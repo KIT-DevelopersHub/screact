@@ -15,9 +15,12 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.nxtend.team35.yubiboard.camera.CameraSession
+import com.nxtend.team35.yubiboard.vision.DebugOverlayView
+import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
 
 class MainActivity : AppCompatActivity() {
     private lateinit var cameraSession: CameraSession
+    private lateinit var handLandmarkerProcessor: HandLandmarkerProcessor
     private lateinit var cameraStatus: TextView
     private lateinit var permissionCard: MaterialCardView
 
@@ -44,6 +47,27 @@ class MainActivity : AppCompatActivity() {
 
         cameraStatus = findViewById(R.id.camera_status)
         permissionCard = findViewById(R.id.permission_card)
+        val debugOverlay = findViewById<DebugOverlayView>(R.id.debug_overlay)
+        handLandmarkerProcessor = HandLandmarkerProcessor(
+            context = this,
+            onResult = { result ->
+                runOnUiThread {
+                    debugOverlay.setHandResult(result)
+                    cameraStatus.text = if (result.detected) {
+                        getString(
+                            R.string.hand_detected,
+                            result.framesPerSecond,
+                            result.inferenceTimeMs,
+                        )
+                    } else {
+                        getString(R.string.hand_not_detected, result.framesPerSecond)
+                    }
+                }
+            },
+            onError = {
+                runOnUiThread { cameraStatus.setText(R.string.hand_landmarker_error) }
+            },
+        )
         cameraSession = CameraSession(
             context = this,
             lifecycleOwner = this,
@@ -54,6 +78,7 @@ class MainActivity : AppCompatActivity() {
                 showPermissionPrompt()
             },
         )
+        cameraSession.setFrameConsumer(handLandmarkerProcessor::process)
 
         findViewById<MaterialButton>(R.id.grant_permission_button).setOnClickListener {
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -64,6 +89,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         cameraSession.close()
+        handLandmarkerProcessor.close()
         super.onDestroy()
     }
 
@@ -73,7 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCamera() {
         permissionCard.visibility = View.GONE
-        cameraStatus.setText(R.string.camera_starting)
+        cameraStatus.setText(R.string.hand_searching)
         cameraSession.start()
     }
 

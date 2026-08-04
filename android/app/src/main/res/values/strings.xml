@@ -3,6 +3,10 @@
     <string name="camera_preview">背面カメラのプレビュー</string>
     <string name="camera_starting">カメラを起動中</string>
     <string name="camera_ready">カメラ準備完了</string>
+    <string name="hand_searching">手を探索中</string>
+    <string name="hand_detected">手を検出・%1$.1f fps・%2$d ms</string>
+    <string name="hand_not_detected">手を検出できません・%1$.1f fps</string>
+    <string name="hand_landmarker_error">手検知を初期化できません</string>
     <string name="camera_error">カメラを起動できません</string>
     <string name="camera_permission_title">カメラの許可が必要です</string>
     <string name="camera_permission_message">手と画面マーカーを検出するため、背面カメラへのアクセスを許可してください。</string>
