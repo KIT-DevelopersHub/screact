@@ -3,6 +3,7 @@ package com.nxtend.team35.yubiboard
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Size
 import android.view.View
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
@@ -20,6 +21,7 @@ import com.nxtend.team35.yubiboard.camera.CameraSession
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
+import com.nxtend.team35.yubiboard.settings.AppSettings
 import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.ArucoMarkerProcessor
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
@@ -39,6 +41,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectButton: MaterialButton
     private lateinit var disconnectButton: MaterialButton
     private lateinit var modeButton: MaterialButton
+    private lateinit var debugOverlay: DebugOverlayView
+    private lateinit var settingsPanel: View
+    private lateinit var resolutionButton: MaterialButton
+    private lateinit var detectionConfidenceInput: TextInputEditText
+    private lateinit var presenceConfidenceInput: TextInputEditText
+    private lateinit var trackingConfidenceInput: TextInputEditText
+    private lateinit var sendFpsInput: TextInputEditText
+    private var editingSettings = AppSettings()
     @Volatile
     private var currentMode: CaptureMode = CaptureMode.TRACKING
 
@@ -73,32 +83,20 @@ class MainActivity : AppCompatActivity() {
         connectButton = findViewById(R.id.connect_button)
         disconnectButton = findViewById(R.id.disconnect_button)
         modeButton = findViewById(R.id.mode_button)
+        debugOverlay = findViewById(R.id.debug_overlay)
+        settingsPanel = findViewById(R.id.advanced_settings_panel)
+        resolutionButton = findViewById(R.id.resolution_button)
+        detectionConfidenceInput = findViewById(R.id.detection_confidence_input)
+        presenceConfidenceInput = findViewById(R.id.presence_confidence_input)
+        trackingConfidenceInput = findViewById(R.id.tracking_confidence_input)
+        sendFpsInput = findViewById(R.id.send_fps_input)
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
         hostInput.setText(viewModel.savedHost)
         portInput.setText(viewModel.savedPort.toString())
+        editingSettings = viewModel.currentSettings
+        renderSettingsForm(editingSettings)
 
-        val debugOverlay = findViewById<DebugOverlayView>(R.id.debug_overlay)
-        handLandmarkerProcessor = HandLandmarkerProcessor(
-            context = this,
-            onResult = { result ->
-                viewModel.submitHand(result)
-                runOnUiThread {
-                    debugOverlay.setHandResult(result)
-                    cameraStatus.text = if (result.detected) {
-                        getString(
-                            R.string.hand_detected,
-                            result.framesPerSecond,
-                            result.inferenceTimeMs,
-                        )
-                    } else {
-                        getString(R.string.hand_not_detected, result.framesPerSecond)
-                    }
-                }
-            },
-            onError = {
-                runOnUiThread { cameraStatus.setText(R.string.hand_landmarker_error) }
-            },
-        )
+        handLandmarkerProcessor = createHandProcessor(editingSettings)
         arucoMarkerProcessor = ArucoMarkerProcessor(
             onResult = { result ->
                 if (result.stable) viewModel.submitCalibration(result)
@@ -152,6 +150,27 @@ class MainActivity : AppCompatActivity() {
             }
             viewModel.setModeManually(next)
         }
+        findViewById<MaterialButton>(R.id.settings_toggle_button).setOnClickListener {
+            settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        resolutionButton.setOnClickListener {
+            editingSettings = editingSettings.toggledResolution()
+            renderSettingsForm(editingSettings)
+        }
+        findViewById<MaterialButton>(R.id.apply_settings_button).setOnClickListener {
+            val candidate = readSettingsForm() ?: return@setOnClickListener
+            val error = viewModel.updateSettings(candidate)
+            if (error != null) {
+                connectionStatus.text = error
+                return@setOnClickListener
+            }
+            editingSettings = candidate
+            replaceHandProcessor(candidate)
+            if (hasCameraPermission()) {
+                cameraSession.start(Size(candidate.analysisWidth, candidate.analysisHeight))
+            }
+            connectionStatus.setText(R.string.settings_applied)
+        }
 
         viewModel.connection.observe(this, ::renderConnection)
         viewModel.mode.observe(this, ::renderMode)
@@ -175,7 +194,8 @@ class MainActivity : AppCompatActivity() {
     private fun showCamera() {
         permissionCard.visibility = View.GONE
         cameraStatus.setText(R.string.hand_searching)
-        cameraSession.start()
+        val settings = viewModel.currentSettings
+        cameraSession.start(Size(settings.analysisWidth, settings.analysisHeight))
     }
 
     private fun showPermissionPrompt() {
@@ -207,5 +227,63 @@ class MainActivity : AppCompatActivity() {
         modeButton.setText(
             if (isCalibration) R.string.switch_to_tracking else R.string.switch_to_calibration,
         )
+    }
+
+    private fun createHandProcessor(settings: AppSettings) = HandLandmarkerProcessor(
+        context = this,
+        minDetectionConfidence = settings.minDetectionConfidence,
+        minPresenceConfidence = settings.minPresenceConfidence,
+        minTrackingConfidence = settings.minTrackingConfidence,
+        onResult = { result ->
+            viewModel.submitHand(result)
+            runOnUiThread {
+                debugOverlay.setHandResult(result)
+                cameraStatus.text = if (result.detected) {
+                    getString(R.string.hand_detected, result.framesPerSecond, result.inferenceTimeMs)
+                } else {
+                    getString(R.string.hand_not_detected, result.framesPerSecond)
+                }
+            }
+        },
+        onError = {
+            runOnUiThread { cameraStatus.setText(R.string.hand_landmarker_error) }
+        },
+    )
+
+    private fun replaceHandProcessor(settings: AppSettings) {
+        val previous = handLandmarkerProcessor
+        handLandmarkerProcessor = createHandProcessor(settings)
+        findViewById<View>(R.id.main).postDelayed({ previous.close() }, PROCESSOR_CLOSE_DELAY_MS)
+    }
+
+    private fun renderSettingsForm(settings: AppSettings) {
+        resolutionButton.setText(
+            if (settings.analysisWidth == 640) R.string.resolution_640 else R.string.resolution_960,
+        )
+        detectionConfidenceInput.setText(settings.minDetectionConfidence.toString())
+        presenceConfidenceInput.setText(settings.minPresenceConfidence.toString())
+        trackingConfidenceInput.setText(settings.minTrackingConfidence.toString())
+        sendFpsInput.setText(settings.maxSendFps.toString())
+    }
+
+    private fun readSettingsForm(): AppSettings? {
+        val detection = detectionConfidenceInput.text?.toString()?.toFloatOrNull()
+        val presence = presenceConfidenceInput.text?.toString()?.toFloatOrNull()
+        val tracking = trackingConfidenceInput.text?.toString()?.toFloatOrNull()
+        val sendFps = sendFpsInput.text?.toString()?.toIntOrNull()
+        if (detection == null || presence == null || tracking == null || sendFps == null) {
+            connectionStatus.text = "詳細設定の数値を確認してください"
+            return null
+        }
+        return editingSettings.copy(
+            minDetectionConfidence = detection,
+            minPresenceConfidence = presence,
+            minTrackingConfidence = tracking,
+            maxSendFps = sendFps,
+        )
+    }
+
+    companion object {
+        private const val PROCESSOR_CLOSE_DELAY_MS = 1_000L
     }
 }

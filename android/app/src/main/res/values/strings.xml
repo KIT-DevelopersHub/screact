@@ -30,4 +30,13 @@
     <string name="mode_calibration">位置合わせ撮影</string>
     <string name="switch_to_tracking">通常撮影へ</string>
     <string name="switch_to_calibration">位置合わせへ</string>
+    <string name="advanced_settings">詳細</string>
+    <string name="detection_confidence">検出</string>
+    <string name="presence_confidence">存在</string>
+    <string name="tracking_confidence">追跡</string>
+    <string name="send_fps">fps</string>
+    <string name="resolution_640">640×480</string>
+    <string name="resolution_960">960×540</string>
+    <string name="apply_settings">適用</string>
+    <string name="settings_applied">設定を適用しました</string>
 </resources>

@@ -39,6 +39,8 @@ class YubiBoardWebSocketClient(
 ) : AutoCloseable {
     private val lock = Any()
     private val frameId = AtomicLong(0)
+    private val targetFrameIntervalMs = AtomicLong(FRAME_INTERVAL_MS)
+    private val lastHandSentAtMs = AtomicLong(0)
     private val latestHand = AtomicReference<HandDetectionResult?>()
     private val latestCalibration = AtomicReference<MarkerDetectionResult?>()
     private var desiredConfig: ConnectionConfig? = null
@@ -50,7 +52,7 @@ class YubiBoardWebSocketClient(
     private var manuallyStopped = true
 
     init {
-        scheduler.scheduleAtFixedRate(::flushLatestHand, 0, FRAME_INTERVAL_MS, TimeUnit.MILLISECONDS)
+        scheduler.scheduleAtFixedRate(::flushLatestHand, 0, SENDER_TICK_MS, TimeUnit.MILLISECONDS)
         scheduler.scheduleAtFixedRate(
             ::flushLatestCalibration,
             0,
@@ -78,6 +80,11 @@ class YubiBoardWebSocketClient(
 
     fun submitCalibration(result: MarkerDetectionResult) {
         if (result.stable) latestCalibration.set(result)
+    }
+
+    fun setMaxFrameRate(framesPerSecond: Int) {
+        require(framesPerSecond in 5..20)
+        targetFrameIntervalMs.set(1_000L / framesPerSecond)
     }
 
     fun disconnect() {
@@ -120,6 +127,8 @@ class YubiBoardWebSocketClient(
     }
 
     private fun flushLatestHand() {
+        val now = monotonicMs()
+        if (now - lastHandSentAtMs.get() < targetFrameIntervalMs.get()) return
         val socket: WebSocket
         val activeSession: String
         synchronized(lock) {
@@ -144,7 +153,11 @@ class YubiBoardWebSocketClient(
                 HandPayload(detected = false)
             },
         )
-        if (!socket.send(ProtocolCodec.encode(message))) latestHand.compareAndSet(null, result)
+        if (socket.send(ProtocolCodec.encode(message))) {
+            lastHandSentAtMs.set(now)
+        } else {
+            latestHand.compareAndSet(null, result)
+        }
     }
 
     private fun startHeartbeat(socket: WebSocket, activeSession: String) {
@@ -306,6 +319,7 @@ class YubiBoardWebSocketClient(
         private const val ACK_TIMEOUT_SECONDS = 5L
         private const val HEARTBEAT_SECONDS = 5L
         private const val FRAME_INTERVAL_MS = 50L
+        private const val SENDER_TICK_MS = 20L
         private const val CALIBRATION_INTERVAL_MS = 200L
         private const val MAX_QUEUE_BYTES = 256L * 1024L
         private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 10_000)

@@ -21,13 +21,14 @@ class CameraSession(
     private val onError: (Throwable) -> Unit,
 ) : AutoCloseable {
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    @Volatile
     private var frameConsumer: (ImageProxy) -> Unit = { it.close() }
 
     fun setFrameConsumer(consumer: (ImageProxy) -> Unit) {
         frameConsumer = consumer
     }
 
-    fun start() {
+    fun start(targetSize: Size = Size(640, 480)) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener(
             {
@@ -38,7 +39,7 @@ class CameraSession(
                     }
                     @Suppress("DEPRECATION")
                     val analysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(640, 480))
+                        .setTargetResolution(targetSize)
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
