@@ -70,7 +70,9 @@ function Read-WebSocketFrame {
     [long]$length = $header[1] -band 0x7F
     if ($length -eq 126) {
         $extended = Read-ExactBytes -Stream $Stream -Count 2
-        $length = ($extended[0] -shl 8) -bor $extended[1]
+        # PowerShell preserves the byte type for bit shifts, so cast before
+        # shifting to avoid truncating payload lengths above 255 bytes.
+        $length = (([int]$extended[0]) -shl 8) -bor ([int]$extended[1])
     } elseif ($length -eq 127) {
         $extended = Read-ExactBytes -Stream $Stream -Count 8
         $length = 0
