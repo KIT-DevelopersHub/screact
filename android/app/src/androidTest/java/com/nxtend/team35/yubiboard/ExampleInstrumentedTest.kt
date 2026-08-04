@@ -2,6 +2,7 @@ package com.nxtend.team35.yubiboard
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.opencv.android.OpenCVLoader
 
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,9 +17,12 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class ExampleInstrumentedTest {
     @Test
-    fun useAppContext() {
-        // Context of the app under test.
+    fun nativeDependenciesAndModelArePackaged() {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.nxtend.team35.yubiboard", appContext.packageName)
+        assertTrue(OpenCVLoader.initLocal())
+        appContext.assets.open("hand_landmarker.task").use { model ->
+            assertTrue(model.available() > 0)
+        }
     }
 }
