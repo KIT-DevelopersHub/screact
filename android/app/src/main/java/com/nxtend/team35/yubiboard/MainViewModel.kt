@@ -10,6 +10,7 @@ import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
+import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -47,6 +48,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnect() = webSocketClient.disconnect()
 
     fun submitHand(result: HandDetectionResult) = webSocketClient.submitHand(result)
+
+    fun submitCalibration(result: MarkerDetectionResult) = webSocketClient.submitCalibration(result)
 
     fun setModeManually(mode: CaptureMode) {
         mutableMode.value = mode

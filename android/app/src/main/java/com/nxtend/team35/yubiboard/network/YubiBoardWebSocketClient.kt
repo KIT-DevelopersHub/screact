@@ -1,16 +1,19 @@
 package com.nxtend.team35.yubiboard.network
 
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
+import com.nxtend.team35.yubiboard.protocol.CalibrationMarkersMessage
 import com.nxtend.team35.yubiboard.protocol.ControlMessage
 import com.nxtend.team35.yubiboard.protocol.HandFrameMessage
 import com.nxtend.team35.yubiboard.protocol.HandPayload
 import com.nxtend.team35.yubiboard.protocol.HeartbeatMessage
 import com.nxtend.team35.yubiboard.protocol.HelloAckMessage
 import com.nxtend.team35.yubiboard.protocol.HelloMessage
+import com.nxtend.team35.yubiboard.protocol.MarkerPayload
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
 import com.nxtend.team35.yubiboard.protocol.SCHEMA_VERSION
 import com.nxtend.team35.yubiboard.protocol.SourceInfo
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
+import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -37,6 +40,7 @@ class YubiBoardWebSocketClient(
     private val lock = Any()
     private val frameId = AtomicLong(0)
     private val latestHand = AtomicReference<HandDetectionResult?>()
+    private val latestCalibration = AtomicReference<MarkerDetectionResult?>()
     private var desiredConfig: ConnectionConfig? = null
     private var webSocket: WebSocket? = null
     private var sessionId: String? = null
@@ -47,6 +51,12 @@ class YubiBoardWebSocketClient(
 
     init {
         scheduler.scheduleAtFixedRate(::flushLatestHand, 0, FRAME_INTERVAL_MS, TimeUnit.MILLISECONDS)
+        scheduler.scheduleAtFixedRate(
+            ::flushLatestCalibration,
+            0,
+            CALIBRATION_INTERVAL_MS,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     fun connect(config: ConnectionConfig) {
@@ -66,12 +76,17 @@ class YubiBoardWebSocketClient(
         latestHand.set(result)
     }
 
+    fun submitCalibration(result: MarkerDetectionResult) {
+        if (result.stable) latestCalibration.set(result)
+    }
+
     fun disconnect() {
         synchronized(lock) {
             manuallyStopped = true
             desiredConfig = null
             sessionId = null
             latestHand.set(null)
+            latestCalibration.set(null)
             heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
             webSocket?.close(NORMAL_CLOSE_CODE, "user disconnect")
@@ -149,6 +164,32 @@ class YubiBoardWebSocketClient(
             HEARTBEAT_SECONDS,
             TimeUnit.SECONDS,
         )
+    }
+
+    private fun flushLatestCalibration() {
+        val socket: WebSocket
+        val activeSession: String
+        synchronized(lock) {
+            socket = webSocket ?: return
+            activeSession = sessionId ?: return
+        }
+        if (socket.queueSize() > MAX_QUEUE_BYTES) return
+        val result = latestCalibration.getAndSet(null) ?: return
+        val message = CalibrationMarkersMessage(
+            sessionId = activeSession,
+            capturedAtMonotonicMs = result.capturedAtMonotonicMs,
+            source = SourceInfo(result.sourceWidth, result.sourceHeight),
+            markers = result.markers.map { marker ->
+                MarkerPayload(
+                    id = marker.id,
+                    center = listOf(marker.center.x, marker.center.y),
+                    corners = marker.corners.map { listOf(it.x, it.y) },
+                )
+            },
+        )
+        if (!socket.send(ProtocolCodec.encode(message))) {
+            latestCalibration.compareAndSet(null, result)
+        }
     }
 
     private fun handleServerMessage(socket: WebSocket, text: String) {
@@ -265,6 +306,7 @@ class YubiBoardWebSocketClient(
         private const val ACK_TIMEOUT_SECONDS = 5L
         private const val HEARTBEAT_SECONDS = 5L
         private const val FRAME_INTERVAL_MS = 50L
+        private const val CALIBRATION_INTERVAL_MS = 200L
         private const val MAX_QUEUE_BYTES = 256L * 1024L
         private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 10_000)
 

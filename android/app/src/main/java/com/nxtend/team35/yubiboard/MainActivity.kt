@@ -21,11 +21,13 @@ import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.vision.DebugOverlayView
+import com.nxtend.team35.yubiboard.vision.ArucoMarkerProcessor
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
 
 class MainActivity : AppCompatActivity() {
     private lateinit var cameraSession: CameraSession
     private lateinit var handLandmarkerProcessor: HandLandmarkerProcessor
+    private lateinit var arucoMarkerProcessor: ArucoMarkerProcessor
     private lateinit var viewModel: MainViewModel
     private lateinit var cameraStatus: TextView
     private lateinit var permissionCard: MaterialCardView
@@ -37,6 +39,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectButton: MaterialButton
     private lateinit var disconnectButton: MaterialButton
     private lateinit var modeButton: MaterialButton
+    @Volatile
+    private var currentMode: CaptureMode = CaptureMode.TRACKING
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -95,6 +99,21 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { cameraStatus.setText(R.string.hand_landmarker_error) }
             },
         )
+        arucoMarkerProcessor = ArucoMarkerProcessor(
+            onResult = { result ->
+                if (result.stable) viewModel.submitCalibration(result)
+                runOnUiThread {
+                    debugOverlay.setMarkerResult(result)
+                    cameraStatus.text = getString(
+                        if (result.stable) R.string.markers_stable else R.string.markers_searching,
+                        result.markers.size,
+                    )
+                }
+            },
+            onError = {
+                runOnUiThread { cameraStatus.setText(R.string.aruco_error) }
+            },
+        )
         cameraSession = CameraSession(
             context = this,
             lifecycleOwner = this,
@@ -105,7 +124,13 @@ class MainActivity : AppCompatActivity() {
                 showPermissionPrompt()
             },
         )
-        cameraSession.setFrameConsumer(handLandmarkerProcessor::process)
+        cameraSession.setFrameConsumer { image ->
+            if (currentMode == CaptureMode.CALIBRATION) {
+                arucoMarkerProcessor.process(image)
+            } else {
+                handLandmarkerProcessor.process(image)
+            }
+        }
 
         findViewById<MaterialButton>(R.id.grant_permission_button).setOnClickListener {
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -176,6 +201,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderMode(mode: CaptureMode) {
+        currentMode = mode
         val isCalibration = mode == CaptureMode.CALIBRATION
         modeStatus.setText(if (isCalibration) R.string.mode_calibration else R.string.mode_tracking)
         modeButton.setText(

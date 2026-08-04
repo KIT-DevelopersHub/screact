@@ -1,8 +1,6 @@
 package com.nxtend.team35.yubiboard.vision
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.os.SystemClock
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
@@ -10,6 +8,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import com.nxtend.team35.yubiboard.camera.toCorrectedBitmap
 import java.util.ArrayDeque
 
 class HandLandmarkerProcessor(
@@ -50,28 +49,7 @@ class HandLandmarkerProcessor(
         }
 
         val capturedAt = SystemClock.uptimeMillis()
-        val rotationDegrees = image.imageInfo.rotationDegrees
-        val bitmap = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
-        try {
-            image.planes[0].buffer.rewind()
-            bitmap.copyPixelsFromBuffer(image.planes[0].buffer)
-        } finally {
-            image.close()
-        }
-
-        val correctedBitmap = if (rotationDegrees == 0) {
-            bitmap
-        } else {
-            Bitmap.createBitmap(
-                bitmap,
-                0,
-                0,
-                bitmap.width,
-                bitmap.height,
-                Matrix().apply { postRotate(rotationDegrees.toFloat()) },
-                true,
-            )
-        }
+        val correctedBitmap = image.toCorrectedBitmap()
         val mpImage = BitmapImageBuilder(correctedBitmap).build()
         runCatching { detector.detectAsync(mpImage, capturedAt) }
             .onFailure(onError)
