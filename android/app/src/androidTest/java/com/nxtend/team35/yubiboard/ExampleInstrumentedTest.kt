@@ -3,6 +3,7 @@ package com.nxtend.team35.yubiboard
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.opencv.android.OpenCVLoader
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,5 +25,13 @@ class ExampleInstrumentedTest {
         appContext.assets.open("hand_landmarker.task").use { model ->
             assertTrue(model.available() > 0)
         }
+    }
+
+    @Test
+    fun debugDiagnosticsCollectEvents() {
+        assertTrue(BuildConfig.DEBUG)
+        AppDiagnostics.clear()
+        AppDiagnostics.event("instrumentation", "probe", mapOf("device" to android.os.Build.MODEL))
+        assertEquals("probe", AppDiagnostics.snapshot().events.single().name)
     }
 }

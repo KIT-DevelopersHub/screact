@@ -1,6 +1,7 @@
 package com.nxtend.team35.yubiboard
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -8,10 +9,14 @@ import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.settings.AppSettings
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
+import com.nxtend.team35.yubiboard.vision.DetectedMarker
+import com.nxtend.team35.yubiboard.vision.LandmarkPoint
+import com.nxtend.team35.yubiboard.vision.NormalizedPoint
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -60,7 +65,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun submitCalibration(result: MarkerDetectionResult) = webSocketClient.submitCalibration(result)
 
     fun setModeManually(mode: CaptureMode) {
+        AppDiagnostics.event("ui", "manual_mode", mapOf("mode" to mode))
         mutableMode.value = mode
+    }
+
+    fun submitDebugHand(detected: Boolean) {
+        check(BuildConfig.DEBUG) { "Debug input is unavailable in release builds" }
+        val landmarks = if (detected) List(21) { index ->
+            LandmarkPoint(
+                x = 0.3f + (index % 5) * 0.08f,
+                y = 0.25f + (index / 5) * 0.12f,
+                z = -index * 0.001f,
+            )
+        } else emptyList()
+        AppDiagnostics.event("debug", "synthetic_hand", mapOf("detected" to detected))
+        submitHand(
+            HandDetectionResult(
+                capturedAtMonotonicMs = SystemClock.uptimeMillis(),
+                sourceWidth = currentSettings.analysisWidth,
+                sourceHeight = currentSettings.analysisHeight,
+                detected = detected,
+                landmarks = landmarks,
+                handedness = if (detected) "RIGHT" else null,
+                handednessScore = if (detected) 0.99f else null,
+            ),
+        )
+    }
+
+    fun submitDebugCalibration() {
+        check(BuildConfig.DEBUG) { "Debug input is unavailable in release builds" }
+        fun marker(id: Int, x: Float, y: Float) = DetectedMarker(
+            id = id,
+            center = NormalizedPoint(x, y),
+            corners = listOf(
+                NormalizedPoint(x - 0.03f, y - 0.03f),
+                NormalizedPoint(x + 0.03f, y - 0.03f),
+                NormalizedPoint(x + 0.03f, y + 0.03f),
+                NormalizedPoint(x - 0.03f, y + 0.03f),
+            ),
+        )
+        AppDiagnostics.event("debug", "synthetic_calibration")
+        submitCalibration(
+            MarkerDetectionResult(
+                capturedAtMonotonicMs = SystemClock.uptimeMillis(),
+                sourceWidth = currentSettings.analysisWidth,
+                sourceHeight = currentSettings.analysisHeight,
+                markers = listOf(
+                    marker(10, 0.1f, 0.1f),
+                    marker(11, 0.9f, 0.1f),
+                    marker(12, 0.9f, 0.9f),
+                    marker(13, 0.1f, 0.9f),
+                ),
+                stable = true,
+            ),
+        )
     }
 
     fun updateSettings(settings: AppSettings): String? {

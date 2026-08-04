@@ -514,7 +514,9 @@ flowchart LR
     Offset --> Overlay[画面上へ描画]
 ```
 
-ログ専用画面やファイル保存は実装していない。通信の不正JSONや未知制御などは、現在は接続状態表示欄へ最後のメッセージを表示する。
+debug APKには「診断」パネルがあり、端末・カメラ・検出・ArUco・通信の最新値、カウンター、直近500イベントを確認できる。イベントは`YubiBoardDiag`タグへJSONLとして出力し、Storage Access Frameworkを使って利用者が選んだ場所へ保存できる。疑似21点、疑似未検出、疑似4マーカーにより、カメラ入力と切り離して通信経路を検証できる。これらは`BuildConfig.DEBUG`で保護され、releaseでは表示・収集・実行されない。
+
+PC側のPowerShellテストハーネスは正常接続、モード切替、切断、ackタイムアウト、不正JSON、session/schema不一致、低速受信を再現し、イベントJSONL、接続CSV、Markdown要約を`android/debug-results/`へ保存する。ADBランナーはUSB reverse、ビルド・導入、instrumentation test、5秒間隔の温度・メモリとLogcatを収集する。
 
 ## 17. データ保持・セキュリティ
 
@@ -562,8 +564,9 @@ Android Studioでは`android/`をプロジェクトルートとして開く。�
 | JVM単体テスト | WebSocketのhello_ack前後とsessionId | 成功 |
 | JVM単体テスト | 追跡状態3回検出・300 ms喪失 | 成功 |
 | JVM単体テスト | ArUco 4 ID、5フレーム、移動・配置拒否 | 成功 |
+| JVM単体テスト | debug診断イベント、カウンター、500件上限 | 成功 |
 | AndroidTestビルド | OpenCVとモデルassetのパッケージ確認テスト | APK生成成功 |
-| AndroidTest実行 | 実端末上でOpenCV初期化とasset読込 | 未実行（ADB端末なし） |
+| AndroidTest実行 | 実端末上でOpenCV初期化とasset読込 | ADBランナーから実行可能 |
 | モックWebSocket | `hello`から`hello_ack`までの実通信 | 成功 |
 
 ### 19.3 デモ経路
@@ -602,6 +605,8 @@ journey
 - 実PCアプリとのペアリング、制御、再接続、座標受け渡し
 - Androidの画面回転・バックグラウンド復帰を含む実機操作
 
+上記を再現可能に測定する環境は実装済みだが、端末・照明・設置条件を伴う受入結果そのものは実機セッションごとに`android/debug-results/`へ記録する。
+
 ### 20.2 既知の制約
 
 - 1人・1アクティブハンドのみを対象とする。
@@ -612,7 +617,7 @@ journey
 - マーカー安定後も安定結果が到着するたび最大5 fpsで送信する。PCからの受領確認はない。
 - デバッグAPKはMediaPipeモデルとOpenCVネイティブライブラリを含むユニバーサルAPKであり、サイズが大きい。
 - `ERROR`接続状態は定義済みだが、現行の通信処理からは発行されない。
-- ログの履歴表示、エクスポート、遠隔診断はない。
+- release APKには診断履歴・疑似入力・エクスポートを含めない。
 
 ## 21. 変更時の同期対象
 
@@ -625,4 +630,3 @@ journey
 | 設定値・許容範囲 | 本書、`android/README.md` |
 | 実装範囲・責任境界 | 本書、`android-app-requirements.md` |
 | ビルド・デモ手順 | 本書、`android/README.md` |
-

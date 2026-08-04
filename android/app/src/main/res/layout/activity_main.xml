@@ -35,6 +35,16 @@
         android:textColor="@color/white"
         android:textStyle="bold" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/diagnostics_button"
+        style="?attr/materialButtonOutlinedStyle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="12dp"
+        android:text="@string/diagnostics"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

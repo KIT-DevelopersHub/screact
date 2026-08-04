@@ -39,4 +39,12 @@
     <string name="resolution_960">960×540</string>
     <string name="apply_settings">適用</string>
     <string name="settings_applied">設定を適用しました</string>
+    <string name="diagnostics">診断</string>
+    <string name="diagnostics_title">Debug診断</string>
+    <string name="diagnostics_refresh">更新</string>
+    <string name="diagnostics_clear">消去</string>
+    <string name="diagnostics_export">JSONL保存</string>
+    <string name="diagnostics_fake_hand">疑似21点</string>
+    <string name="diagnostics_fake_missing">疑似未検出</string>
+    <string name="diagnostics_fake_markers">疑似4マーカー</string>
 </resources>

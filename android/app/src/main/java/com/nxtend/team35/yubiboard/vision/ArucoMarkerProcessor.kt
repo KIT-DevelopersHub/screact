@@ -3,6 +3,7 @@ package com.nxtend.team35.yubiboard.vision
 import android.os.SystemClock
 import androidx.camera.core.ImageProxy
 import com.nxtend.team35.yubiboard.camera.toCorrectedBitmap
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Mat
@@ -62,13 +63,33 @@ class ArucoMarkerProcessor(
                         corners = normalizedCorners,
                     )
                 }.sortedBy { it.id }
+                val isStable = stabilityTracker.update(markers)
+                AppDiagnostics.increment("aruco.frames")
+                if (isStable) AppDiagnostics.increment("aruco.stable_frames")
+                AppDiagnostics.gauge("aruco.marker_count", markers.size)
+                AppDiagnostics.gauge("aruco.stable", isStable)
+                AppDiagnostics.gauge(
+                    "aruco.stability_progress",
+                    "${stabilityTracker.stableFrameCount}/${MarkerStabilityTracker.DEFAULT_REQUIRED_STABLE_FRAMES}",
+                )
+                AppDiagnostics.sampled(
+                    "aruco_result",
+                    "vision",
+                    "aruco_result",
+                    mapOf(
+                        "ids" to markers.joinToString { it.id.toString() },
+                        "stable" to isStable,
+                        "stableFrames" to stabilityTracker.stableFrameCount,
+                        "centers" to markers.joinToString(";") { "${it.id}:${it.center.x},${it.center.y}" },
+                    ),
+                )
                 onResult(
                     MarkerDetectionResult(
                         capturedAtMonotonicMs = capturedAt,
                         sourceWidth = bitmap.width,
                         sourceHeight = bitmap.height,
                         markers = markers,
-                        stable = stabilityTracker.update(markers),
+                        stable = isStable,
                     ),
                 )
             } finally {
@@ -79,6 +100,7 @@ class ArucoMarkerProcessor(
             }
         }.onFailure {
             stabilityTracker.reset()
+            AppDiagnostics.event("vision", "aruco_error", mapOf("message" to it.message))
             onError(it)
         }
     }

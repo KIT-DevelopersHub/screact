@@ -9,6 +9,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.nxtend.team35.yubiboard.camera.toCorrectedBitmap
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import java.util.ArrayDeque
 
 class HandLandmarkerProcessor(
@@ -50,6 +51,7 @@ class HandLandmarkerProcessor(
         }
 
         val capturedAt = SystemClock.uptimeMillis()
+        AppDiagnostics.increment("hand.frames_submitted")
         val correctedBitmap = image.toCorrectedBitmap()
         val mpImage = BitmapImageBuilder(correctedBitmap).build()
         runCatching { detector.detectAsync(mpImage, capturedAt) }
@@ -68,13 +70,36 @@ class HandLandmarkerProcessor(
         }.orEmpty()
         val category = result.handedness().firstOrNull()?.firstOrNull()
         val detected = landmarks.size == HAND_LANDMARK_COUNT
+        AppDiagnostics.increment("hand.results")
+        if (detected) AppDiagnostics.increment("hand.detected") else AppDiagnostics.increment("hand.missing")
+        AppDiagnostics.gauge("hand.fps", frameTimes.size * 1000f / FPS_WINDOW_MS)
+        AppDiagnostics.gauge("hand.inference_ms", (now - result.timestampMs()).coerceAtLeast(0))
+        AppDiagnostics.metric("hand.fps", frameTimes.size * 1000f / FPS_WINDOW_MS)
+        AppDiagnostics.metric("hand.inference_ms", (now - result.timestampMs()).coerceAtLeast(0))
+        val trackingState = trackingStateMachine.update(detected, result.timestampMs())
+        AppDiagnostics.gauge("hand.tracking_state", trackingState)
+        AppDiagnostics.sampled(
+            key = "hand_result",
+            category = "vision",
+            name = "hand_result",
+            fields = mapOf(
+                "detected" to detected,
+                "handedness" to category?.categoryName()?.uppercase(),
+                "score" to category?.score(),
+                "fps" to frameTimes.size * 1000f / FPS_WINDOW_MS,
+                "inferenceMs" to (now - result.timestampMs()).coerceAtLeast(0),
+                "trackingState" to trackingState,
+                "indexTip" to landmarks.getOrNull(8)?.let { "${it.x},${it.y},${it.z}" },
+                "landmarks" to landmarks.joinToString(";") { "${it.x},${it.y},${it.z}" },
+            ),
+        )
         onResult(
             HandDetectionResult(
                 capturedAtMonotonicMs = result.timestampMs(),
                 sourceWidth = input.width,
                 sourceHeight = input.height,
                 detected = detected,
-                trackingState = trackingStateMachine.update(detected, result.timestampMs()),
+                trackingState = trackingState,
                 landmarks = landmarks,
                 handedness = category?.categoryName()?.uppercase(),
                 handednessScore = category?.score(),

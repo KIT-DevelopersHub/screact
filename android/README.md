@@ -22,6 +22,95 @@ PCのファイアウォールで指定ポートのローカルLAN受信を許可
 
 AndroidアプリへPCのLAN内IPv4、ポート`8080`、コード`123456`を入力します。接続後、サーバーに`hand_frame`の件数が表示されます。`-InitialMode calibration`なら、接続直後にArUco位置合わせモードへ入ります。
 
+## 実機デバッグ環境
+
+デスクトップアプリがなくても、`tools/android-debug.ps1`とモックサーバーで実機のカメラ、検出、通信、再接続、性能を検証できます。スクリプトは`ANDROID_HOME`、`ANDROID_SDK_ROOT`、または標準のWindows SDK配置から`adb`を検出します。
+
+```powershell
+.\android\tools\android-debug.ps1 doctor
+```
+
+### USBを基準経路にする
+
+ADB reverseを使うと、Wi-FiやWindows Firewallの影響を受けずに実機からPCのサーバーへ接続できます。
+
+```powershell
+.\android\tools\android-debug.ps1 build
+.\android\tools\android-debug.ps1 install
+.\android\tools\android-debug.ps1 usb -Port 8080
+.\android\tools\mock-websocket-server.ps1 -Port 8080 -PairingToken 123456
+```
+
+アプリにはホスト`127.0.0.1`、ポート`8080`、コード`123456`を入力します。カメラ権限の拒否経路も検証するため、`install`は既定では権限を自動付与しません。必要な場合だけ`-GrantCamera`を指定します。
+
+Xiaomi系端末で`INSTALL_FAILED_USER_RESTRICTED`となる場合は、端末をロック解除し、開発者向けオプションの「USB経由のインストール」を有効にして、端末に表示される確認を許可してください。
+
+### 同一LANを検証する
+
+```powershell
+.\android\tools\android-debug.ps1 lan -Port 8080
+.\android\tools\mock-websocket-server.ps1 -Port 8080 -PairingToken 123456
+```
+
+表示されたPCのIPv4アドレスをアプリへ入力します。Windows FirewallではTCP 8080の受信をプライベートネットワークに限定して許可してください。公衆ネットワークやルーターのポート転送へ公開しないでください。
+
+### Debug診断パネル
+
+debug APKでは画面上部の「診断」から次を確認できます。
+
+- 端末・カメラ・解析設定、手検出fps、推論時間、追跡状態
+- 21点座標、人差し指先端、左右分類、ArUco IDと中心
+- 接続状態、session、送信数、送信バイト、置換・失敗・キュー抑制
+- カメラなしで通信を試す「疑似21点」「疑似未検出」「疑似4マーカー」
+- 直近500イベントのJSONL保存
+
+疑似入力は通信層の検証専用です。検出精度の評価には使わないでください。診断イベントはLogcatの`YubiBoardDiag`タグにもJSONで出力されます。release APKでは診断ボタン、イベント収集、疑似入力は無効です。
+
+### 通信障害シナリオ
+
+モックサーバーの`-Scenario`には次を指定できます。
+
+| 値 | 確認内容 |
+| --- | --- |
+| `happy` | 正常なhello、データ受信、heartbeat |
+| `mode-switch` | 3秒後の遠隔モード切替 |
+| `remote-disconnect` | PCからの切断要求 |
+| `ack-timeout` | hello_ackなしと自動再接続 |
+| `invalid-json` | 不正JSONを無視して継続 |
+| `wrong-session` | 異なるsessionの制御を無視 |
+| `schema-mismatch` | 未対応schemaのackを拒否 |
+| `drop` | 通信断と段階的な再接続 |
+| `slow-reader` | 低速受信時の最新フレーム優先 |
+
+```powershell
+.\android\tools\mock-websocket-server.ps1 -Scenario mode-switch -DurationSeconds 60
+```
+
+受信イベント、接続別CSV、Markdown要約は`android/debug-results/`へ保存され、Gitには追加されません。
+
+### ArUcoと連続動作
+
+PCで[`tools/calibration-target-1920x1080.png`](./tools/calibration-target-1920x1080.png)を全画面表示し、Androidカメラに四隅が入るよう設置します。この画像は`DICT_4X4_50`のID 10、11、12、13をOpenCVで再検証済みです。
+
+```powershell
+.\android\tools\android-debug.ps1 soak -DurationMinutes 10
+```
+
+端末温度、メモリ、crash/ANR、構造化Logcatを5秒間隔で`android/debug-results/`へ保存します。出力先を固定する場合は`-OutputDirectory`を指定します。アプリデータ消去は既定では行わず、必要な場合だけ`-ResetAppData`を使用します。
+
+### 自動テスト
+
+```powershell
+.\android\tools\android-debug.ps1 test
+```
+
+これはdebug APKとandroidTest APKを実機へ導入してinstrumentation testを実行します。全ローカル検証は次でも実行できます。
+
+```powershell
+cd android
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+```
+
 ## デモ手順
 
 1. PCでモックサーバーまたは互換PCアプリを起動する。
@@ -30,6 +119,8 @@ AndroidアプリへPCのLAN内IPv4、ポート`8080`、コード`123456`を入�
 4. 「位置合わせへ」を押し、`DICT_4X4_50`のID 10（左上）、11（右上）、12（右下）、13（左下）を映す。
 5. 4 IDが5フレーム安定すると、黄色の枠と「安定」を表示して`calibration_markers`を送る。
 6. PCサーバーを止めて再接続表示を確認し、再起動して自動復帰を確認する。
+
+追加の受入確認として、640×480と960×540の両方で10分測定します。640×480では検出15 fps以上、crash/ANRなし、メモリが継続的に増え続けないことを確認します。PCとAndroidの単調時計は同期していないため、PC受信時刻から真のエンドツーエンド遅延は算出しません。診断画面の`network.capture_to_send_ms`をAndroid内部の撮影から送信要求までの遅延として扱います。
 
 ## 設定と既定値
 

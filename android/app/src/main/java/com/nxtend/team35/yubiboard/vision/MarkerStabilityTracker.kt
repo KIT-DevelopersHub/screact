@@ -4,10 +4,11 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 class MarkerStabilityTracker(
-    private val requiredFrames: Int = DEFAULT_REQUIRED_FRAMES,
+    private val requiredFrames: Int = DEFAULT_REQUIRED_STABLE_FRAMES,
     private val maxCenterMovement: Float = DEFAULT_MAX_CENTER_MOVEMENT,
 ) {
     private val history = ArrayDeque<Map<Int, NormalizedPoint>>()
+    val stableFrameCount: Int get() = history.size
 
     fun update(markers: List<DetectedMarker>): Boolean {
         if (!hasExpectedLayout(markers)) {
@@ -65,7 +66,7 @@ class MarkerStabilityTracker(
         const val ID_BOTTOM_LEFT = 13
         val EXPECTED_IDS = setOf(ID_TOP_LEFT, ID_TOP_RIGHT, ID_BOTTOM_RIGHT, ID_BOTTOM_LEFT)
 
-        private const val DEFAULT_REQUIRED_FRAMES = 5
+        const val DEFAULT_REQUIRED_STABLE_FRAMES = 5
         private const val DEFAULT_MAX_CENTER_MOVEMENT = 0.01f
         private const val MIN_QUADRILATERAL_AREA = 0.05f
     }

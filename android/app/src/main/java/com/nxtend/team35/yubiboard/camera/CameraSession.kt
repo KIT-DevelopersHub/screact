@@ -10,6 +10,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -29,6 +30,11 @@ class CameraSession(
     }
 
     fun start(targetSize: Size = Size(640, 480)) {
+        AppDiagnostics.event(
+            "camera",
+            "start_requested",
+            mapOf("width" to targetSize.width, "height" to targetSize.height),
+        )
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener(
             {
@@ -54,8 +60,13 @@ class CameraSession(
                         preview,
                         analysis,
                     )
+                    AppDiagnostics.gauge("camera.resolution", "${targetSize.width}x${targetSize.height}")
+                    AppDiagnostics.event("camera", "ready")
                     onReady()
-                }.onFailure(onError)
+                }.onFailure {
+                    AppDiagnostics.event("camera", "error", mapOf("message" to it.message))
+                    onError(it)
+                }
             },
             ContextCompat.getMainExecutor(context),
         )

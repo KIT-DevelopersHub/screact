@@ -3,12 +3,16 @@ package com.nxtend.team35.yubiboard
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.graphics.Typeface
 import android.util.Size
 import android.view.View
 import android.widget.TextView
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -18,6 +22,7 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.nxtend.team35.yubiboard.camera.CameraSession
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
@@ -51,6 +56,21 @@ class MainActivity : AppCompatActivity() {
     private var editingSettings = AppSettings()
     @Volatile
     private var currentMode: CaptureMode = CaptureMode.TRACKING
+    private var diagnosticsDialog: AlertDialog? = null
+
+    private val diagnosticsExportLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/x-ndjson"),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
+                    it.write(AppDiagnostics.jsonLines())
+                }
+            }.onFailure {
+                AppDiagnostics.event("ui", "diagnostics_export_error", mapOf("message" to it.message))
+            }
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -91,6 +111,16 @@ class MainActivity : AppCompatActivity() {
         trackingConfidenceInput = findViewById(R.id.tracking_confidence_input)
         sendFpsInput = findViewById(R.id.send_fps_input)
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        AppDiagnostics.event(
+            "app",
+            "created",
+            mapOf(
+                "model" to android.os.Build.MODEL,
+                "android" to android.os.Build.VERSION.RELEASE,
+                "sdk" to android.os.Build.VERSION.SDK_INT,
+                "version" to BuildConfig.VERSION_NAME,
+            ),
+        )
         hostInput.setText(viewModel.savedHost)
         portInput.setText(viewModel.savedPort.toString())
         editingSettings = viewModel.currentSettings
@@ -153,6 +183,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.settings_toggle_button).setOnClickListener {
             settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
+        findViewById<MaterialButton>(R.id.diagnostics_button).apply {
+            visibility = if (BuildConfig.DEBUG) View.VISIBLE else View.GONE
+            setOnClickListener { showDiagnosticsDialog() }
+        }
         resolutionButton.setOnClickListener {
             editingSettings = editingSettings.toggledResolution()
             renderSettingsForm(editingSettings)
@@ -182,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        diagnosticsDialog?.dismiss()
         cameraSession.close()
         handLandmarkerProcessor.close()
         super.onDestroy()
@@ -281,6 +316,60 @@ class MainActivity : AppCompatActivity() {
             minTrackingConfidence = tracking,
             maxSendFps = sendFps,
         )
+    }
+
+    private fun showDiagnosticsDialog() {
+        if (!BuildConfig.DEBUG) return
+        val density = resources.displayMetrics.density
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), 0)
+        }
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val output = TextView(this).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            setTextIsSelectable(true)
+            text = AppDiagnostics.format()
+        }
+        fun action(label: Int, block: () -> Unit) {
+            actions.addView(MaterialButton(this).apply {
+                setText(label)
+                textSize = 11f
+                setOnClickListener {
+                    block()
+                    output.text = AppDiagnostics.format()
+                }
+            })
+        }
+        action(R.string.diagnostics_refresh) {}
+        action(R.string.diagnostics_clear) { AppDiagnostics.clear() }
+        container.addView(actions)
+        val syntheticActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun syntheticAction(label: Int, block: () -> Unit) {
+            syntheticActions.addView(MaterialButton(this).apply {
+                setText(label)
+                textSize = 11f
+                setOnClickListener {
+                    block()
+                    output.text = AppDiagnostics.format()
+                }
+            })
+        }
+        syntheticAction(R.string.diagnostics_fake_hand) { viewModel.submitDebugHand(true) }
+        syntheticAction(R.string.diagnostics_fake_missing) { viewModel.submitDebugHand(false) }
+        syntheticAction(R.string.diagnostics_fake_markers) { viewModel.submitDebugCalibration() }
+        container.addView(syntheticActions)
+        container.addView(ScrollView(this).apply { addView(output) })
+        diagnosticsDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.diagnostics_title)
+            .setView(container)
+            .setPositiveButton(R.string.diagnostics_export) { _, _ ->
+                diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .also { it.show() }
     }
 
     companion object {
