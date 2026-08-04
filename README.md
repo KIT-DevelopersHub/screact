@@ -137,6 +137,7 @@ AndroidアプリからPCへ送信する主なデータは以下です。
 ```text
 docs/
 ├─ android-current-spec.md       # Androidアプリ現行仕様書
+├─ android-debug-tutorial.md     # Android実機デバッグ手順
 ├─ android-protocol-v1.md        # Android通信プロトコル
 ├─ android-app-requirements.md   # Androidアプリ要件定義書
 ├─ desktop-app-requirements.md   # デスクトップアプリ要件定義書

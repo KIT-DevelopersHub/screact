@@ -65,7 +65,7 @@ flowchart LR
 | 最低Android | Android 7.0 / API 24 |
 | compileSdk / targetSdk | 36 / 36 |
 | Java・JVMターゲット | 11 |
-| UI | Android View、Material Components、ConstraintLayout |
+| UI | Jetpack Compose、Material 3（カメラPreviewと検出Overlayは`AndroidView`で統合） |
 | カメラ | CameraX 1.6.1 |
 | 手指検出 | MediaPipe Tasks Vision 0.10.35 |
 | マーカー検出 | OpenCV 4.12.0、`DICT_4X4_50` |
@@ -131,7 +131,7 @@ flowchart TB
 
 | クラス | 責務 |
 | --- | --- |
-| `MainActivity` | Viewの初期化、権限要求、カメラ開始、撮影モードによる解析振り分け、設定適用 |
+| `MainActivity` | Compose UIの構築、権限要求、カメラ開始、撮影モードによる解析振り分け、設定適用 |
 | `MainViewModel` | 画面回転をまたぐ接続・モード状態、設定永続化、WebSocketクライアントの所有 |
 | `CameraSession` | CameraX PreviewとImageAnalysisを背面カメラへバインド |
 | `HandLandmarkerProcessor` | 画像補正、非同期手指検出、21点・左右・信頼度・fps・推論時間の生成 |
@@ -144,7 +144,7 @@ flowchart TB
 
 ## 5. 画面仕様
 
-画面は単一Activityで構成する。カメラ映像を全画面表示し、その上へ検出結果と状態、下部へ接続操作を重ねる。
+画面は単一ActivityのJetpack Compose UIで構成する。カメラ映像を全画面表示し、その上へ検出結果と状態、下部へ接続操作を重ねる。接続・切断・撮影モード切替は画面幅いっぱいのボタンとし、狭い端末でも主要操作が欠けない構成にする。
 
 ```mermaid
 flowchart TB
@@ -155,8 +155,9 @@ flowchart TB
     Preview --> TopRight[右上: 接続状態・撮影モード]
     Preview --> Bottom[下部: PC接続カード]
     Bottom --> Address[PC IP・ポート・6桁コード]
-    Bottom --> Controls[詳細・モード切替・切断・接続]
-    Controls --> Advanced[折りたたみ詳細設定]
+    Bottom --> Controls[設定・診断・モード切替・切断・接続]
+    Controls --> Settings[設定ダイアログ]
+    Settings --> RuntimeMode[本番／デバッグモード]
     Screen --> Permission[中央: カメラ権限カード]
 ```
 
@@ -169,7 +170,7 @@ flowchart TB
 | 撮影モード | 通常撮影または位置合わせ撮影 |
 | 接続入力 | PCのホスト、1〜65535のポート、6桁数字のペアリングコード |
 | 接続操作 | 接続、切断、通常撮影／位置合わせの手動切替 |
-| 詳細設定 | 解像度、検出信頼度、存在信頼度、追跡信頼度、最大送信fps |
+| 設定 | 本番／デバッグモード、解像度、最大送信fps。デバッグ時のみ各検出信頼度 |
 
 接続処理中から再接続中までは接続ボタンを無効化し、切断ボタンを有効化する。未接続またはエラー表示時は接続ボタンを有効化する。
 
@@ -492,6 +493,7 @@ flowchart LR
 | 存在信頼度 | 0.5 | 0.0〜1.0 | する |
 | 追跡信頼度 | 0.5 | 0.0〜1.0 | する |
 | 最大送信fps | 20 | 5〜20 | する |
+| デバッグモード | debug APKは有効、release APKは無効 | 有効／無効 | する |
 | PC host | 空 | 空でない文字列 | 接続成功前の検証通過時に保存 |
 | PC port | 8080 | 1〜65535 | 接続成功前の検証通過時に保存 |
 | deviceId | 初回に`android-`＋UUID先頭8文字 | アプリ生成 | する |
@@ -514,7 +516,7 @@ flowchart LR
     Offset --> Overlay[画面上へ描画]
 ```
 
-debug APKには「診断」パネルがあり、端末・カメラ・検出・ArUco・通信の最新値、カウンター、直近500イベントを確認できる。イベントは`YubiBoardDiag`タグへJSONLとして出力し、Storage Access Frameworkを使って利用者が選んだ場所へ保存できる。疑似21点、疑似未検出、疑似4マーカーにより、カメラ入力と切り離して通信経路を検証できる。これらは`BuildConfig.DEBUG`で保護され、releaseでは表示・収集・実行されない。
+アプリ内設定でデバッグモードを有効にすると「診断」パネルが現れ、端末・カメラ・検出・ArUco・通信の最新値、カウンター、直近500イベントを確認できる。イベントは`YubiBoardDiag`タグへJSONLとして出力し、Storage Access Frameworkを使って利用者が選んだ場所へ保存できる。疑似21点、疑似未検出、疑似4マーカーにより、カメラ入力と切り離して通信経路を検証できる。本番モードでは診断UIと詳細なしきい値を隠し、イベント収集と疑似入力を停止する。選択したモードはSharedPreferencesに保存され、ビルド種別は初回既定値だけを決める。
 
 PC側のPowerShellテストハーネスは正常接続、モード切替、切断、ackタイムアウト、不正JSON、session/schema不一致、低速受信を再現し、イベントJSONL、接続CSV、Markdown要約を`android/debug-results/`へ保存する。ADBランナーはUSB reverse、ビルド・導入、instrumentation test、5秒間隔の温度・メモリとLogcatを収集する。
 
@@ -522,7 +524,7 @@ PC側のPowerShellテストハーネスは正常接続、モード切替、切�
 
 - 通信は同一LAN向けの平文`ws://`であり、TLSは使用しない。
 - ペアリングコードはメモリ上の接続設定にのみ保持し、SharedPreferencesへ保存しない。
-- deviceId、host、port、検出設定はSharedPreferencesへ保存する。
+- deviceId、host、port、検出設定、デバッグモードはSharedPreferencesへ保存する。
 - カメラ画像は端末内で解析し、ファイル保存もネットワーク送信も行わない。
 - ランドマークとマーカー座標は接続中のPCへ送信する。
 - アプリはAndroidバックアップを許可している。端末・OSのバックアップ規則により、保存設定がバックアップ対象となる可能性がある。
@@ -617,7 +619,7 @@ journey
 - マーカー安定後も安定結果が到着するたび最大5 fpsで送信する。PCからの受領確認はない。
 - デバッグAPKはMediaPipeモデルとOpenCVネイティブライブラリを含むユニバーサルAPKであり、サイズが大きい。
 - `ERROR`接続状態は定義済みだが、現行の通信処理からは発行されない。
-- release APKには診断履歴・疑似入力・エクスポートを含めない。
+- 本番モードでは診断履歴を収集せず、疑似入力・エクスポートUIを表示しない。利用者は設定からデバッグモードへ切り替えられる。
 
 ## 21. 変更時の同期対象
 
