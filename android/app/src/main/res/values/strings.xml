@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">YubiBoard</string>
+    <string name="camera_preview">背面カメラのプレビュー</string>
+    <string name="camera_starting">カメラを起動中</string>
+    <string name="camera_ready">カメラ準備完了</string>
+    <string name="camera_error">カメラを起動できません</string>
+    <string name="camera_permission_title">カメラの許可が必要です</string>
+    <string name="camera_permission_message">手と画面マーカーを検出するため、背面カメラへのアクセスを許可してください。</string>
+    <string name="grant_camera_permission">カメラを許可</string>
 </resources>
