@@ -40,4 +40,4 @@ AndroidアプリへPCのLAN内IPv4、ポート`8080`、コード`123456`を入�
 - 再接続: 1、2、4、8、以後10秒
 - IPとポートは保存するが、ペアリングコードは保存しない
 
-通信JSONの詳細は[`docs/android-protocol-v1.md`](../docs/android-protocol-v1.md)を参照してください。
+現在の実装全体は[`docs/android-current-spec.md`](../docs/android-current-spec.md)、通信JSONの詳細は[`docs/android-protocol-v1.md`](../docs/android-protocol-v1.md)を参照してください。

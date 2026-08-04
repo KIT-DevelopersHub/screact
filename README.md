@@ -132,11 +132,15 @@ AndroidアプリからPCへ送信する主なデータは以下です。
 
 ## ドキュメント
 
-要件定義書などのプロジェクト資料は、`docs/`ディレクトリで管理します。
+要件定義書や現行仕様書などのプロジェクト資料は、`docs/`ディレクトリで管理します。
 
 ```text
 docs/
-└─ ...
+├─ android-current-spec.md       # Androidアプリ現行仕様書
+├─ android-protocol-v1.md        # Android通信プロトコル
+├─ android-app-requirements.md   # Androidアプリ要件定義書
+├─ desktop-app-requirements.md   # デスクトップアプリ要件定義書
+└─ system-requirements.md        # システム全体要件定義書
 ```
 
 ## 現在の状態
