@@ -21,6 +21,7 @@ class HandLandmarkerProcessor(
 ) : AutoCloseable {
     private var handLandmarker: HandLandmarker? = null
     private val frameTimes = ArrayDeque<Long>()
+    private val trackingStateMachine = TrackingStateMachine()
 
     init {
         runCatching {
@@ -66,12 +67,14 @@ class HandLandmarkerProcessor(
             LandmarkPoint(point.x(), point.y(), point.z())
         }.orEmpty()
         val category = result.handedness().firstOrNull()?.firstOrNull()
+        val detected = landmarks.size == HAND_LANDMARK_COUNT
         onResult(
             HandDetectionResult(
                 capturedAtMonotonicMs = result.timestampMs(),
                 sourceWidth = input.width,
                 sourceHeight = input.height,
-                detected = landmarks.size == HAND_LANDMARK_COUNT,
+                detected = detected,
+                trackingState = trackingStateMachine.update(detected, result.timestampMs()),
                 landmarks = landmarks,
                 handedness = category?.categoryName()?.uppercase(),
                 handednessScore = category?.score(),

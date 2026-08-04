@@ -11,6 +11,7 @@ data class HandDetectionResult(
     val sourceWidth: Int,
     val sourceHeight: Int,
     val detected: Boolean,
+    val trackingState: TrackingState = if (detected) TrackingState.TRACKING else TrackingState.UNDETECTED,
     val landmarks: List<LandmarkPoint> = emptyList(),
     val handedness: String? = null,
     val handednessScore: Float? = null,
