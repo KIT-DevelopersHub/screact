@@ -26,7 +26,7 @@ data class MetricSummary(
     val p95: Double,
 )
 
-/** Lightweight debug telemetry. Every method is a no-op in release builds. */
+/** Lightweight telemetry controlled by the persisted in-app debug-mode setting. */
 object AppDiagnostics {
     private const val LOG_TAG = "YubiBoardDiag"
     private const val MAX_EVENTS = 500
@@ -36,10 +36,19 @@ object AppDiagnostics {
     private val gauges = linkedMapOf<String, String>()
     private val metrics = linkedMapOf<String, ArrayDeque<Double>>()
     private val lastSamples = mutableMapOf<String, Long>()
+    @Volatile
+    private var enabled = BuildConfig.DEBUG
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
+        if (value) event("app", "debug_mode_enabled")
+    }
+
+    fun isEnabled(): Boolean = enabled
 
     @Synchronized
     fun event(category: String, name: String, fields: Map<String, Any?> = emptyMap()) {
-        if (!BuildConfig.DEBUG) return
+        if (!enabled) return
         val normalized = fields.mapValues { (_, value) -> value?.toString().orEmpty() }
         val item = DiagnosticEvent(monotonicMs(), category, name, normalized)
         events.addLast(item)
@@ -50,7 +59,7 @@ object AppDiagnostics {
 
     @Synchronized
     fun sampled(key: String, category: String, name: String, fields: Map<String, Any?> = emptyMap()) {
-        if (!BuildConfig.DEBUG) return
+        if (!enabled) return
         val now = monotonicMs()
         val previous = lastSamples[key]
         if (previous != null && now - previous < SAMPLE_INTERVAL_MS) return
@@ -60,19 +69,19 @@ object AppDiagnostics {
 
     @Synchronized
     fun increment(name: String, amount: Long = 1) {
-        if (!BuildConfig.DEBUG) return
+        if (!enabled) return
         counters[name] = (counters[name] ?: 0L) + amount
     }
 
     @Synchronized
     fun gauge(name: String, value: Any?) {
-        if (!BuildConfig.DEBUG) return
+        if (!enabled) return
         gauges[name] = value?.toString().orEmpty()
     }
 
     @Synchronized
     fun metric(name: String, value: Number) {
-        if (!BuildConfig.DEBUG) return
+        if (!enabled) return
         val values = metrics.getOrPut(name) { ArrayDeque() }
         values.addLast(value.toDouble())
         while (values.size > MAX_METRIC_SAMPLES) values.removeFirst()

@@ -30,6 +30,7 @@ class ExampleInstrumentedTest {
     @Test
     fun debugDiagnosticsCollectEvents() {
         assertTrue(BuildConfig.DEBUG)
+        AppDiagnostics.setEnabled(true)
         AppDiagnostics.clear()
         AppDiagnostics.event("instrumentation", "probe", mapOf("device" to android.os.Build.MODEL))
         assertEquals("probe", AppDiagnostics.snapshot().events.single().name)

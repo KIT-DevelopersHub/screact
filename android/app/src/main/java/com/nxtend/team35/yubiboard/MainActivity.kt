@@ -3,60 +3,88 @@ package com.nxtend.team35.yubiboard
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.graphics.Typeface
 import android.util.Size
-import android.view.View
-import android.widget.TextView
-import android.widget.LinearLayout
-import android.widget.ScrollView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AlertDialog
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
 import com.nxtend.team35.yubiboard.camera.CameraSession
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.settings.AppSettings
-import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.ArucoMarkerProcessor
+import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
     private lateinit var cameraSession: CameraSession
     private lateinit var handLandmarkerProcessor: HandLandmarkerProcessor
     private lateinit var arucoMarkerProcessor: ArucoMarkerProcessor
     private lateinit var viewModel: MainViewModel
-    private lateinit var cameraStatus: TextView
-    private lateinit var permissionCard: MaterialCardView
-    private lateinit var connectionStatus: TextView
-    private lateinit var modeStatus: TextView
-    private lateinit var hostInput: TextInputEditText
-    private lateinit var portInput: TextInputEditText
-    private lateinit var tokenInput: TextInputEditText
-    private lateinit var connectButton: MaterialButton
-    private lateinit var disconnectButton: MaterialButton
-    private lateinit var modeButton: MaterialButton
+    private lateinit var previewView: PreviewView
     private lateinit var debugOverlay: DebugOverlayView
-    private lateinit var settingsPanel: View
-    private lateinit var resolutionButton: MaterialButton
-    private lateinit var detectionConfidenceInput: TextInputEditText
-    private lateinit var presenceConfidenceInput: TextInputEditText
-    private lateinit var trackingConfidenceInput: TextInputEditText
-    private lateinit var sendFpsInput: TextInputEditText
-    private var editingSettings = AppSettings()
+
+    private var cameraStatus by mutableStateOf("カメラを起動中")
+    private var cameraPermissionGranted by mutableStateOf(false)
+    private var transientMessage by mutableStateOf<String?>(null)
     @Volatile
     private var currentMode: CaptureMode = CaptureMode.TRACKING
-    private var diagnosticsDialog: AlertDialog? = null
 
     private val diagnosticsExportLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-ndjson"),
@@ -68,6 +96,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }.onFailure {
                 AppDiagnostics.event("ui", "diagnostics_export_error", mapOf("message" to it.message))
+                transientMessage = "診断ログを保存できませんでした"
             }
         }
     }
@@ -75,81 +104,47 @@ class MainActivity : AppCompatActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) {
-            showCamera()
-        } else {
-            showPermissionPrompt()
-        }
+        cameraPermissionGranted = granted
+        if (granted) startCamera() else cameraStatus = "カメラ権限が必要です"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
-
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
-
-        cameraStatus = findViewById(R.id.camera_status)
-        permissionCard = findViewById(R.id.permission_card)
-        connectionStatus = findViewById(R.id.connection_status)
-        modeStatus = findViewById(R.id.mode_status)
-        hostInput = findViewById(R.id.host_input)
-        portInput = findViewById(R.id.port_input)
-        tokenInput = findViewById(R.id.token_input)
-        connectButton = findViewById(R.id.connect_button)
-        disconnectButton = findViewById(R.id.disconnect_button)
-        modeButton = findViewById(R.id.mode_button)
-        debugOverlay = findViewById(R.id.debug_overlay)
-        settingsPanel = findViewById(R.id.advanced_settings_panel)
-        resolutionButton = findViewById(R.id.resolution_button)
-        detectionConfidenceInput = findViewById(R.id.detection_confidence_input)
-        presenceConfidenceInput = findViewById(R.id.presence_confidence_input)
-        trackingConfidenceInput = findViewById(R.id.tracking_confidence_input)
-        sendFpsInput = findViewById(R.id.send_fps_input)
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
-        AppDiagnostics.event(
-            "app",
-            "created",
-            mapOf(
-                "model" to android.os.Build.MODEL,
-                "android" to android.os.Build.VERSION.RELEASE,
-                "sdk" to android.os.Build.VERSION.SDK_INT,
-                "version" to BuildConfig.VERSION_NAME,
-            ),
-        )
-        hostInput.setText(viewModel.savedHost)
-        portInput.setText(viewModel.savedPort.toString())
-        editingSettings = viewModel.currentSettings
-        renderSettingsForm(editingSettings)
+        previewView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FIT_CENTER
+            contentDescription = "背面カメラのプレビュー"
+        }
+        debugOverlay = DebugOverlayView(this)
 
-        handLandmarkerProcessor = createHandProcessor(editingSettings)
+        val initialSettings = viewModel.currentSettings
+        handLandmarkerProcessor = createHandProcessor(initialSettings)
         arucoMarkerProcessor = ArucoMarkerProcessor(
             onResult = { result ->
                 if (result.stable) viewModel.submitCalibration(result)
                 runOnUiThread {
                     debugOverlay.setMarkerResult(result)
-                    cameraStatus.text = getString(
-                        if (result.stable) R.string.markers_stable else R.string.markers_searching,
-                        result.markers.size,
-                    )
+                    cameraStatus = if (result.stable) {
+                        "マーカー ${result.markers.size}/4・安定"
+                    } else {
+                        "マーカー ${result.markers.size}/4・安定待ち"
+                    }
                 }
             },
             onError = {
-                runOnUiThread { cameraStatus.setText(R.string.aruco_error) }
+                runOnUiThread { cameraStatus = "ArUco検出を初期化できません" }
             },
         )
         cameraSession = CameraSession(
             context = this,
             lifecycleOwner = this,
-            previewView = findViewById<PreviewView>(R.id.preview_view),
-            onReady = { cameraStatus.setText(R.string.camera_ready) },
+            previewView = previewView,
+            onReady = { cameraStatus = "カメラ準備完了" },
             onError = {
-                cameraStatus.setText(R.string.camera_error)
-                showPermissionPrompt()
+                cameraStatus = "カメラを起動できません"
+                cameraPermissionGranted = false
             },
         )
         cameraSession.setFrameConsumer { image ->
@@ -160,63 +155,67 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<MaterialButton>(R.id.grant_permission_button).setOnClickListener {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-        connectButton.setOnClickListener {
-            val error = viewModel.connect(
-                hostInput.text?.toString().orEmpty(),
-                portInput.text?.toString().orEmpty(),
-                tokenInput.text?.toString().orEmpty(),
-            )
-            if (error != null) connectionStatus.text = error
-        }
-        disconnectButton.setOnClickListener { viewModel.disconnect() }
-        modeButton.setOnClickListener {
-            val next = if (viewModel.mode.value == CaptureMode.CALIBRATION) {
-                CaptureMode.TRACKING
-            } else {
-                CaptureMode.CALIBRATION
-            }
-            viewModel.setModeManually(next)
-        }
-        findViewById<MaterialButton>(R.id.settings_toggle_button).setOnClickListener {
-            settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }
-        findViewById<MaterialButton>(R.id.diagnostics_button).apply {
-            visibility = if (BuildConfig.DEBUG) View.VISIBLE else View.GONE
-            setOnClickListener { showDiagnosticsDialog() }
-        }
-        resolutionButton.setOnClickListener {
-            editingSettings = editingSettings.toggledResolution()
-            renderSettingsForm(editingSettings)
-        }
-        findViewById<MaterialButton>(R.id.apply_settings_button).setOnClickListener {
-            val candidate = readSettingsForm() ?: return@setOnClickListener
-            val error = viewModel.updateSettings(candidate)
-            if (error != null) {
-                connectionStatus.text = error
-                return@setOnClickListener
-            }
-            editingSettings = candidate
-            replaceHandProcessor(candidate)
-            if (hasCameraPermission()) {
-                cameraSession.start(Size(candidate.analysisWidth, candidate.analysisHeight))
-            }
-            connectionStatus.setText(R.string.settings_applied)
-        }
-
-        viewModel.connection.observe(this, ::renderConnection)
-        viewModel.mode.observe(this, ::renderMode)
+        viewModel.mode.observe(this) { mode -> currentMode = mode }
         viewModel.log.observe(this) { message ->
-            if (!message.isNullOrBlank()) connectionStatus.text = message
+            if (!message.isNullOrBlank()) transientMessage = message
         }
 
-        if (hasCameraPermission()) showCamera() else showPermissionPrompt()
+        AppDiagnostics.event(
+            "app",
+            "created",
+            mapOf(
+                "model" to android.os.Build.MODEL,
+                "android" to android.os.Build.VERSION.RELEASE,
+                "sdk" to android.os.Build.VERSION.SDK_INT,
+                "version" to BuildConfig.VERSION_NAME,
+            ),
+        )
+
+        setContent {
+            YubiBoardTheme {
+                val connection by viewModel.connection.observeAsState(
+                    ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
+                )
+                val mode by viewModel.mode.observeAsState(CaptureMode.TRACKING)
+                val settings by viewModel.settings.observeAsState(initialSettings)
+                YubiBoardScreen(
+                    previewView = previewView,
+                    debugOverlay = debugOverlay,
+                    cameraStatus = cameraStatus,
+                    cameraPermissionGranted = cameraPermissionGranted,
+                    connection = connection,
+                    mode = mode,
+                    settings = settings,
+                    savedHost = viewModel.savedHost,
+                    savedPort = viewModel.savedPort,
+                    transientMessage = transientMessage,
+                    onRequestCameraPermission = {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    },
+                    onConnect = { host, port, token ->
+                        transientMessage = null
+                        viewModel.connect(host, port, token).also { error ->
+                            if (error != null) transientMessage = error
+                        }
+                    },
+                    onDisconnect = viewModel::disconnect,
+                    onModeChange = viewModel::setModeManually,
+                    onApplySettings = ::applySettings,
+                    onFakeHand = viewModel::submitDebugHand,
+                    onFakeMarkers = viewModel::submitDebugCalibration,
+                    onClearDiagnostics = AppDiagnostics::clear,
+                    onExportDiagnostics = {
+                        diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
+                    },
+                )
+            }
+        }
+
+        cameraPermissionGranted = hasCameraPermission()
+        if (cameraPermissionGranted) startCamera() else cameraStatus = "カメラ権限が必要です"
     }
 
     override fun onDestroy() {
-        diagnosticsDialog?.dismiss()
         cameraSession.close()
         handLandmarkerProcessor.close()
         super.onDestroy()
@@ -226,42 +225,10 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
 
-    private fun showCamera() {
-        permissionCard.visibility = View.GONE
-        cameraStatus.setText(R.string.hand_searching)
+    private fun startCamera() {
+        cameraStatus = "手を探索中"
         val settings = viewModel.currentSettings
         cameraSession.start(Size(settings.analysisWidth, settings.analysisHeight))
-    }
-
-    private fun showPermissionPrompt() {
-        permissionCard.visibility = View.VISIBLE
-    }
-
-    private fun renderConnection(snapshot: ConnectionSnapshot) {
-        connectionStatus.text = when (snapshot.status) {
-            ConnectionStatus.DISCONNECTED -> getString(R.string.connection_disconnected)
-            ConnectionStatus.CONNECTING -> getString(R.string.connection_connecting)
-            ConnectionStatus.AWAITING_ACK -> getString(R.string.connection_awaiting_ack)
-            ConnectionStatus.CONNECTED -> getString(R.string.connection_connected)
-            ConnectionStatus.RECONNECTING -> getString(
-                R.string.connection_reconnecting,
-                snapshot.retryInSeconds ?: 0,
-            )
-            ConnectionStatus.ERROR -> snapshot.detail ?: getString(R.string.connection_error)
-        }
-        val connectedOrBusy = snapshot.status != ConnectionStatus.DISCONNECTED &&
-            snapshot.status != ConnectionStatus.ERROR
-        connectButton.isEnabled = !connectedOrBusy
-        disconnectButton.isEnabled = connectedOrBusy
-    }
-
-    private fun renderMode(mode: CaptureMode) {
-        currentMode = mode
-        val isCalibration = mode == CaptureMode.CALIBRATION
-        modeStatus.setText(if (isCalibration) R.string.mode_calibration else R.string.mode_tracking)
-        modeButton.setText(
-            if (isCalibration) R.string.switch_to_tracking else R.string.switch_to_calibration,
-        )
     }
 
     private fun createHandProcessor(settings: AppSettings) = HandLandmarkerProcessor(
@@ -273,106 +240,485 @@ class MainActivity : AppCompatActivity() {
             viewModel.submitHand(result)
             runOnUiThread {
                 debugOverlay.setHandResult(result)
-                cameraStatus.text = if (result.detected) {
-                    getString(R.string.hand_detected, result.framesPerSecond, result.inferenceTimeMs)
+                cameraStatus = if (result.detected) {
+                    "手を検出・%.1f fps・%d ms".format(result.framesPerSecond, result.inferenceTimeMs)
                 } else {
-                    getString(R.string.hand_not_detected, result.framesPerSecond)
+                    "手を検出できません・%.1f fps".format(result.framesPerSecond)
                 }
             }
         },
         onError = {
-            runOnUiThread { cameraStatus.setText(R.string.hand_landmarker_error) }
+            runOnUiThread { cameraStatus = "手検知を初期化できません" }
         },
     )
+
+    private fun applySettings(candidate: AppSettings): String? {
+        val previous = viewModel.currentSettings
+        val error = viewModel.updateSettings(candidate)
+        if (error != null) return error
+        val detectorChanged = previous.minDetectionConfidence != candidate.minDetectionConfidence ||
+            previous.minPresenceConfidence != candidate.minPresenceConfidence ||
+            previous.minTrackingConfidence != candidate.minTrackingConfidence
+        if (detectorChanged) replaceHandProcessor(candidate)
+        if (cameraPermissionGranted &&
+            (previous.analysisWidth != candidate.analysisWidth ||
+                previous.analysisHeight != candidate.analysisHeight)
+        ) {
+            cameraSession.start(Size(candidate.analysisWidth, candidate.analysisHeight))
+        }
+        transientMessage = if (candidate.debugModeEnabled) {
+            "デバッグモードを有効にしました"
+        } else {
+            "本番モードを有効にしました"
+        }
+        return null
+    }
 
     private fun replaceHandProcessor(settings: AppSettings) {
         val previous = handLandmarkerProcessor
         handLandmarkerProcessor = createHandProcessor(settings)
-        findViewById<View>(R.id.main).postDelayed({ previous.close() }, PROCESSOR_CLOSE_DELAY_MS)
-    }
-
-    private fun renderSettingsForm(settings: AppSettings) {
-        resolutionButton.setText(
-            if (settings.analysisWidth == 640) R.string.resolution_640 else R.string.resolution_960,
-        )
-        detectionConfidenceInput.setText(settings.minDetectionConfidence.toString())
-        presenceConfidenceInput.setText(settings.minPresenceConfidence.toString())
-        trackingConfidenceInput.setText(settings.minTrackingConfidence.toString())
-        sendFpsInput.setText(settings.maxSendFps.toString())
-    }
-
-    private fun readSettingsForm(): AppSettings? {
-        val detection = detectionConfidenceInput.text?.toString()?.toFloatOrNull()
-        val presence = presenceConfidenceInput.text?.toString()?.toFloatOrNull()
-        val tracking = trackingConfidenceInput.text?.toString()?.toFloatOrNull()
-        val sendFps = sendFpsInput.text?.toString()?.toIntOrNull()
-        if (detection == null || presence == null || tracking == null || sendFps == null) {
-            connectionStatus.text = "詳細設定の数値を確認してください"
-            return null
-        }
-        return editingSettings.copy(
-            minDetectionConfidence = detection,
-            minPresenceConfidence = presence,
-            minTrackingConfidence = tracking,
-            maxSendFps = sendFps,
-        )
-    }
-
-    private fun showDiagnosticsDialog() {
-        if (!BuildConfig.DEBUG) return
-        val density = resources.displayMetrics.density
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), 0)
-        }
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val output = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 12f
-            setTextIsSelectable(true)
-            text = AppDiagnostics.format()
-        }
-        fun action(label: Int, block: () -> Unit) {
-            actions.addView(MaterialButton(this).apply {
-                setText(label)
-                textSize = 11f
-                setOnClickListener {
-                    block()
-                    output.text = AppDiagnostics.format()
-                }
-            })
-        }
-        action(R.string.diagnostics_refresh) {}
-        action(R.string.diagnostics_clear) { AppDiagnostics.clear() }
-        container.addView(actions)
-        val syntheticActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun syntheticAction(label: Int, block: () -> Unit) {
-            syntheticActions.addView(MaterialButton(this).apply {
-                setText(label)
-                textSize = 11f
-                setOnClickListener {
-                    block()
-                    output.text = AppDiagnostics.format()
-                }
-            })
-        }
-        syntheticAction(R.string.diagnostics_fake_hand) { viewModel.submitDebugHand(true) }
-        syntheticAction(R.string.diagnostics_fake_missing) { viewModel.submitDebugHand(false) }
-        syntheticAction(R.string.diagnostics_fake_markers) { viewModel.submitDebugCalibration() }
-        container.addView(syntheticActions)
-        container.addView(ScrollView(this).apply { addView(output) })
-        diagnosticsDialog = AlertDialog.Builder(this)
-            .setTitle(R.string.diagnostics_title)
-            .setView(container)
-            .setPositiveButton(R.string.diagnostics_export) { _, _ ->
-                diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-            .also { it.show() }
+        previewView.postDelayed({ previous.close() }, PROCESSOR_CLOSE_DELAY_MS)
     }
 
     companion object {
         private const val PROCESSOR_CLOSE_DELAY_MS = 1_000L
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun YubiBoardScreen(
+    previewView: PreviewView,
+    debugOverlay: DebugOverlayView,
+    cameraStatus: String,
+    cameraPermissionGranted: Boolean,
+    connection: ConnectionSnapshot,
+    mode: CaptureMode,
+    settings: AppSettings,
+    savedHost: String,
+    savedPort: Int,
+    transientMessage: String?,
+    onRequestCameraPermission: () -> Unit,
+    onConnect: (String, String, String) -> String?,
+    onDisconnect: () -> Unit,
+    onModeChange: (CaptureMode) -> Unit,
+    onApplySettings: (AppSettings) -> String?,
+    onFakeHand: (Boolean) -> Unit,
+    onFakeMarkers: () -> Unit,
+    onClearDiagnostics: () -> Unit,
+    onExportDiagnostics: () -> Unit,
+) {
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
+    var host by rememberSaveable { mutableStateOf(savedHost.ifBlank { "127.0.0.1" }) }
+    var port by rememberSaveable { mutableStateOf(savedPort.toString()) }
+    var token by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(settings.debugModeEnabled) {
+        if (!settings.debugModeEnabled) showDiagnostics = false
+    }
+
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        AndroidView(factory = { debugOverlay }, modifier = Modifier.fillMaxSize())
+
+        FlowRow(
+            modifier = Modifier.safeDrawingPadding().padding(12.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatusChip(cameraStatus, Color(0xCC142B31))
+            StatusChip(connectionLabel(connection), connectionColor(connection.status))
+            StatusChip(
+                if (mode == CaptureMode.CALIBRATION) "位置合わせ" else "手を追跡",
+                Color(0xCC4A3B16),
+            )
+            if (settings.debugModeEnabled) StatusChip("DEBUG", Color(0xCCD04A36))
+        }
+
+        ConnectionPanel(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            connection = connection,
+            mode = mode,
+            host = host,
+            port = port,
+            token = token,
+            debugModeEnabled = settings.debugModeEnabled,
+            transientMessage = transientMessage,
+            onHostChange = { host = it },
+            onPortChange = { port = it.filter(Char::isDigit).take(5) },
+            onTokenChange = { token = it.filter(Char::isDigit).take(6) },
+            onConnect = { onConnect(host, port, token) },
+            onDisconnect = onDisconnect,
+            onModeChange = onModeChange,
+            onOpenSettings = { showSettings = true },
+            onOpenDiagnostics = { showDiagnostics = true },
+        )
+
+        if (!cameraPermissionGranted) {
+            CameraPermissionCard(
+                modifier = Modifier.align(Alignment.Center),
+                onRequestPermission = onRequestCameraPermission,
+            )
+        }
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            settings = settings,
+            onDismiss = { showSettings = false },
+            onApply = { candidate ->
+                onApplySettings(candidate).also { if (it == null) showSettings = false }
+            },
+        )
+    }
+    if (showDiagnostics && settings.debugModeEnabled) {
+        DiagnosticsDialog(
+            onDismiss = { showDiagnostics = false },
+            onFakeHand = onFakeHand,
+            onFakeMarkers = onFakeMarkers,
+            onClear = onClearDiagnostics,
+            onExport = onExportDiagnostics,
+        )
+    }
+}
+
+@Composable
+private fun StatusChip(text: String, background: Color) {
+    Surface(color = background, shape = RoundedCornerShape(50), tonalElevation = 4.dp) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ConnectionPanel(
+    modifier: Modifier,
+    connection: ConnectionSnapshot,
+    mode: CaptureMode,
+    host: String,
+    port: String,
+    token: String,
+    debugModeEnabled: Boolean,
+    transientMessage: String?,
+    onHostChange: (String) -> Unit,
+    onPortChange: (String) -> Unit,
+    onTokenChange: (String) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onModeChange: (CaptureMode) -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    val connectedOrBusy = connection.status !in setOf(ConnectionStatus.DISCONNECTED, ConnectionStatus.ERROR)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shadowElevation = 16.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .safeDrawingPadding()
+                .heightIn(max = 430.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("PC接続", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        connectionLabel(connection),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onOpenSettings) { Text("設定") }
+                if (debugModeEnabled) {
+                    TextButton(onClick = onOpenDiagnostics) { Text("診断") }
+                }
+            }
+
+            if (!connectedOrBusy) {
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = onHostChange,
+                    label = { Text("PCのIPまたはホスト名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = port,
+                        onValueChange = onPortChange,
+                        label = { Text("ポート") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = onTokenChange,
+                        label = { Text("6桁コード") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Button(onClick = onConnect, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("PCへ接続")
+                }
+            } else {
+                Text(
+                    "接続先  $host:$port",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
+                    Text("接続を切断")
+                }
+            }
+
+            Button(
+                onClick = {
+                    onModeChange(
+                        if (mode == CaptureMode.CALIBRATION) CaptureMode.TRACKING else CaptureMode.CALIBRATION,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (mode == CaptureMode.CALIBRATION) "手の追跡へ戻る" else "位置合わせを開始")
+            }
+            if (!transientMessage.isNullOrBlank()) {
+                Text(
+                    transientMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraPermissionCard(modifier: Modifier, onRequestPermission: () -> Unit) {
+    Card(
+        modifier = modifier.padding(24.dp).fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("カメラの許可が必要です", style = MaterialTheme.typography.titleLarge)
+            Text("手と画面マーカーを検出するため、背面カメラへのアクセスを許可してください。")
+            Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
+                Text("カメラを許可")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SettingsDialog(
+    settings: AppSettings,
+    onDismiss: () -> Unit,
+    onApply: (AppSettings) -> String?,
+) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    var detection by remember(settings) { mutableStateOf(settings.minDetectionConfidence.toString()) }
+    var presence by remember(settings) { mutableStateOf(settings.minPresenceConfidence.toString()) }
+    var tracking by remember(settings) { mutableStateOf(settings.minTrackingConfidence.toString()) }
+    var sendFps by remember(settings) { mutableStateOf(settings.maxSendFps.toString()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("設定", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Surface(
+                    color = if (draft.debugModeEnabled) {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("デバッグモード", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (draft.debugModeEnabled) {
+                                    "診断、疑似入力、詳細設定を表示します"
+                                } else {
+                                    "操作に必要な項目だけを表示します"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(
+                            checked = draft.debugModeEnabled,
+                            onCheckedChange = { draft = draft.copy(debugModeEnabled = it) },
+                        )
+                    }
+                }
+
+                Text("解析解像度", fontWeight = FontWeight.SemiBold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = draft.analysisWidth == 640,
+                        onClick = { draft = draft.copy(analysisWidth = 640, analysisHeight = 480) },
+                        label = { Text("640 × 480") },
+                    )
+                    FilterChip(
+                        selected = draft.analysisWidth == 960,
+                        onClick = { draft = draft.copy(analysisWidth = 960, analysisHeight = 540) },
+                        label = { Text("960 × 540") },
+                    )
+                }
+
+                OutlinedTextField(
+                    value = sendFps,
+                    onValueChange = { sendFps = it.filter(Char::isDigit).take(2) },
+                    label = { Text("最大送信fps（5〜20）") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (draft.debugModeEnabled) {
+                    Text("検出しきい値", fontWeight = FontWeight.SemiBold)
+                    ConfidenceField("検出信頼度", detection) { detection = it }
+                    ConfidenceField("存在信頼度", presence) { presence = it }
+                    ConfidenceField("追跡信頼度", tracking) { tracking = it }
+                }
+
+                if (error != null) {
+                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("キャンセル") }
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        val candidate = draft.copy(
+                            minDetectionConfidence = detection.toFloatOrNull() ?: Float.NaN,
+                            minPresenceConfidence = presence.toFloatOrNull() ?: Float.NaN,
+                            minTrackingConfidence = tracking.toFloatOrNull() ?: Float.NaN,
+                            maxSendFps = sendFps.toIntOrNull() ?: -1,
+                        )
+                        error = onApply(candidate)
+                    }) { Text("適用") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfidenceField(label: String, value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onValueChange(it.filter { char -> char.isDigit() || char == '.' }.take(4)) },
+        label = { Text("$label（0.0〜1.0）") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DiagnosticsDialog(
+    onDismiss: () -> Unit,
+    onFakeHand: (Boolean) -> Unit,
+    onFakeMarkers: () -> Unit,
+    onClear: () -> Unit,
+    onExport: () -> Unit,
+) {
+    var output by remember { mutableStateOf(AppDiagnostics.format()) }
+    fun refresh() { output = AppDiagnostics.format() }
+    Dialog(onDismissRequest = onDismiss) {
+        Card(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("デバッグ診断", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    OutlinedButton(onClick = { refresh() }) { Text("更新") }
+                    OutlinedButton(onClick = { onClear(); refresh() }) { Text("消去") }
+                    OutlinedButton(onClick = onExport) { Text("JSONL保存") }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Button(onClick = { onFakeHand(true); refresh() }) { Text("疑似21点") }
+                    Button(onClick = { onFakeHand(false); refresh() }) { Text("疑似未検出") }
+                    Button(onClick = { onFakeMarkers(); refresh() }) { Text("疑似4マーカー") }
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    color = Color(0xFF0D171A),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            output,
+                            modifier = Modifier.verticalScroll(rememberScrollState()).padding(12.dp),
+                            color = Color(0xFFD7F7ED),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                    Text("閉じる")
+                }
+            }
+        }
+    }
+}
+
+private fun connectionLabel(snapshot: ConnectionSnapshot): String = when (snapshot.status) {
+    ConnectionStatus.DISCONNECTED -> "未接続"
+    ConnectionStatus.CONNECTING -> "接続中"
+    ConnectionStatus.AWAITING_ACK -> "PC応答待ち"
+    ConnectionStatus.CONNECTED -> "接続済み"
+    ConnectionStatus.RECONNECTING -> "${snapshot.retryInSeconds ?: 0}秒後に再接続"
+    ConnectionStatus.ERROR -> snapshot.detail ?: "接続エラー"
+}
+
+private fun connectionColor(status: ConnectionStatus): Color = when (status) {
+    ConnectionStatus.CONNECTED -> Color(0xCC176B52)
+    ConnectionStatus.CONNECTING, ConnectionStatus.AWAITING_ACK, ConnectionStatus.RECONNECTING ->
+        Color(0xCC8A5D14)
+    ConnectionStatus.ERROR -> Color(0xCC9D352F)
+    ConnectionStatus.DISCONNECTED -> Color(0xCC37474F)
+}
+
+private val YubiBoardColors = darkColorScheme(
+    primary = Color(0xFF67E6C4),
+    onPrimary = Color(0xFF00382D),
+    secondary = Color(0xFFFFD166),
+    tertiary = Color(0xFFFFB59F),
+    background = Color(0xFF071316),
+    surface = Color(0xFF102226),
+    surfaceVariant = Color(0xFF24383D),
+)
+
+@Composable
+private fun YubiBoardTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = YubiBoardColors, content = content)
 }

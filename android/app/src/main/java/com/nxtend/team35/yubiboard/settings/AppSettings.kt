@@ -7,6 +7,7 @@ data class AppSettings(
     val minPresenceConfidence: Float = 0.5f,
     val minTrackingConfidence: Float = 0.5f,
     val maxSendFps: Int = 20,
+    val debugModeEnabled: Boolean = false,
 ) {
     fun validate(): String? = when {
         (analysisWidth to analysisHeight) !in SUPPORTED_RESOLUTIONS -> "未対応の解析解像度です"

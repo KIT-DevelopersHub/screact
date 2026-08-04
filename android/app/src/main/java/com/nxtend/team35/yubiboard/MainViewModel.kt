@@ -44,6 +44,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         webSocketClient.setMaxFrameRate(currentSettings.maxSendFps)
+        AppDiagnostics.setEnabled(currentSettings.debugModeEnabled)
     }
 
     fun connect(host: String, portText: String, pairingToken: String): String? {
@@ -70,7 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun submitDebugHand(detected: Boolean) {
-        check(BuildConfig.DEBUG) { "Debug input is unavailable in release builds" }
+        check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
         val landmarks = if (detected) List(21) { index ->
             LandmarkPoint(
                 x = 0.3f + (index % 5) * 0.08f,
@@ -93,7 +94,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun submitDebugCalibration() {
-        check(BuildConfig.DEBUG) { "Debug input is unavailable in release builds" }
+        check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
         fun marker(id: Int, x: Float, y: Float) = DetectedMarker(
             id = id,
             center = NormalizedPoint(x, y),
@@ -130,8 +131,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putFloat(KEY_PRESENCE_CONFIDENCE, settings.minPresenceConfidence)
             .putFloat(KEY_TRACKING_CONFIDENCE, settings.minTrackingConfidence)
             .putInt(KEY_MAX_SEND_FPS, settings.maxSendFps)
+            .putBoolean(KEY_DEBUG_MODE, settings.debugModeEnabled)
             .apply()
         webSocketClient.setMaxFrameRate(settings.maxSendFps)
+        AppDiagnostics.setEnabled(settings.debugModeEnabled)
         mutableSettings.value = settings
         return null
     }
@@ -155,6 +158,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
+        debugModeEnabled = preferences.getBoolean(KEY_DEBUG_MODE, BuildConfig.DEBUG),
     ).let { if (it.validate() == null) it else AppSettings() }
 
     companion object {
@@ -168,6 +172,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_PRESENCE_CONFIDENCE = "presence_confidence"
         private const val KEY_TRACKING_CONFIDENCE = "tracking_confidence"
         private const val KEY_MAX_SEND_FPS = "max_send_fps"
+        private const val KEY_DEBUG_MODE = "debug_mode"
         private const val DEFAULT_PORT = 8080
     }
 }

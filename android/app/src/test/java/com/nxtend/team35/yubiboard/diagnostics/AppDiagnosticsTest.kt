@@ -7,7 +7,10 @@ import org.junit.Test
 
 class AppDiagnosticsTest {
     @Before
-    fun reset() = AppDiagnostics.clear()
+    fun reset() {
+        AppDiagnostics.setEnabled(true)
+        AppDiagnostics.clear()
+    }
 
     @Test
     fun `records counters gauges and bounded events`() {
@@ -32,5 +35,21 @@ class AppDiagnosticsTest {
         AppDiagnostics.sampled("hand", "vision", "hand_result")
 
         assertEquals(1, AppDiagnostics.snapshot().events.size)
+    }
+
+    @Test
+    fun `disabled mode does not collect diagnostics`() {
+        AppDiagnostics.setEnabled(false)
+
+        AppDiagnostics.event("test", "hidden")
+        AppDiagnostics.increment("frames")
+        AppDiagnostics.gauge("mode", "tracking")
+        AppDiagnostics.metric("latency", 10)
+
+        val snapshot = AppDiagnostics.snapshot()
+        assertTrue(snapshot.events.isEmpty())
+        assertTrue(snapshot.counters.isEmpty())
+        assertTrue(snapshot.gauges.isEmpty())
+        assertTrue(snapshot.metrics.isEmpty())
     }
 }
