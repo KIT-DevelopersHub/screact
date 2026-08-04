@@ -11,4 +11,20 @@
     <string name="camera_permission_title">カメラの許可が必要です</string>
     <string name="camera_permission_message">手と画面マーカーを検出するため、背面カメラへのアクセスを許可してください。</string>
     <string name="grant_camera_permission">カメラを許可</string>
+    <string name="connect_to_pc">PCへ接続</string>
+    <string name="pc_ip_address">PCのIP</string>
+    <string name="pc_port">ポート</string>
+    <string name="pairing_code">6桁コード</string>
+    <string name="connect">接続</string>
+    <string name="disconnect">切断</string>
+    <string name="connection_disconnected">未接続</string>
+    <string name="connection_connecting">接続中</string>
+    <string name="connection_awaiting_ack">PCの応答待ち</string>
+    <string name="connection_connected">接続済み</string>
+    <string name="connection_reconnecting">%1$d秒後に再接続</string>
+    <string name="connection_error">接続エラー</string>
+    <string name="mode_tracking">通常撮影</string>
+    <string name="mode_calibration">位置合わせ撮影</string>
+    <string name="switch_to_tracking">通常撮影へ</string>
+    <string name="switch_to_calibration">位置合わせへ</string>
 </resources>

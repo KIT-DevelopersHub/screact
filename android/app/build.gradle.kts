@@ -8,6 +8,10 @@ android {
     namespace = "com.nxtend.team35.yubiboard"
     compileSdk = 36
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.nxtend.team35.yubiboard"
         minSdk = 24

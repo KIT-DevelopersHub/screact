@@ -55,6 +55,7 @@ class YubiBoardWebSocketClient(
             manuallyStopped = false
             desiredConfig = config
             reconnectAttempt = 0
+            heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
             webSocket?.cancel()
             openSocket(config, reconnecting = false)
