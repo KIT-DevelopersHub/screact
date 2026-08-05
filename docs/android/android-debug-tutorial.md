@@ -220,7 +220,7 @@ python -m unittest android/tools/tests/test_render_hand_video.py
 .\android\tools\android-debug.ps1 soak -DurationMinutes 10
 ```
 
-試験中に手の出し入れ、位置合わせ、画面回転、モック停止・再起動を混ぜる。`android/debug-results/device-日時/summary.md`で次を確認する。
+試験中に手の出し入れ、位置合わせ、モック停止・再起動を混ぜる。現在はMediaPipe解析中のActivity再生成を避けるため横画面固定なので、端末を回転させる試験は行わない。`android/debug-results/device-日時/summary.md`で次を確認する。
 
 - Crash／ANR 0件
 - PC平均受信15 fps以上
