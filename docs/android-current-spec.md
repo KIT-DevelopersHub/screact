@@ -7,8 +7,8 @@
 | 文書種別 | 現行実装仕様（As-Built Specification） |
 | 対象 | YubiBoard Androidアプリ |
 | アプリバージョン | `0.1.0`（`versionCode=1`） |
-| 実装基準コミット | `872aa5a` |
-| 作成日 | 2026-08-04 |
+| 実装基準コミット | `0ccff9a` |
+| 最終更新日 | 2026-08-05 |
 | 通信スキーマ | version 1 |
 | パッケージ | `com.nxtend.team35.yubiboard` |
 
@@ -52,11 +52,11 @@ flowchart LR
 
 | 区分 | 内容 | 現状 |
 | --- | --- | --- |
-| デモ必須 | カメラ許可、背面プレビュー、手指検出、WebSocket接続、最新フレーム送信 | 実装・自動検証済み |
-| デモ必須 | モックPCとの接続、接続状態表示、切断後の自動再接続 | 実装・ローカル通信確認済み |
-| デモ補助 | 骨格・マーカー重畳、fps・推論時間、手動モード切替 | 実装済み |
-| デモ補助 | ArUco 4点検出・安定化、検出設定変更 | 実装・単体検証済み |
-| 後続確認 | Android実機での表示整合、長時間性能、実PCアプリとの統合 | 未検証 |
+| デモ必須 | カメラ許可、背面プレビュー、手指検出、WebSocket接続、最新フレーム送信 | 実装・自動・実機検証済み |
+| デモ必須 | モックPCとの接続、接続状態表示、切断後の自動再接続 | 実装・実機通信確認済み |
+| デモ補助 | 骨格・マーカー重畳、fps・推論時間、手動モード切替 | 実装・実機表示確認済み |
+| デモ補助 | ArUco 4点検出・安定化、検出設定変更 | 実装・単体・実機検証済み |
+| 後続確認 | 長時間性能、実PCアプリとの統合、端末・照明条件を広げた精度評価 | 未検証 |
 
 ## 3. 動作環境と採用技術
 
@@ -204,8 +204,8 @@ stateDiagram-v2
     state "通常撮影 TRACKING" as TRACKING
     state "位置合わせ撮影 CALIBRATION" as CALIBRATION
 
-    TRACKING --> CALIBRATION: 手動で「位置合わせへ」
-    CALIBRATION --> TRACKING: 手動で「通常撮影へ」
+    TRACKING --> CALIBRATION: 手動で「位置合わせを開始」
+    CALIBRATION --> TRACKING: 手動で「手の追跡へ戻る」
     TRACKING --> CALIBRATION: hello_ack calibrationRequired=true
     CALIBRATION --> TRACKING: hello_ack calibrationRequired=false
     TRACKING --> CALIBRATION: control_message set_mode=calibration
@@ -312,19 +312,21 @@ flowchart TD
     Detect --> Filter[ID 10・11・12・13だけ残す]
     Filter --> Normalize[中心と4頂点を0〜1へ正規化]
     Normalize --> Four{4 IDが完全一致}
-    Four -->|いいえ| Reset[安定履歴を消去]
+    Four -->|いいえ| Missing{3フレーム連続で不正か}
+    Missing -->|いいえ| InvalidWait[有効履歴を保持して待機]
+    Missing -->|はい| Reset[安定履歴を消去]
     Four -->|はい| Layout{配置と面積が有効}
-    Layout -->|いいえ| Reset
-    Layout -->|はい| Movement{中心移動が各0.01以下}
-    Movement -->|いいえ| Wait[安定待ち]
-    Movement -->|はい| Frames{5フレーム連続}
-    Frames -->|いいえ| Wait
+    Layout -->|いいえ| Missing
+    Layout -->|はい| Movement{中心移動が各0.02以下}
+    Movement -->|いいえ| Restart[履歴を現在フレームから再開]
+    Movement -->|はい| Frames{有効な5フレームを蓄積}
+    Frames -->|いいえ| Progress[安定待ち n/5]
     Frames -->|はい| Stable[stable=true]
     Stable --> Overlay[黄色枠とIDを表示]
     Stable --> Send[最新マーカースロットへ格納]
 ```
 
-配置検証は、左右・上下関係が期待どおりであり、4中心から作る四角形の正規化面積が`0.05`以上であることを要求する。安定性は各IDの中心が履歴先頭からユークリッド距離`0.01`以内にある状態が5フレーム続くことで成立する。
+配置検証は端末の90度単位の回転に依存せず、ID 10、11、12、13が同じ向きの凸四角形を構成し、4中心から作る正規化面積が`0.01`以上であることを要求する。安定性は各IDの中心が履歴先頭からユークリッド距離`0.02`以内にある有効な5フレームの蓄積で成立する。1〜2フレームの一時的な欠落では有効履歴を保持し、3フレーム連続で4 IDまたは配置条件を満たさなければ履歴を消去する。
 
 ## 11. 接続仕様
 
@@ -565,7 +567,7 @@ Android Studioでは`android/`をプロジェクトルートとして開く。�
 | JVM単体テスト | JSON、未知フィールド、未検出形式 | 成功 |
 | JVM単体テスト | WebSocketのhello_ack前後とsessionId | 成功 |
 | JVM単体テスト | 追跡状態3回検出・300 ms喪失 | 成功 |
-| JVM単体テスト | ArUco 4 ID、5フレーム、移動・配置拒否 | 成功 |
+| JVM単体テスト | ArUco 4 ID、有効5フレーム、回転、揺れ・一時欠落許容、移動・不正配置拒否 | 成功 |
 | JVM単体テスト | debug診断イベント、カウンター、500件上限 | 成功 |
 | AndroidTestビルド | OpenCVとモデルassetのパッケージ確認テスト | APK生成成功 |
 | AndroidTest実行 | 実端末上でOpenCV初期化とasset読込 | ADBランナーから実行可能 |
@@ -585,7 +587,7 @@ journey
       PC側でhand_frame受信を確認: 5: 発表者
     section 位置合わせ
       位置合わせ撮影へ切替: 4: 発表者
-      ID 10から13を5フレーム映す: 4: 発表者
+      ID 10から13を映して安定待ち5/5を確認: 4: 発表者
       安定表示とmarkers受信を確認: 5: 発表者
     section 復旧
       PCサーバーを一時停止: 4: 発表者
@@ -594,14 +596,21 @@ journey
 
 モックサーバーの起動方法と具体的な操作は[`android/README.md`](../android/README.md)を参照すること。
 
-## 20. 未検証事項と既知の制約
+## 20. 検証状況と既知の制約
 
-### 20.1 未検証
+### 20.1 実機確認済み
 
-- Android実機でのカメラプレビューとOverlay座標の一致
-- 実端末でのMediaPipe・OpenCVネイティブライブラリ初期化
-- 実際の手、照明、端末角度に対する検出精度
-- 実マーカー4枚を使った安定判定と頂点順序
+2026-08-05のAndroid実機とモックPCを用いたUSB接続セッションで、次を確認した。
+
+- 背面カメラプレビューと手指・ArUco Overlayの表示
+- MediaPipeによる実際の手の検出と`hand_frame`送信
+- OpenCVによる実マーカーID 10〜13の検出
+- 端末を90度回転した配置で「安定待ち 1/5」から「安定」への遷移
+- 安定後の`calibration_markers`継続送信
+
+### 20.2 未検証
+
+- 複数機種、照明、距離、端末角度を横断した手・マーカー検出精度
 - 15〜20 fps、100〜150 ms目標の実測
 - 10分連続動作、発熱、メモリ、バッテリー消費
 - 実PCアプリとのペアリング、制御、再接続、座標受け渡し
@@ -609,7 +618,7 @@ journey
 
 上記を再現可能に測定する環境は実装済みだが、端末・照明・設置条件を伴う受入結果そのものは実機セッションごとに`android/debug-results/`へ記録する。
 
-### 20.2 既知の制約
+### 20.3 既知の制約
 
 - 1人・1アクティブハンドのみを対象とする。
 - 通常撮影と位置合わせ撮影は排他的である。

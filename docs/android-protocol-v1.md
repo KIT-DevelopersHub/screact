@@ -11,7 +11,7 @@ Androidは接続直後に既存要件どおり`hello`を送る。PCは5秒以内
 ## AndroidからPC
 
 - `hand_frame`: 検出ごとに増加する`frameId`、単調時刻、補正済み画像情報、0〜20の21点を送る。未検出時は`hand.detected=false`とする。
-- `calibration_markers`: ArUco ID、中心、時計回りの4頂点を正規化座標で送る。
+- `calibration_markers`: Android側で4 IDの配置と安定性を確認した後、ArUco ID、中心、時計回りの4頂点を正規化座標で送る。安定判定の進捗は端末UIだけに表示し、通信フィールドには含めない。
 - `heartbeat`: 5秒ごとに次の形式で送る。
 
 ```json
