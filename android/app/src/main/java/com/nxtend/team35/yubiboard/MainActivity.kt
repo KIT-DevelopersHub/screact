@@ -129,7 +129,8 @@ class MainActivity : ComponentActivity() {
                     cameraStatus = if (result.stable) {
                         "マーカー ${result.markers.size}/4・安定"
                     } else {
-                        "マーカー ${result.markers.size}/4・安定待ち"
+                        "マーカー ${result.markers.size}/4・安定待ち " +
+                            "${result.stableFrameCount}/${result.requiredStableFrames}"
                     }
                 }
             },

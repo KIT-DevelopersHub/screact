@@ -17,4 +17,6 @@ data class MarkerDetectionResult(
     val sourceHeight: Int,
     val markers: List<DetectedMarker>,
     val stable: Boolean,
+    val stableFrameCount: Int = 0,
+    val requiredStableFrames: Int = MarkerStabilityTracker.DEFAULT_REQUIRED_STABLE_FRAMES,
 )

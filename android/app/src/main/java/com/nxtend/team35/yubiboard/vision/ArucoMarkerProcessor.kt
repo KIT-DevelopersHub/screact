@@ -90,6 +90,8 @@ class ArucoMarkerProcessor(
                         sourceHeight = bitmap.height,
                         markers = markers,
                         stable = isStable,
+                        stableFrameCount = stabilityTracker.stableFrameCount,
+                        requiredStableFrames = MarkerStabilityTracker.DEFAULT_REQUIRED_STABLE_FRAMES,
                     ),
                 )
             } finally {
