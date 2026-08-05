@@ -2,6 +2,7 @@ package com.nxtend.team35.yubiboard
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Rule
@@ -13,6 +14,13 @@ class MainActivityComposeTest {
 
     @Test
     fun primaryConnectionActionAndRuntimeModeSettingAreVisible() {
+        // OEM backup/restore may preserve the last experience preference after reinstalling.
+        if (composeRule.onAllNodesWithText("デバッグへ戻る").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
+            composeRule.onNodeWithText("接続する").assertIsDisplayed()
+            composeRule.onNodeWithText("デバッグへ戻る").performClick()
+        }
+
         composeRule.onNodeWithText("PCへ接続").assertIsDisplayed()
         composeRule.onNodeWithText("設定").performClick()
 

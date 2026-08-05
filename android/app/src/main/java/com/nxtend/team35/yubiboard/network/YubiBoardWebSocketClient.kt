@@ -8,11 +8,13 @@ import com.nxtend.team35.yubiboard.protocol.HandFrameMessage
 import com.nxtend.team35.yubiboard.protocol.HandPayload
 import com.nxtend.team35.yubiboard.protocol.HeartbeatMessage
 import com.nxtend.team35.yubiboard.protocol.HelloAckMessage
+import com.nxtend.team35.yubiboard.protocol.HelloErrorMessage
 import com.nxtend.team35.yubiboard.protocol.HelloMessage
 import com.nxtend.team35.yubiboard.protocol.MarkerPayload
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
 import com.nxtend.team35.yubiboard.protocol.SCHEMA_VERSION
 import com.nxtend.team35.yubiboard.protocol.SourceInfo
+import com.nxtend.team35.yubiboard.protocol.CalibrationStatusMessage
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import okhttp3.OkHttpClient
@@ -32,6 +34,7 @@ class YubiBoardWebSocketClient(
     private val clientVersion: String,
     private val onStateChanged: (ConnectionSnapshot) -> Unit,
     private val onModeChanged: (CaptureMode) -> Unit,
+    private val onCalibrationStatus: (CalibrationStatusMessage) -> Unit = {},
     private val onLog: (String) -> Unit = {},
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(10, TimeUnit.SECONDS)
@@ -50,7 +53,9 @@ class YubiBoardWebSocketClient(
     private var reconnectAttempt = 0
     private var heartbeatTask: ScheduledFuture<*>? = null
     private var reconnectTask: ScheduledFuture<*>? = null
+    private var countdownTask: ScheduledFuture<*>? = null
     private var manuallyStopped = true
+    private var pendingErrorCode: ConnectionErrorCode? = null
 
     init {
         scheduler.scheduleAtFixedRate(::flushLatestHand, 0, SENDER_TICK_MS, TimeUnit.MILLISECONDS)
@@ -75,6 +80,7 @@ class YubiBoardWebSocketClient(
             reconnectAttempt = 0
             heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
+            countdownTask?.cancel(false)
             webSocket?.cancel()
             openSocket(config, reconnecting = false)
         }
@@ -105,13 +111,26 @@ class YubiBoardWebSocketClient(
             latestCalibration.set(null)
             heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
+            countdownTask?.cancel(false)
             webSocket?.close(NORMAL_CLOSE_CODE, "user disconnect")
             webSocket = null
             publish(ConnectionSnapshot(ConnectionStatus.DISCONNECTED))
         }
     }
 
+    fun retryNow() {
+        synchronized(lock) {
+            val config = desiredConfig ?: return
+            if (manuallyStopped) return
+            reconnectTask?.cancel(false)
+            countdownTask?.cancel(false)
+            webSocket?.cancel()
+            openSocket(config, reconnecting = true)
+        }
+    }
+
     private fun openSocket(config: ConnectionConfig, reconnecting: Boolean) {
+        countdownTask?.cancel(false)
         AppDiagnostics.event(
             "network",
             if (reconnecting) "reconnect_started" else "socket_started",
@@ -133,6 +152,7 @@ class YubiBoardWebSocketClient(
                         AppDiagnostics.increment("network.ack_timeouts")
                         AppDiagnostics.event("network", "hello_ack_timeout")
                         onLog("hello_ack timeout")
+                        pendingErrorCode = ConnectionErrorCode.ACK_TIMEOUT
                         listener.socket?.cancel()
                     }
                 }
@@ -158,6 +178,18 @@ class YubiBoardWebSocketClient(
             return
         }
         val result = latestHand.getAndSet(null) ?: return
+        val hadOutOfRange = result.detected && result.landmarks.any {
+            it.x !in 0f..1f || it.y !in 0f..1f
+        }
+        if (hadOutOfRange) {
+            AppDiagnostics.increment("network.landmarks_clamped")
+            AppDiagnostics.sampled(
+                "landmarks_clamped",
+                "network",
+                "landmarks_clamped",
+                mapOf("rawIndexTip" to result.landmarks.getOrNull(8)),
+            )
+        }
         val message = HandFrameMessage(
             sessionId = activeSession,
             frameId = frameId.incrementAndGet(),
@@ -168,7 +200,9 @@ class YubiBoardWebSocketClient(
                     detected = true,
                     handedness = result.handedness,
                     handednessScore = result.handednessScore,
-                    landmarks = result.landmarks.map { listOf(it.x, it.y, it.z) },
+                    landmarks = result.landmarks.map {
+                        listOf(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f), it.z)
+                    },
                 )
             } else {
                 HandPayload(detected = false)
@@ -294,6 +328,45 @@ class YubiBoardWebSocketClient(
                 startHeartbeat(socket, message.sessionId)
             }
 
+            is HelloErrorMessage -> synchronized(lock) {
+                if (message.schemaVersion != SCHEMA_VERSION || webSocket !== socket) return
+                val errorCode = when (message.code) {
+                    "pairing_code_mismatch" -> ConnectionErrorCode.PAIRING_CODE_MISMATCH
+                    "unsupported_version" -> ConnectionErrorCode.UNSUPPORTED_VERSION
+                    "server_busy" -> ConnectionErrorCode.SERVER_BUSY
+                    else -> ConnectionErrorCode.UNKNOWN
+                }
+                AppDiagnostics.event(
+                    "network",
+                    "hello_error",
+                    mapOf("code" to message.code, "retryable" to message.retryable),
+                )
+                if (message.retryable) {
+                    pendingErrorCode = errorCode
+                    socket.cancel()
+                } else {
+                    manuallyStopped = true
+                    desiredConfig = null
+                    sessionId = null
+                    socket.close(NORMAL_CLOSE_CODE, "hello rejected")
+                    webSocket = null
+                    publish(ConnectionSnapshot(ConnectionStatus.ERROR, errorCode = errorCode))
+                }
+            }
+
+            is CalibrationStatusMessage -> synchronized(lock) {
+                if (message.schemaVersion != SCHEMA_VERSION || message.sessionId != sessionId) {
+                    AppDiagnostics.increment("network.ignored_calibration_status")
+                    return
+                }
+                AppDiagnostics.event(
+                    "network",
+                    "calibration_status",
+                    mapOf("status" to message.status, "reason" to message.reason),
+                )
+                onCalibrationStatus(message)
+            }
+
             is ControlMessage -> synchronized(lock) {
                 if (message.sessionId != sessionId) {
                     AppDiagnostics.increment("network.ignored_controls")
@@ -327,13 +400,16 @@ class YubiBoardWebSocketClient(
             AppDiagnostics.event("network", "socket_ended", mapOf("detail" to detail))
             sessionId = null
             heartbeatTask?.cancel(false)
-            scheduleReconnect(detail)
+            val errorCode = pendingErrorCode ?: ConnectionErrorCode.UNREACHABLE
+            pendingErrorCode = null
+            scheduleReconnect(detail, errorCode)
         }
     }
 
-    private fun scheduleReconnect(detail: String) {
+    private fun scheduleReconnect(detail: String, errorCode: ConnectionErrorCode) {
         val config = desiredConfig ?: return
         val delayMs = RETRY_DELAYS_MS[reconnectAttempt.coerceAtMost(RETRY_DELAYS_MS.lastIndex)]
+        val deadlineMs = monotonicMs() + delayMs
         reconnectAttempt++
         AppDiagnostics.gauge("network.reconnect_attempt", reconnectAttempt)
         AppDiagnostics.event(
@@ -346,9 +422,30 @@ class YubiBoardWebSocketClient(
                 status = ConnectionStatus.RECONNECTING,
                 retryInSeconds = (delayMs / 1_000).toInt(),
                 detail = detail,
+                errorCode = errorCode,
             ),
         )
         reconnectTask?.cancel(false)
+        countdownTask?.cancel(false)
+        countdownTask = scheduler.scheduleAtFixedRate(
+            {
+                synchronized(lock) {
+                    if (manuallyStopped || desiredConfig != config) return@synchronized
+                    val remaining = ((deadlineMs - monotonicMs()).coerceAtLeast(0) + 999) / 1_000
+                    publish(
+                        ConnectionSnapshot(
+                            status = ConnectionStatus.RECONNECTING,
+                            retryInSeconds = remaining.toInt(),
+                            detail = detail,
+                            errorCode = errorCode,
+                        ),
+                    )
+                }
+            },
+            1,
+            1,
+            TimeUnit.SECONDS,
+        )
         reconnectTask = scheduler.schedule(
             {
                 synchronized(lock) {

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('doctor', 'build', 'install', 'usb', 'lan', 'test', 'start', 'soak', 'all')]
+    [ValidateSet('doctor', 'build', 'install', 'usb', 'lan', 'test', 'start', 'production', 'soak', 'all')]
     [string]$Action = 'doctor',
 
     [string]$Serial = '',
@@ -91,7 +91,7 @@ function Invoke-Doctor {
 function Invoke-Build {
     Push-Location $androidRoot
     try {
-        & $gradle testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+        & $gradle testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
         if ($LASTEXITCODE -ne 0) { throw 'Gradle verification failed.' }
     } finally {
         Pop-Location
@@ -115,12 +115,28 @@ function Install-App {
     Resolve-Device
     if ($ResetAppData) {
         $installed = (Invoke-Adb shell pm list packages $packageName | Out-String).Trim()
-        if ($installed) { Invoke-Adb shell pm clear $packageName | Out-Null }
+        if ($installed) {
+            $prefix = if ([string]::IsNullOrWhiteSpace($Serial)) { @() } else { @('-s', $Serial) }
+            $clearOutput = & $adb @prefix shell pm clear $packageName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'pm clearが端末に拒否されたため、対象debugアプリを再導入して初期化します。'
+                $uninstallOutput = & $adb @prefix uninstall $packageName 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "アプリデータの初期化に失敗しました: $($clearOutput -join ' ') / $($uninstallOutput -join ' ')"
+                }
+            }
+        }
     }
     Build-DebugApks
     $apk = Join-Path $androidRoot 'app\build\outputs\apk\debug\app-debug.apk'
     Install-Apk $apk
-    if ($GrantCamera) { Invoke-Adb shell pm grant $packageName android.permission.CAMERA }
+    if ($GrantCamera) {
+        $prefix = if ([string]::IsNullOrWhiteSpace($Serial)) { @() } else { @('-s', $Serial) }
+        $grantOutput = & $adb @prefix shell pm grant $packageName android.permission.CAMERA 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'ADBからカメラ権限を付与できません。端末上の権限ダイアログで許可してください。'
+        }
+    }
 }
 
 function Enable-UsbRoute {
@@ -142,6 +158,17 @@ function Show-LanRoute {
 function Start-App {
     Resolve-Device
     Invoke-Adb shell am start -n "$packageName/.MainActivity" | Out-Host
+}
+
+function Start-ProductionCheck {
+    Install-App
+    Enable-UsbRoute
+    Start-App
+    Write-Host ''
+    Write-Host 'Androidのデバッグ画面から「設定」→本番モード、または「診断」→「本番状態ラボ」を選択してください。'
+    Write-Host '実通信の本番フローは別ターミナルで次を実行します:'
+    Write-Host ".\android\tools\mock-websocket-server.ps1 -Port $Port -Scenario production-happy"
+    Write-Host "Android接続値: host=127.0.0.1 port=$Port code=123456"
 }
 
 function Invoke-InstrumentedTest {
@@ -251,6 +278,7 @@ switch ($Action) {
     'lan' { Show-LanRoute }
     'test' { Invoke-InstrumentedTest }
     'start' { Start-App }
+    'production' { Start-ProductionCheck }
     'soak' { Invoke-Soak }
     'all' {
         Invoke-Doctor

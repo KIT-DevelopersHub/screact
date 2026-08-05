@@ -2,7 +2,10 @@ package com.nxtend.team35.yubiboard
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -63,6 +66,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import com.nxtend.team35.yubiboard.camera.CameraSession
+import com.nxtend.team35.yubiboard.camera.CameraProfile
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
@@ -71,6 +75,12 @@ import com.nxtend.team35.yubiboard.settings.AppSettings
 import com.nxtend.team35.yubiboard.vision.ArucoMarkerProcessor
 import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
+import com.nxtend.team35.yubiboard.vision.ProductionOverlayView
+import com.nxtend.team35.yubiboard.ui.CameraUiState
+import com.nxtend.team35.yubiboard.ui.ExperienceMode
+import com.nxtend.team35.yubiboard.ui.ProductionScreen
+import com.nxtend.team35.yubiboard.ui.ProductionUiState
+import com.nxtend.team35.yubiboard.ui.ProductionStateLab
 
 class MainActivity : ComponentActivity() {
     private lateinit var cameraSession: CameraSession
@@ -79,9 +89,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var viewModel: MainViewModel
     private lateinit var previewView: PreviewView
     private lateinit var debugOverlay: DebugOverlayView
+    private lateinit var productionOverlay: ProductionOverlayView
 
     private var cameraStatus by mutableStateOf("カメラを起動中")
     private var cameraPermissionGranted by mutableStateOf(false)
+    private var cameraPermissionPermanentlyDenied by mutableStateOf(false)
+    private var cameraStarted = false
     private var transientMessage by mutableStateOf<String?>(null)
     @Volatile
     private var currentMode: CaptureMode = CaptureMode.TRACKING
@@ -105,7 +118,15 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         cameraPermissionGranted = granted
-        if (granted) startCamera() else cameraStatus = "カメラ権限が必要です"
+        cameraPermissionPermanentlyDenied = !granted && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
+        if (granted) {
+            startCamera()
+        } else {
+            cameraStatus = "カメラ権限が必要です"
+            viewModel.updateCameraState(
+                if (cameraPermissionPermanentlyDenied) CameraUiState.PERMISSION_DENIED else CameraUiState.PERMISSION_REQUIRED,
+            )
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,14 +139,16 @@ class MainActivity : ComponentActivity() {
             contentDescription = "背面カメラのプレビュー"
         }
         debugOverlay = DebugOverlayView(this)
+        productionOverlay = ProductionOverlayView(this)
 
         val initialSettings = viewModel.currentSettings
         handLandmarkerProcessor = createHandProcessor(initialSettings)
         arucoMarkerProcessor = ArucoMarkerProcessor(
             onResult = { result ->
-                if (result.stable) viewModel.submitCalibration(result)
+                viewModel.submitCalibration(result)
                 runOnUiThread {
                     debugOverlay.setMarkerResult(result)
+                    productionOverlay.setMarkerResult(result)
                     cameraStatus = if (result.stable) {
                         "マーカー ${result.markers.size}/4・安定"
                     } else {
@@ -142,10 +165,22 @@ class MainActivity : ComponentActivity() {
             context = this,
             lifecycleOwner = this,
             previewView = previewView,
-            onReady = { cameraStatus = "カメラ準備完了" },
+            onReady = {
+                cameraStarted = true
+                cameraStatus = "カメラ準備完了"
+                viewModel.updateCameraState(CameraUiState.READY)
+            },
             onError = {
                 cameraStatus = "カメラを起動できません"
-                cameraPermissionGranted = false
+                cameraStarted = false
+                viewModel.updateCameraState(CameraUiState.ERROR)
+            },
+            onFrameInfo = { info ->
+                AppDiagnostics.event(
+                    "camera",
+                    "production_frame_info",
+                    mapOf("actual" to "${info.actualWidth}x${info.actualHeight}"),
+                )
             },
         )
         cameraSession.setFrameConsumer { image ->
@@ -157,6 +192,10 @@ class MainActivity : ComponentActivity() {
         }
 
         viewModel.mode.observe(this) { mode -> currentMode = mode }
+        viewModel.calibrationReset.observe(this) {
+            arucoMarkerProcessor.reset()
+            productionOverlay.clear()
+        }
         viewModel.log.observe(this) { message ->
             if (!message.isNullOrBlank()) transientMessage = message
         }
@@ -179,41 +218,83 @@ class MainActivity : ComponentActivity() {
                 )
                 val mode by viewModel.mode.observeAsState(CaptureMode.TRACKING)
                 val settings by viewModel.settings.observeAsState(initialSettings)
-                YubiBoardScreen(
-                    previewView = previewView,
-                    debugOverlay = debugOverlay,
-                    cameraStatus = cameraStatus,
-                    cameraPermissionGranted = cameraPermissionGranted,
-                    connection = connection,
-                    mode = mode,
-                    settings = settings,
-                    savedHost = viewModel.savedHost,
-                    savedPort = viewModel.savedPort,
-                    transientMessage = transientMessage,
-                    onRequestCameraPermission = {
-                        permissionLauncher.launch(Manifest.permission.CAMERA)
-                    },
-                    onConnect = { host, port, token ->
-                        transientMessage = null
-                        viewModel.connect(host, port, token).also { error ->
-                            if (error != null) transientMessage = error
-                        }
-                    },
-                    onDisconnect = viewModel::disconnect,
-                    onModeChange = viewModel::setModeManually,
-                    onApplySettings = ::applySettings,
-                    onFakeHand = viewModel::submitDebugHand,
-                    onFakeMarkers = viewModel::submitDebugCalibration,
-                    onClearDiagnostics = AppDiagnostics::clear,
-                    onExportDiagnostics = {
-                        diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
-                    },
-                )
+                val productionState by viewModel.productionState.observeAsState(ProductionUiState())
+                if (settings.debugModeEnabled && BuildConfig.DEBUG) {
+                    YubiBoardScreen(
+                        previewView = previewView,
+                        debugOverlay = debugOverlay,
+                        cameraStatus = cameraStatus,
+                        cameraPermissionGranted = cameraPermissionGranted,
+                        connection = connection,
+                        mode = mode,
+                        settings = settings,
+                        savedHost = viewModel.savedHost,
+                        savedPort = viewModel.savedPort,
+                        transientMessage = transientMessage,
+                        onRequestCameraPermission = {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        onConnect = { host, port, token ->
+                            transientMessage = null
+                            viewModel.connect(host, port, token).also { error ->
+                                if (error != null) transientMessage = error
+                            }
+                        },
+                        onDisconnect = viewModel::disconnect,
+                        onModeChange = viewModel::setModeManually,
+                        onApplySettings = ::applySettings,
+                        onFakeHand = viewModel::submitDebugHand,
+                        onFakeMarkers = viewModel::submitDebugCalibration,
+                        onClearDiagnostics = AppDiagnostics::clear,
+                        onExportDiagnostics = {
+                            diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
+                        },
+                    )
+                } else {
+                    ProductionScreen(
+                        state = productionState,
+                        savedHost = viewModel.savedHost,
+                        savedPort = viewModel.savedPort,
+                        cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
+                        previewContent = {
+                            Box(Modifier.fillMaxSize()) {
+                                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                                AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
+                            }
+                        },
+                        onRequestCameraPermission = {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        onOpenSystemSettings = ::openAppSettings,
+                        onRetryCamera = ::startCamera,
+                        onConnect = viewModel::connect,
+                        onCancelConnection = viewModel::disconnect,
+                        onDisconnect = viewModel::disconnect,
+                        onRetryNow = viewModel::retryNow,
+                        onChangeConnectionSettings = viewModel::changeConnectionSettings,
+                        onOpenDebug = { viewModel.setExperienceMode(ExperienceMode.DEBUG) },
+                    )
+                }
             }
         }
 
         cameraPermissionGranted = hasCameraPermission()
-        if (cameraPermissionGranted) startCamera() else cameraStatus = "カメラ権限が必要です"
+        if (cameraPermissionGranted) {
+            startCamera()
+        } else {
+            cameraStatus = "カメラ権限が必要です"
+            viewModel.updateCameraState(CameraUiState.PERMISSION_REQUIRED)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val granted = hasCameraPermission()
+        if (granted && !cameraPermissionGranted) {
+            cameraPermissionGranted = true
+            cameraPermissionPermanentlyDenied = false
+            startCamera()
+        }
     }
 
     override fun onDestroy() {
@@ -227,9 +308,29 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
 
     private fun startCamera() {
+        if (!hasCameraPermission()) {
+            viewModel.updateCameraState(CameraUiState.PERMISSION_REQUIRED)
+            return
+        }
         cameraStatus = "手を探索中"
+        cameraStarted = false
+        viewModel.updateCameraState(CameraUiState.STARTING)
         val settings = viewModel.currentSettings
-        cameraSession.start(Size(settings.analysisWidth, settings.analysisHeight))
+        val profile = if (settings.debugModeEnabled && BuildConfig.DEBUG) {
+            CameraProfile.from(Size(settings.analysisWidth, settings.analysisHeight))
+        } else {
+            CameraProfile.HD_720
+        }
+        cameraSession.start(profile, allowFallback = !profile.debugOnly)
+    }
+
+    private fun openAppSettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", packageName, null),
+            ),
+        )
     }
 
     private fun createHandProcessor(settings: AppSettings) = HandLandmarkerProcessor(
@@ -241,6 +342,7 @@ class MainActivity : ComponentActivity() {
             viewModel.submitHand(result)
             runOnUiThread {
                 debugOverlay.setHandResult(result)
+                productionOverlay.setHandResult(result)
                 cameraStatus = if (result.detected) {
                     "手を検出・%.1f fps・%d ms".format(result.framesPerSecond, result.inferenceTimeMs)
                 } else {
@@ -263,9 +365,10 @@ class MainActivity : ComponentActivity() {
         if (detectorChanged) replaceHandProcessor(candidate)
         if (cameraPermissionGranted &&
             (previous.analysisWidth != candidate.analysisWidth ||
-                previous.analysisHeight != candidate.analysisHeight)
+                previous.analysisHeight != candidate.analysisHeight ||
+                previous.debugModeEnabled != candidate.debugModeEnabled)
         ) {
-            cameraSession.start(Size(candidate.analysisWidth, candidate.analysisHeight))
+            startCamera()
         }
         transientMessage = if (candidate.debugModeEnabled) {
             "デバッグモードを有効にしました"
@@ -311,6 +414,7 @@ private fun YubiBoardScreen(
 ) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showDiagnostics by rememberSaveable { mutableStateOf(false) }
+    var showStateLab by rememberSaveable { mutableStateOf(false) }
     var host by rememberSaveable { mutableStateOf(savedHost.ifBlank { "127.0.0.1" }) }
     var port by rememberSaveable { mutableStateOf(savedPort.toString()) }
     var token by rememberSaveable { mutableStateOf("") }
@@ -380,7 +484,11 @@ private fun YubiBoardScreen(
             onFakeMarkers = onFakeMarkers,
             onClear = onClearDiagnostics,
             onExport = onExportDiagnostics,
+            onOpenStateLab = { showDiagnostics = false; showStateLab = true },
         )
+    }
+    if (showStateLab && settings.debugModeEnabled) {
+        ProductionStateLab(onDismiss = { showStateLab = false })
     }
 }
 
@@ -578,6 +686,11 @@ private fun SettingsDialog(
                 Text("解析解像度", fontWeight = FontWeight.SemiBold)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
+                        selected = draft.analysisWidth == 1280,
+                        onClick = { draft = draft.copy(analysisWidth = 1280, analysisHeight = 720) },
+                        label = { Text("1280 × 720") },
+                    )
+                    FilterChip(
                         selected = draft.analysisWidth == 640,
                         onClick = { draft = draft.copy(analysisWidth = 640, analysisHeight = 480) },
                         label = { Text("640 × 480") },
@@ -586,6 +699,11 @@ private fun SettingsDialog(
                         selected = draft.analysisWidth == 960,
                         onClick = { draft = draft.copy(analysisWidth = 960, analysisHeight = 540) },
                         label = { Text("960 × 540") },
+                    )
+                    FilterChip(
+                        selected = draft.analysisWidth == 1920,
+                        onClick = { draft = draft.copy(analysisWidth = 1920, analysisHeight = 1080) },
+                        label = { Text("1920 × 1080（比較用）") },
                     )
                 }
 
@@ -646,6 +764,7 @@ private fun DiagnosticsDialog(
     onFakeMarkers: () -> Unit,
     onClear: () -> Unit,
     onExport: () -> Unit,
+    onOpenStateLab: () -> Unit,
 ) {
     var output by remember { mutableStateOf(AppDiagnostics.format()) }
     fun refresh() { output = AppDiagnostics.format() }
@@ -660,6 +779,7 @@ private fun DiagnosticsDialog(
                     OutlinedButton(onClick = { refresh() }) { Text("更新") }
                     OutlinedButton(onClick = { onClear(); refresh() }) { Text("消去") }
                     OutlinedButton(onClick = onExport) { Text("JSONL保存") }
+                    OutlinedButton(onClick = onOpenStateLab) { Text("本番状態ラボ") }
                 }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -711,13 +831,13 @@ private fun connectionColor(status: ConnectionStatus): Color = when (status) {
 }
 
 private val YubiBoardColors = darkColorScheme(
-    primary = Color(0xFF67E6C4),
-    onPrimary = Color(0xFF00382D),
-    secondary = Color(0xFFFFD166),
-    tertiary = Color(0xFFFFB59F),
-    background = Color(0xFF071316),
-    surface = Color(0xFF102226),
-    surfaceVariant = Color(0xFF24383D),
+    primary = Color(0xFFF1F1F1),
+    onPrimary = Color(0xFF181818),
+    secondary = Color(0xFFCECECE),
+    tertiary = Color(0xFFBDBDBD),
+    background = Color(0xFF101010),
+    surface = Color(0xFF1B1B1B),
+    surfaceVariant = Color(0xFF303030),
 )
 
 @Composable

@@ -29,6 +29,8 @@ object ProtocolCodec {
         return when (messageType) {
             "hello_ack" -> json.decodeFromString<HelloAckMessage>(text)
             "control_message" -> json.decodeFromString<ControlMessage>(text)
+            "hello_error" -> json.decodeFromString<HelloErrorMessage>(text)
+            "calibration_status" -> json.decodeFromString<CalibrationStatusMessage>(text)
             else -> null
         }
     }

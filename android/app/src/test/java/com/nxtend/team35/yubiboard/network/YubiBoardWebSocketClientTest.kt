@@ -82,6 +82,117 @@ class YubiBoardWebSocketClientTest {
         }
     }
 
+    @Test
+    fun `non retryable hello error is exposed without reconnecting`() {
+        val server = MockWebServer()
+        val errorReceived = CountDownLatch(1)
+        val serverClosed = CountDownLatch(1)
+        val serverSocket = AtomicReference<WebSocket>()
+        val lastState = AtomicReference<ConnectionSnapshot>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSocket.set(webSocket)
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        if (text.contains("\"messageType\":\"hello\"")) {
+                            webSocket.send(
+                                """{"schemaVersion":1,"messageType":"hello_error","code":"pairing_code_mismatch","retryable":false}""",
+                            )
+                        }
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        serverClosed.countDown()
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {
+                lastState.set(it)
+                if (it.status == ConnectionStatus.ERROR) errorReceived.countDown()
+            },
+            onModeChanged = {},
+        )
+        try {
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, "123456"))
+            assertTrue(errorReceived.await(2, TimeUnit.SECONDS))
+            assertEquals(ConnectionErrorCode.PAIRING_CODE_MISMATCH, lastState.get().errorCode)
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            serverClosed.await(2, TimeUnit.SECONDS)
+            client.close()
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `out of range landmarks are clamped at the network boundary`() {
+        val server = MockWebServer()
+        val handReceived = CountDownLatch(1)
+        val serverClosed = CountDownLatch(1)
+        val serverSocket = AtomicReference<WebSocket>()
+        val handJson = AtomicReference<String>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSocket.set(webSocket)
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        if (text.contains("\"messageType\":\"hello\"")) {
+                            webSocket.send(
+                                """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s-clamp","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":false}""",
+                            )
+                        } else if (text.contains("\"messageType\":\"hand_frame\"")) {
+                            handJson.set(text)
+                            handReceived.countDown()
+                        }
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        serverClosed.countDown()
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {},
+            onModeChanged = {},
+        )
+        try {
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, "123456"))
+            Thread.sleep(150)
+            client.submitHand(
+                sampleHand().copy(
+                    landmarks = List(21) { LandmarkPoint(-0.2f, 1.3f, -0.01f) },
+                ),
+            )
+            assertTrue(handReceived.await(2, TimeUnit.SECONDS))
+            val encoded = handJson.get()
+            assertTrue(encoded.contains("[0.0,1.0,-0.01]"))
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            serverClosed.await(2, TimeUnit.SECONDS)
+            client.close()
+            server.shutdown()
+        }
+    }
+
     private fun sampleHand() = HandDetectionResult(
         capturedAtMonotonicMs = 100,
         sourceWidth = 640,
