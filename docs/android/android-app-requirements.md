@@ -8,8 +8,11 @@
 
 ## 関連文書
 
-- [全体要件定義書](./system-requirements.md)
-- [デスクトップアプリ（PCアプリ）要件定義書](./desktop-app-requirements.md)
+- [全体要件定義書](../system/system-requirements.md)
+- [デスクトップアプリ（PCアプリ）要件定義書](../desktop/desktop-app-requirements.md)
+- [Android UI要件定義書](./android-ui-requirements.md)
+- [Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md)
+- [Android本番UI・処理変更計画](./android-production-ui-change-plan.md)
 
 
 ## 1. 文書の対象
@@ -171,7 +174,7 @@ flowchart TB
 
 ### 4.1 カメラ入力
 
-Androidのカメラ画像取得には、CameraXのImageAnalysisを使用する。初期設定候補は以下とする。
+Androidのカメラ画像取得には、CameraXのImageAnalysisを使用する。解像度選択と画面表示の詳細は[Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md)を正本とし、初期値は以下とする。
 
 
 | 項目 | 初期値 |
@@ -179,7 +182,7 @@ Androidのカメラ画像取得には、CameraXのImageAnalysisを使用する�
 | 使用カメラ | 背面カメラ |
 | カメラフレームレート | 30 fpsを目標 |
 | 骨格検知レート | 15～20 fps以上を目標 |
-| 解析解像度 | 640×480または960×540から検証 |
+| 解析解像度 | 1280×720を第一候補、960×540、640×480へ起動時フォールバック |
 | バックプレッシャー | 最新フレーム優先 |
 | 古いフレーム | 処理待ちとして蓄積しない |
 
@@ -583,6 +586,8 @@ AndroidアプリまたはPC側ログへ渡す情報として、少なくとも�
 | NFR-004 | 遅延時は全フレームの順次処理より最新状態を優先する。 |
 | NFR-005 | 10分以上の連続動作で著しい性能低下や操作不能が発生しないこと。 |
 | NFR-006 | Android端末の温度上昇による継続的な大幅性能低下を避けること。 |
+| NFR-007 | CameraXへの要求解像度と実解析解像度を区別し、受入判定には実解析解像度を使用すること。 |
+| NFR-008 | Preview、ImageAnalysis、Overlayが同じ画角とCropRectを使用すること。 |
 
 **図31　全体遅延の内訳**
 
@@ -658,10 +663,12 @@ flowchart TB
 | AC-007 | Android端末が操作対象の手について21点の骨格座標を取得できること。 |
 | AC-009 | Android側で手を見失った場合、PCが未検出状態を認識できること。 |
 | AC-020 | 10分以上連続して利用してもシステムが停止しないこと。 |
+| AC-021 | 1280×720を第一候補として起動し、端末非対応時は定義済みプロファイルへフォールバックできること。 |
+| AC-022 | 実解析解像度で10分連続動作し、PC側の平均受信レートが15 fps以上であること。 |
 
 ## 16. 未確定事項
 
-Android MVPで確定したArUco ID・表示位置・安定フレーム数・中心移動許容値は本文へ反映し、未確定事項から除外した。
+Android MVPで確定したArUco ID・表示位置・安定フレーム数・中心移動許容値は本文へ反映し、未確定事項から除外した。解析解像度は[Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md)で確定した。
 
 
 | ID | 未確定事項 |
@@ -669,7 +676,6 @@ Android MVPで確定したArUco ID・表示位置・安定フレーム数・中�
 | TBD-001 | システムの正式名称 |
 | TBD-002 | 対応するAndroidの最低バージョン |
 | TBD-003 | 対応するAndroid端末の最低性能 |
-| TBD-004 | Android側の解析解像度 |
 | TBD-005 | 骨格検知フレームレート |
 | TBD-006 | PCへの最低送信フレームレート |
 | TBD-007 | 許容可能な全体遅延 |

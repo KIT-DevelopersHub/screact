@@ -136,13 +136,13 @@ AndroidアプリからPCへ送信する主なデータは以下です。
 
 ```text
 docs/
-├─ android-current-spec.md       # Androidアプリ現行仕様書
-├─ android-debug-tutorial.md     # Android実機デバッグ手順
-├─ android-protocol-v1.md        # Android通信プロトコル
-├─ android-app-requirements.md   # Androidアプリ要件定義書
-├─ desktop-app-requirements.md   # デスクトップアプリ要件定義書
-└─ system-requirements.md        # システム全体要件定義書
+├─ README.md                     # 文書索引と編集ルール
+├─ system/                       # システム全体の要件
+├─ android/                      # Androidの要件・仕様・計画・手順
+└─ desktop/                      # デスクトップアプリの要件・仕様・計画
 ```
+
+文書一覧は[`docs/README.md`](./docs/README.md)を参照してください。
 
 ## 現在の状態
 

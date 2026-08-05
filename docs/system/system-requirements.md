@@ -8,8 +8,8 @@
 
 ## 関連文書
 
-- [Androidアプリ要件定義書](./android-app-requirements.md)
-- [デスクトップアプリ（PCアプリ）要件定義書](./desktop-app-requirements.md)
+- [Androidアプリ要件定義書](../android/android-app-requirements.md)
+- [デスクトップアプリ（PCアプリ）要件定義書](../desktop/desktop-app-requirements.md)
 
 
 ## 1. 文書情報

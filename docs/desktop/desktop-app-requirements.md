@@ -12,8 +12,8 @@
 
 ## 関連文書
 
-- [全体要件定義書](./system-requirements.md)
-- [Androidアプリ要件定義書](./android-app-requirements.md)
+- [全体要件定義書](../system/system-requirements.md)
+- [Androidアプリ要件定義書](../android/android-app-requirements.md)
 - ADR-0001「Windowsデスクトップアプリの技術スタック選定」（2026-07-14、Status: Proposed）
 
 
