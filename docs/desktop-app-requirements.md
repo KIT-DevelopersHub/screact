@@ -205,7 +205,7 @@ sequenceDiagram
     PC-->>User: Android接続済みを表示
     User->>PC: 画面位置合わせを開始
     PC->>Screen: 4つのArUcoマーカーを表示
-    loop 4 IDが安定して検出されるまで
+    loop Androidで有効5フレームが安定するまで
         Camera-->>Android: カメラ画像
         Android->>Android: ArUcoマーカー検出
         Android->>Android: ID・中心・頂点座標取得
@@ -565,7 +565,7 @@ flowchart TD
     Show[PCが4つのArUcoを表示]
     Capture[Androidが画面を撮影]
     Detect{4つすべて検出したか}
-    Stable{複数フレームで安定しているか}
+    Stable{Androidで有効5フレームが安定したか}
     Send[ID・中心・頂点座標をPCへ送信]
     Match[PCがIDと表示位置を対応付け]
     Calculate[変換行列を計算]
@@ -589,7 +589,7 @@ flowchart TD
 - 対象画面上に異なるIDを持つ4つのArUcoマーカーを表示する。
 - AndroidからArUco ID、中心座標、4頂点座標、撮影画像サイズ、検出時刻を受信する。
 - 各ArUco IDと対象画面上の既知の座標を対応付ける。
-- 複数フレームにわたる検出結果の安定性を確認する。
+- Android側で安定判定済みの`calibration_markers`を受信し、IDと対象画面上の既知位置を検証する。
 - ホモグラフィ変換行列を作成し、利用可能か検証する。
 - 変換行列を保存する。
 - 成功時にマーカーを非表示にし、操作可能状態へ移行する。
@@ -1070,6 +1070,7 @@ flowchart TD
 
 ## 17. 未確定事項
 
+Android MVPで確定したArUco ID・表示位置・安定フレーム数・中心移動許容値はAndroid側の契約として本文へ反映し、未確定事項から除外した。
 
 
 | ID | 未確定事項 |
@@ -1085,11 +1086,7 @@ flowchart TD
 | TBD-013 | クリックとして扱う最大押下時間 |
 | TBD-014 | スクロールとズームの判別時間 |
 | TBD-015 | トラッキング喪失と判断する時間 |
-| TBD-016 | ArUcoマーカーのID |
 | TBD-017 | ArUcoマーカーのサイズ |
-| TBD-018 | ArUcoマーカーの表示位置 |
-| TBD-019 | 位置合わせ安定判定に必要なフレーム数 |
-| TBD-020 | 位置合わせ誤差の許容値 |
 | TBD-023 | WindowsなどのOS入力へ直接変換する範囲 |
 | TBD-024 | 専用描画キャンバスの実装範囲 |
 | TBD-025 | ズーム操作の実装方式 |

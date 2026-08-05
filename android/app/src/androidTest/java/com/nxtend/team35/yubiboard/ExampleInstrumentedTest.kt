@@ -2,6 +2,8 @@ package com.nxtend.team35.yubiboard
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.opencv.android.OpenCVLoader
+import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,9 +18,21 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class ExampleInstrumentedTest {
     @Test
-    fun useAppContext() {
-        // Context of the app under test.
+    fun nativeDependenciesAndModelArePackaged() {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.nxtend.team35.yubiboard", appContext.packageName)
+        assertTrue(OpenCVLoader.initLocal())
+        appContext.assets.open("hand_landmarker.task").use { model ->
+            assertTrue(model.available() > 0)
+        }
+    }
+
+    @Test
+    fun debugDiagnosticsCollectEvents() {
+        assertTrue(BuildConfig.DEBUG)
+        AppDiagnostics.setEnabled(true)
+        AppDiagnostics.clear()
+        AppDiagnostics.event("instrumentation", "probe", mapOf("device" to android.os.Build.MODEL))
+        assertEquals("probe", AppDiagnostics.snapshot().events.single().name)
     }
 }

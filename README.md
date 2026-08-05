@@ -132,22 +132,32 @@ AndroidアプリからPCへ送信する主なデータは以下です。
 
 ## ドキュメント
 
-要件定義書などのプロジェクト資料は、`docs/`ディレクトリで管理します。
+要件定義書や現行仕様書などのプロジェクト資料は、`docs/`ディレクトリで管理します。
 
 ```text
 docs/
-└─ ...
+├─ android-current-spec.md       # Androidアプリ現行仕様書
+├─ android-debug-tutorial.md     # Android実機デバッグ手順
+├─ android-protocol-v1.md        # Android通信プロトコル
+├─ android-app-requirements.md   # Androidアプリ要件定義書
+├─ desktop-app-requirements.md   # デスクトップアプリ要件定義書
+└─ system-requirements.md        # システム全体要件定義書
 ```
 
 ## 現在の状態
 
-現在は、Androidアプリおよびデスクトップアプリの開発環境構築を進めています。
+AndroidアプリのMVP実装、自動検証、Android実機デバッグ・チュートリアル全項目の実施が完了しています。Android実機とモックPC間ではUSB／LAN接続、手検出、位置合わせ、障害処理、自動再接続、10分連続動作を確認済みです。実PCアプリとの統合が次の対象です。
 
-- [ ] ディレクトリ構成の整理
-- [ ] Androidプロジェクトの作成
-- [ ] Android実機でのアプリ起動
-- [ ] CameraXによるカメラプレビュー
-- [ ] MediaPipeによる手指骨格検知
-- [ ] WebSocket通信
+- [x] ディレクトリ構成の整理
+- [x] Androidプロジェクトの作成
+- [x] Android実機でのアプリ起動
+- [x] CameraXによるカメラプレビュー実装
+- [x] MediaPipeによる手指骨格検知実装
+- [x] ArUcoマーカー検出・安定化実装
+- [x] WebSocketクライアント・モックサーバー実装
+- [x] 再接続・動作設定・デバッグ表示実装
 - [ ] デスクトップアプリの初期構築
-- [ ] Android・PC間の接続確認
+- [x] Android・モックPC間のUSB接続確認
+- [x] Android実機デバッグ・チュートリアル完了
+- [x] 10分連続動作・通信断からの自動復帰確認
+- [ ] Android・実PCアプリ間の統合確認
