@@ -6,10 +6,11 @@ import androidx.camera.core.ImageProxy
 
 fun ImageProxy.toCorrectedBitmap(): Bitmap {
     val rotationDegrees = imageInfo.rotationDegrees
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    try {
-        planes[0].buffer.rewind()
-        bitmap.copyPixelsFromBuffer(planes[0].buffer)
+    // CameraX's conversion handles the RGBA plane's channel order and stride.
+    // Copying the plane buffer directly into ARGB_8888 produces corrupted colors
+    // on devices whose CameraX buffer layout differs from Bitmap's native layout.
+    val bitmap = try {
+        toBitmap()
     } finally {
         close()
     }
