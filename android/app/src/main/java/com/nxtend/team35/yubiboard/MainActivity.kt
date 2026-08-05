@@ -697,7 +697,8 @@ private fun connectionLabel(snapshot: ConnectionSnapshot): String = when (snapsh
     ConnectionStatus.CONNECTING -> "接続中"
     ConnectionStatus.AWAITING_ACK -> "PC応答待ち"
     ConnectionStatus.CONNECTED -> "接続済み"
-    ConnectionStatus.RECONNECTING -> "${snapshot.retryInSeconds ?: 0}秒後に再接続"
+    ConnectionStatus.RECONNECTING -> snapshot.retryInSeconds?.let { "${it}秒後に再接続" }
+        ?: "再接続中"
     ConnectionStatus.ERROR -> snapshot.detail ?: "接続エラー"
 }
 

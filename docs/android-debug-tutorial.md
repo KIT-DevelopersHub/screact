@@ -177,6 +177,28 @@ YubiBoard mock WebSocket server: 0.0.0.0:8080/ws/v1/input
 Pairing token: 123456 / initial mode: tracking / scenario: happy
 ```
 
+受信が始まると、フレーム番号、検出有無、受信件数に加えて、人差し指先端（ランドマーク8）の`x, y, z`が20フレームごとに表示されます。全21点は表示された結果ディレクトリの`hand-frames.jsonl`へ保存されます。このファイルがPCへ実際に届いた骨格座標の確認用生ログです。
+
+黒背景の骨格動画も同時に作る場合は、サーバーへ`-DurationSeconds 30 -RenderVideo`を追加します。30秒後に自動停止し、同じ結果ディレクトリへ`hand-tracking.mp4`を生成します。Python 3とFFmpegがPATHに必要ですが、追加パッケージは使いません。
+
+```powershell
+.\android\tools\mock-websocket-server.ps1 `
+  -Port 8080 `
+  -PairingToken 123456 `
+  -InitialMode tracking `
+  -DurationSeconds 30 `
+  -RenderVideo
+```
+
+すでに取得済みのログは、次のコマンドで後から動画化できます。
+
+```powershell
+python .\android\tools\render_hand_video.py `
+  .\android\debug-results\server-<日時>\hand-frames.jsonl
+```
+
+未検出フレームは黒一色です。検出時は白い線、青い関節、黄色い5本の指先として描画されます。MediaPipeが返した範囲外座標はJSONLでは保持し、動画上だけ画面端へクランプするため、受信値の調査を妨げません。
+
 ### Androidアプリで接続する
 
 接続カードへ次を入力します。
@@ -274,10 +296,29 @@ android/tools/calibration-target-1920x1080.png
 ### 手動で通信断を再現する
 
 1. 正常接続した状態でモックサーバーのターミナルを`Ctrl+C`で停止する。
+   `Client disconnected`の後にPowerShellのプロンプトが戻ることを確認する。ウィンドウの`×`だけで閉じると、子の`pwsh`プロセスが残って8080番ポートを保持することがあるため避ける。
 2. Android上部が再接続表示へ変わることを確認する。
 3. 1秒、2秒、4秒、8秒、以後10秒の待ち時間で再試行することを確認する。
 4. 同じコマンドでモックサーバーを再起動する。
 5. Androidが操作なしで`接続済み`へ戻ることを確認する。
+
+`Ctrl+C`後にプロンプトが戻らない、または再起動時に「各ソケット アドレスに対して～1つのみを使用できます」と表示された場合は、8080番ポートを保持するプロセスを確認します。
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen |
+  Format-Table LocalAddress, LocalPort, OwningProcess
+```
+
+行が表示された場合は、`OwningProcess`のPIDを調べます。今回起動したモックの`pwsh`であることを確認できた場合だけ停止してください。
+
+```powershell
+Get-Process -Id <OwningProcessのPID>
+Stop-Process -Id <OwningProcessのPID>
+```
+
+その後、もう一度モックサーバーを起動します。正常に起動すると、待受表示に続いてAndroidからの`Client connected`と`Handshake accepted`が表示されます。
+
+手動停止を使わずに確認したい場合は、最初のモックへ`-DurationSeconds 15`を追加します。15秒後にモック全体が終了してプロンプトへ戻るため、Androidが再接続表示へ変わった後、同じコマンドを再実行して自動復帰を確認できます。
 
 ### 用意された障害シナリオを使う
 
@@ -491,3 +532,19 @@ Xiaomiなどで端末側がAPK導入を拒否しています。
 - [ ] 診断JSONLとサーバー結果の保存場所が分かる
 
 まずUSBの`happy`シナリオを通せば、カメラ、検出、アプリUI、WebSocket、JSON送信までのデモ必須経路を一度に確認できます。その後、位置合わせ、障害シナリオ、LAN、長時間試験の順に広げてください。
+
+## 18. 実施記録
+
+2026-08-05にXiaomi 25118PC98G（Android 15、API 35）を使用し、本チュートリアルの全項目を実施した。
+
+- USB reverseと同一LANの両経路で接続を確認
+- 実際の手、疑似21点、未検出、実／疑似ArUcoマーカーの送信を確認
+- 障害シナリオとモックサーバー停止・再起動後の自動復帰を確認
+- 自動テストを完了
+- 10分連続動作試験を595.8秒、108サンプルで完走
+- Crash／ANR 0件、平均19.42 fps、終了温度39℃、Thermal Status 0を確認
+- 通信断4回からすべて自動復帰し、アプリのプロセス再起動なし
+
+詳細な計測値は[`android-current-spec.md`](./android-current-spec.md#201-実機確認済み)へ転記した。生ログは`android/debug-results/`に生成されるローカル成果物であり、転記後に削除した。
+
+既知の未達事項として、手が画面外へ出た際にMediaPipeのx／y座標が`0.0`〜`1.0`を外れ、モックサーバーの検証エラーが発生した。連続動作には影響しないが、座標処理方針の決定が必要である。

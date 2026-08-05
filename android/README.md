@@ -20,7 +20,26 @@ PCのファイアウォールで指定ポートのローカルLAN受信を許可
 .\android\tools\mock-websocket-server.ps1 -Port 8080 -PairingToken 123456 -InitialMode tracking
 ```
 
-AndroidアプリへPCのLAN内IPv4、ポート`8080`、コード`123456`を入力します。接続後、サーバーに`hand_frame`の件数が表示されます。`-InitialMode calibration`なら、接続直後にArUco位置合わせモードへ入ります。
+AndroidアプリへPCのLAN内IPv4、ポート`8080`、コード`123456`を入力します。接続後、サーバーに`hand_frame`の件数と人差し指先端（ランドマーク8）の座標が表示されます。受信した21点は`android/debug-results/server-<日時>/hand-frames.jsonl`へ完全な形で保存されます。`-InitialMode calibration`なら、接続直後にArUco位置合わせモードへ入ります。
+
+手を映した状態で30秒記録し、停止時に黒背景の骨格MP4も生成する場合は次を実行します。動画生成にはPATH上のPython 3とFFmpegを使用しますが、追加のPythonパッケージは不要です。
+
+```powershell
+.\android\tools\mock-websocket-server.ps1 `
+  -Port 8080 `
+  -PairingToken 123456 `
+  -DurationSeconds 30 `
+  -RenderVideo
+```
+
+既存の座標ログだけを後から動画へ変換することもできます。
+
+```powershell
+python .\android\tools\render_hand_video.py `
+  .\android\debug-results\server-<日時>\hand-frames.jsonl
+```
+
+出力は同じディレクトリの`hand-tracking.mp4`です。未検出フレームは黒一色、検出フレームは白い骨、青い関節、黄色い指先で表示します。ログ上の範囲外座標は解析のためそのまま保存し、動画描画時だけ画面端へ収めます。
 
 ## 実機デバッグ環境
 
@@ -90,7 +109,7 @@ Xiaomi系端末で`INSTALL_FAILED_USER_RESTRICTED`となる場合は、端末を
 .\android\tools\mock-websocket-server.ps1 -Scenario mode-switch -DurationSeconds 60
 ```
 
-受信イベント、接続別CSV、Markdown要約は`android/debug-results/`へ保存され、Gitには追加されません。
+受信イベント、21点座標JSONL、接続別CSV、Markdown要約は`android/debug-results/`へ保存され、Gitには追加されません。`-RenderVideo`指定時は停止後に骨格MP4も同じ出力先へ生成されます。
 
 ### ArUcoと連続動作
 

@@ -174,9 +174,9 @@ function Invoke-Soak {
     try {
         while (((Get-Date) - $started).TotalMinutes -lt $DurationMinutes) {
             $battery = Get-BatterySample
-            $pid = (Invoke-Adb shell pidof $packageName | Out-String).Trim()
+            $appProcessId = (Invoke-Adb shell pidof $packageName | Out-String).Trim()
             $memoryKb = $null
-            if ($pid) {
+            if ($appProcessId) {
                 $meminfo = Invoke-Adb shell dumpsys meminfo $packageName | Out-String
                 $memoryKb = [regex]::Match($meminfo, '(?m)^\s*TOTAL\s+(\d+)').Groups[1].Value
             }
@@ -188,7 +188,7 @@ function Invoke-Soak {
             [pscustomobject]@{
                 timestamp = [DateTime]::UtcNow.ToString('o')
                 elapsedSeconds = [Math]::Round(((Get-Date) - $started).TotalSeconds, 1)
-                pid = $pid
+                pid = $appProcessId
                 memoryKb = $memoryKb
                 cpuPercent = $cpuPercent
                 batteryLevel = $battery.level

@@ -17,12 +17,29 @@ param(
     [ValidateRange(0, 5000)]
     [int]$ReadDelayMs = 0,
 
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+
+    [switch]$RenderVideo,
+
+    [ValidateRange(2, 3840)]
+    [int]$VideoWidth = 960,
+
+    [ValidateRange(2, 2160)]
+    [int]$VideoHeight = 540,
+
+    [ValidateRange(1, 120)]
+    [int]$VideoFps = 20
 )
 
 $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.Encoding]::UTF8
 $webSocketGuid = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+$runStartedAt = [DateTime]::UtcNow
+
+function Test-RunExpired {
+    return $DurationSeconds -gt 0 -and
+        ([DateTime]::UtcNow - $runStartedAt).TotalSeconds -ge $DurationSeconds
+}
 
 function Read-ExactBytes {
     param(
@@ -32,7 +49,17 @@ function Read-ExactBytes {
     $buffer = [byte[]]::new($Count)
     $offset = 0
     while ($offset -lt $Count) {
-        $read = $Stream.Read($buffer, $offset, $Count - $offset)
+        try {
+            $read = $Stream.Read($buffer, $offset, $Count - $offset)
+        } catch [System.IO.IOException] {
+            $socketError = $_.Exception.InnerException -as [System.Net.Sockets.SocketException]
+            if ($null -ne $socketError -and
+                $socketError.SocketErrorCode -eq [System.Net.Sockets.SocketError]::TimedOut) {
+                if (Test-RunExpired) { throw [TimeoutException]::new('Server duration complete') }
+                continue
+            }
+            throw
+        }
         if ($read -le 0) { throw 'Client disconnected' }
         $offset += $read
     }
@@ -43,9 +70,8 @@ function Read-HttpHeaders {
     param([System.IO.Stream]$Stream)
     $bytes = [System.Collections.Generic.List[byte]]::new()
     while ($bytes.Count -lt 8192) {
-        $value = $Stream.ReadByte()
-        if ($value -lt 0) { throw 'Client disconnected during handshake' }
-        $bytes.Add([byte]$value)
+        $value = Read-ExactBytes -Stream $Stream -Count 1
+        $bytes.Add($value[0])
         $count = $bytes.Count
         if ($count -ge 4 -and
             $bytes[$count - 4] -eq 13 -and $bytes[$count - 3] -eq 10 -and
@@ -144,6 +170,15 @@ function Write-DebugEvent {
     ($entry | ConvertTo-Json -Compress -Depth 12) | Add-Content -LiteralPath $script:eventLog -Encoding utf8
 }
 
+function Write-HandFrame {
+    param([object]$Message)
+    $entry = [ordered]@{
+        receivedAtUtc = [DateTime]::UtcNow.ToString('o')
+        message = $Message
+    }
+    ($entry | ConvertTo-Json -Compress -Depth 12) | Add-Content -LiteralPath $script:handFrameLog -Encoding utf8
+}
+
 function Test-ClientMessage {
     param(
         [object]$Message,
@@ -216,8 +251,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $script:eventLog = Join-Path $OutputDirectory 'events.jsonl'
+$script:handFrameLog = Join-Path $OutputDirectory 'hand-frames.jsonl'
 $summaryFile = Join-Path $OutputDirectory 'connections.csv'
-$runStartedAt = [DateTime]::UtcNow
 $effectiveReadDelayMs = if ($Scenario -eq 'slow-reader' -and $ReadDelayMs -eq 0) { 500 } else { $ReadDelayMs }
 
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
@@ -225,11 +260,17 @@ $listener.Start()
 Write-Host "YubiBoard mock WebSocket server: 0.0.0.0:$Port/ws/v1/input"
 Write-Host "Pairing token: $PairingToken / initial mode: $InitialMode / scenario: $Scenario"
 Write-Host "Results: $OutputDirectory"
+Write-Host "Hand coordinates: $script:handFrameLog"
 Write-Host 'Stop with Ctrl+C.'
 Write-DebugEvent -Name 'server_started' -Data @{ port = $Port; scenario = $Scenario; initialMode = $InitialMode }
 
 try {
-    while ($true) {
+    while (-not (Test-RunExpired)) {
+        while (-not $listener.Pending()) {
+            if (Test-RunExpired) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        if (Test-RunExpired) { break }
         $client = $listener.AcceptTcpClient()
         $remote = $client.Client.RemoteEndPoint
         $sessionId = $null
@@ -244,6 +285,9 @@ try {
         Write-Host "Client connected: $remote"
         try {
             $stream = $client.GetStream()
+            # Short reads let PowerShell process Ctrl+C instead of remaining in a
+            # blocking .NET socket call indefinitely.
+            $stream.ReadTimeout = 250
             Complete-WebSocketHandshake -Stream $stream
             $sessionId = 'session-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
             $frameCount = 0
@@ -257,11 +301,7 @@ try {
             $connectionStartedAt = [DateTime]::UtcNow
             $scenarioActionSent = $false
             Write-DebugEvent -Name 'client_connected' -Data @{ remote = $remote.ToString(); sessionId = $sessionId }
-            while ($client.Connected) {
-                if ($DurationSeconds -gt 0 -and ([DateTime]::UtcNow - $runStartedAt).TotalSeconds -ge $DurationSeconds) {
-                    Send-WebSocketFrame -Stream $stream -Opcode 8 -Payload $utf8.GetBytes('duration complete')
-                    break
-                }
+            while ($client.Connected -and -not (Test-RunExpired)) {
                 $frame = Read-WebSocketFrame -Stream $stream
                 if ($effectiveReadDelayMs -gt 0) { Start-Sleep -Milliseconds $effectiveReadDelayMs }
                 if ($frame.Opcode -eq 8) {
@@ -317,6 +357,7 @@ try {
                         }
                     }
                     'hand_frame' {
+                        Write-HandFrame -Message $message
                         $frameCount++
                         if (-not $message.hand.detected) { $missingCount++ }
                         if ($null -ne $lastFrameId -and [long]$message.frameId -gt [long]$lastFrameId + 1) {
@@ -324,7 +365,13 @@ try {
                         }
                         $lastFrameId = [long]$message.frameId
                         if ($frameCount -eq 1 -or $frameCount % 20 -eq 0) {
-                            Write-Host "hand_frame #$($message.frameId): detected=$($message.hand.detected), received=$frameCount"
+                            $indexTip = if ($message.hand.detected -and $message.hand.landmarks.Count -eq 21) {
+                                $point = $message.hand.landmarks[8]
+                                ", index_tip=($($point[0]), $($point[1]), $($point[2]))"
+                            } else {
+                                ''
+                            }
+                            Write-Host "hand_frame #$($message.frameId): detected=$($message.hand.detected), received=$frameCount$indexTip"
                         }
                     }
                     'calibration_markers' {
@@ -360,9 +407,15 @@ try {
                     }
                 }
             }
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            # Ctrl+C must escape the client loop so the listener is released by
+            # the outer finally block.
+            throw
         } catch {
-            Write-Warning $_.Exception.Message
-            Write-DebugEvent -Name 'client_error' -Data @{ remote = $remote.ToString(); error = $_.Exception.Message }
+            if (-not (Test-RunExpired)) {
+                Write-Warning $_.Exception.Message
+                Write-DebugEvent -Name 'client_error' -Data @{ remote = $remote.ToString(); error = $_.Exception.Message }
+            }
         } finally {
             if ($null -ne $connectionStartedAt) {
                 $duration = [Math]::Max(0.001, ([DateTime]::UtcNow - $connectionStartedAt).TotalSeconds)
@@ -390,4 +443,23 @@ try {
     $listener.Stop()
     Write-DebugEvent -Name 'server_stopped' -Data @{}
     Write-ServerSummary
+    if ($RenderVideo) {
+        if (-not (Test-Path -LiteralPath $script:handFrameLog)) {
+            Write-Warning 'No hand frames were received; video was not generated.'
+        } elseif (($VideoWidth % 2) -ne 0 -or ($VideoHeight % 2) -ne 0) {
+            Write-Warning 'VideoWidth and VideoHeight must be even; video was not generated.'
+        } else {
+            $python = @(Get-Command python -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+            if ($null -eq $python) {
+                Write-Warning 'Python was not found; run render_hand_video.py manually after installing Python 3.'
+            } else {
+                $renderer = Join-Path $PSScriptRoot 'render_hand_video.py'
+                $video = Join-Path $OutputDirectory 'hand-tracking.mp4'
+                & $python.Source $renderer $script:handFrameLog $video --width $VideoWidth --height $VideoHeight --fps $VideoFps
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Video renderer exited with status $LASTEXITCODE. The coordinate log remains at $script:handFrameLog"
+                }
+            }
+        }
+    }
 }
