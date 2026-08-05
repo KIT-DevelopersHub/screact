@@ -82,6 +82,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryNow() = webSocketClient.retryNow()
 
+    fun onNetworkLost() = webSocketClient.onNetworkLost()
+
+    fun onNetworkAvailable() = webSocketClient.onNetworkAvailable()
+
     fun changeConnectionSettings() {
         webSocketClient.disconnect()
         updateProduction {

@@ -47,6 +47,7 @@ class YubiBoardWebSocketClient(
     private val lastHandSentAtMs = AtomicLong(0)
     private val latestHand = AtomicReference<HandDetectionResult?>()
     private val latestCalibration = AtomicReference<MarkerDetectionResult?>()
+    private val lastStableCalibration = AtomicReference<MarkerDetectionResult?>()
     private var desiredConfig: ConnectionConfig? = null
     private var webSocket: WebSocket? = null
     private var sessionId: String? = null
@@ -56,6 +57,8 @@ class YubiBoardWebSocketClient(
     private var countdownTask: ScheduledFuture<*>? = null
     private var manuallyStopped = true
     private var pendingErrorCode: ConnectionErrorCode? = null
+    private var calibrationConfirmed = false
+    private var calibrationRequested = false
 
     init {
         scheduler.scheduleAtFixedRate(::flushLatestHand, 0, SENDER_TICK_MS, TimeUnit.MILLISECONDS)
@@ -78,6 +81,9 @@ class YubiBoardWebSocketClient(
             manuallyStopped = false
             desiredConfig = config
             reconnectAttempt = 0
+            calibrationConfirmed = false
+            calibrationRequested = false
+            lastStableCalibration.set(null)
             heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
             countdownTask?.cancel(false)
@@ -91,8 +97,11 @@ class YubiBoardWebSocketClient(
     }
 
     fun submitCalibration(result: MarkerDetectionResult) {
-        if (result.stable && latestCalibration.getAndSet(result) != null) {
-            AppDiagnostics.increment("network.calibration_replaced")
+        if (result.stable) {
+            lastStableCalibration.set(result)
+            if (latestCalibration.getAndSet(result) != null) {
+                AppDiagnostics.increment("network.calibration_replaced")
+            }
         }
     }
 
@@ -109,6 +118,9 @@ class YubiBoardWebSocketClient(
             sessionId = null
             latestHand.set(null)
             latestCalibration.set(null)
+            lastStableCalibration.set(null)
+            calibrationConfirmed = false
+            calibrationRequested = false
             heartbeatTask?.cancel(false)
             reconnectTask?.cancel(false)
             countdownTask?.cancel(false)
@@ -121,7 +133,39 @@ class YubiBoardWebSocketClient(
     fun retryNow() {
         synchronized(lock) {
             val config = desiredConfig ?: return
-            if (manuallyStopped) return
+            if (manuallyStopped || sessionId != null) return
+            reconnectTask?.cancel(false)
+            countdownTask?.cancel(false)
+            webSocket?.cancel()
+            openSocket(config, reconnecting = true)
+        }
+    }
+
+    fun onNetworkLost() {
+        synchronized(lock) {
+            if (manuallyStopped || desiredConfig == null) return
+            AppDiagnostics.event("network", "default_network_lost")
+            sessionId = null
+            heartbeatTask?.cancel(false)
+            reconnectTask?.cancel(false)
+            countdownTask?.cancel(false)
+            webSocket?.cancel()
+            webSocket = null
+            publish(
+                ConnectionSnapshot(
+                    status = ConnectionStatus.RECONNECTING,
+                    detail = "ネットワーク接続を待っています",
+                    errorCode = ConnectionErrorCode.UNREACHABLE,
+                ),
+            )
+        }
+    }
+
+    fun onNetworkAvailable() {
+        synchronized(lock) {
+            val config = desiredConfig ?: return
+            if (manuallyStopped || sessionId != null) return
+            AppDiagnostics.event("network", "default_network_available")
             reconnectTask?.cancel(false)
             countdownTask?.cancel(false)
             webSocket?.cancel()
@@ -143,17 +187,18 @@ class YubiBoardWebSocketClient(
         )
         sessionId = null
         val request = Request.Builder().url(config.webSocketUrl).build()
-        val listener = SocketListener(config)
-        webSocket = httpClient.newWebSocket(request, listener)
+        val listener = SocketListener(config, reconnecting)
+        val openedSocket = httpClient.newWebSocket(request, listener)
+        webSocket = openedSocket
         scheduler.schedule(
             {
                 synchronized(lock) {
-                    if (webSocket === listener.socket && sessionId == null && !manuallyStopped) {
+                    if (webSocket === openedSocket && sessionId == null && !manuallyStopped) {
                         AppDiagnostics.increment("network.ack_timeouts")
                         AppDiagnostics.event("network", "hello_ack_timeout")
                         onLog("hello_ack timeout")
                         pendingErrorCode = ConnectionErrorCode.ACK_TIMEOUT
-                        listener.socket?.cancel()
+                        openedSocket.cancel()
                     }
                 }
             },
@@ -299,7 +344,7 @@ class YubiBoardWebSocketClient(
         }
     }
 
-    private fun handleServerMessage(socket: WebSocket, text: String) {
+    private fun handleServerMessage(socket: WebSocket, text: String, reconnecting: Boolean) {
         val message = runCatching { ProtocolCodec.decodeServerMessage(text) }
             .onFailure {
                 AppDiagnostics.increment("network.invalid_messages")
@@ -311,20 +356,30 @@ class YubiBoardWebSocketClient(
             is HelloAckMessage -> synchronized(lock) {
                 if (message.schemaVersion != SCHEMA_VERSION || webSocket !== socket) return
                 sessionId = message.sessionId
+                val cachedCalibration = lastStableCalibration.get()
+                val reuseCalibration = reconnecting && calibrationConfirmed && cachedCalibration != null
+                calibrationRequested = message.calibrationRequired && !reuseCalibration
                 AppDiagnostics.event(
                     "network",
                     "hello_ack",
                     mapOf(
                         "sessionId" to message.sessionId,
                         "calibrationRequired" to message.calibrationRequired,
+                        "calibrationReused" to reuseCalibration,
                     ),
                 )
                 AppDiagnostics.gauge("network.session_id", message.sessionId)
                 reconnectAttempt = 0
                 publish(ConnectionSnapshot(ConnectionStatus.CONNECTED, message.sessionId))
-                onModeChanged(
-                    if (message.calibrationRequired) CaptureMode.CALIBRATION else CaptureMode.TRACKING,
-                )
+                if (reuseCalibration) {
+                    latestCalibration.set(cachedCalibration)
+                    AppDiagnostics.event("network", "cached_calibration_queued")
+                    onModeChanged(CaptureMode.TRACKING)
+                } else {
+                    onModeChanged(
+                        if (message.calibrationRequired) CaptureMode.CALIBRATION else CaptureMode.TRACKING,
+                    )
+                }
                 startHeartbeat(socket, message.sessionId)
             }
 
@@ -364,6 +419,13 @@ class YubiBoardWebSocketClient(
                     "calibration_status",
                     mapOf("status" to message.status, "reason" to message.reason),
                 )
+                when (message.status) {
+                    "complete" -> {
+                        calibrationConfirmed = true
+                        calibrationRequested = false
+                    }
+                    "retry_required" -> calibrationConfirmed = false
+                }
                 onCalibrationStatus(message)
             }
 
@@ -376,10 +438,16 @@ class YubiBoardWebSocketClient(
                 when (message.command) {
                     "set_mode" -> when (message.mode) {
                         "calibration" -> {
+                            calibrationConfirmed = false
+                            calibrationRequested = true
                             AppDiagnostics.event("network", "remote_mode", mapOf("mode" to "calibration"))
                             onModeChanged(CaptureMode.CALIBRATION)
                         }
                         "tracking" -> {
+                            if (calibrationRequested && lastStableCalibration.get() != null) {
+                                calibrationConfirmed = true
+                            }
+                            calibrationRequested = false
                             AppDiagnostics.event("network", "remote_mode", mapOf("mode" to "tracking"))
                             onModeChanged(CaptureMode.TRACKING)
                         }
@@ -475,11 +543,12 @@ class YubiBoardWebSocketClient(
         httpClient.connectionPool.evictAll()
     }
 
-    private inner class SocketListener(private val config: ConnectionConfig) : WebSocketListener() {
-        var socket: WebSocket? = null
+    private inner class SocketListener(
+        private val config: ConnectionConfig,
+        private val reconnecting: Boolean,
+    ) : WebSocketListener() {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            socket = webSocket
             synchronized(lock) {
                 if (this@YubiBoardWebSocketClient.webSocket !== webSocket || manuallyStopped) return
                 publish(ConnectionSnapshot(ConnectionStatus.AWAITING_ACK))
@@ -497,7 +566,7 @@ class YubiBoardWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            handleServerMessage(webSocket, text)
+            handleServerMessage(webSocket, text, reconnecting)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

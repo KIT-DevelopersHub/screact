@@ -314,6 +314,7 @@ $effectiveReadDelayMs = if ($Scenario -eq 'slow-reader' -and $ReadDelayMs -eq 0)
 
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
 $listener.Start()
+$calibrationComplete = $false
 Write-Host "YubiBoard mock WebSocket server: 0.0.0.0:$Port/ws/v1/input"
 Write-Host "Pairing token: $PairingToken / initial mode: $InitialMode / scenario: $Scenario"
 Write-Host "Results: $OutputDirectory"
@@ -410,8 +411,10 @@ try {
                             messageType = 'hello_ack'
                             sessionId = $sessionId
                             surface = [ordered]@{ surfaceId = 'mock-display'; widthPx = 1920; heightPx = 1080 }
-                            calibrationRequired = $InitialMode -eq 'calibration' -or
+                            calibrationRequired = -not $calibrationComplete -and (
+                                $InitialMode -eq 'calibration' -or
                                 $Scenario -in @('production-happy', 'calibration-retry')
+                            )
                         } | ConvertTo-Json -Compress
                         Send-WebSocketText -Stream $stream -Text $ack
                         Write-Host "Handshake accepted: $sessionId"
@@ -448,6 +451,7 @@ try {
                             Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status processing
                             Start-Sleep -Milliseconds 500
                             Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status complete
+                            $calibrationComplete = $true
                             Send-ModeControl -Stream $stream -SessionId $sessionId -Mode tracking
                             $scenarioActionSent = $true
                         } elseif ($Scenario -eq 'calibration-retry' -and $markerCount -eq 1) {
@@ -458,6 +462,7 @@ try {
                             Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status processing
                             Start-Sleep -Milliseconds 500
                             Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status complete
+                            $calibrationComplete = $true
                             Send-ModeControl -Stream $stream -SessionId $sessionId -Mode tracking
                             $scenarioActionSent = $true
                         }

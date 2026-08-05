@@ -1,8 +1,11 @@
 package com.nxtend.team35.yubiboard
 
 import android.Manifest
-import android.content.pm.PackageManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -90,6 +93,25 @@ class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var debugOverlay: DebugOverlayView
     private lateinit var productionOverlay: ProductionOverlayView
+    private lateinit var connectivityManager: ConnectivityManager
+    @Volatile
+    private var defaultNetwork: Network? = null
+    private var networkCallbackRegistered = false
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            defaultNetwork = network
+            AppDiagnostics.event("network", "android_default_network_available")
+            if (::viewModel.isInitialized) viewModel.onNetworkAvailable()
+        }
+
+        override fun onLost(network: Network) {
+            if (defaultNetwork != network) return
+            defaultNetwork = null
+            AppDiagnostics.event("network", "android_default_network_lost")
+            if (::viewModel.isInitialized) viewModel.onNetworkLost()
+        }
+    }
 
     private var cameraStatus by mutableStateOf("カメラを起動中")
     private var cameraPermissionGranted by mutableStateOf(false)
@@ -133,6 +155,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+        }.onFailure {
+            AppDiagnostics.event(
+                "network",
+                "network_callback_registration_failed",
+                mapOf("message" to it.message),
+            )
+        }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FIT_CENTER
@@ -298,6 +331,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (networkCallbackRegistered) {
+            runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+            networkCallbackRegistered = false
+        }
         cameraSession.close()
         handLandmarkerProcessor.close()
         super.onDestroy()

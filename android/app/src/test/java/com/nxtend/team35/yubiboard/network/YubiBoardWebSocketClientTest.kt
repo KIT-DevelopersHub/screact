@@ -4,6 +4,9 @@ import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
+import com.nxtend.team35.yubiboard.vision.DetectedMarker
+import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
+import com.nxtend.team35.yubiboard.vision.NormalizedPoint
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -13,6 +16,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
@@ -193,6 +197,122 @@ class YubiBoardWebSocketClientTest {
         }
     }
 
+    @Test
+    fun `network recovery reconnects and reuses confirmed calibration`() {
+        val server = MockWebServer()
+        val firstHello = CountDownLatch(1)
+        val firstCalibration = CountDownLatch(1)
+        val trackingStarted = CountDownLatch(1)
+        val secondHello = CountDownLatch(1)
+        val cachedCalibration = CountDownLatch(1)
+        val serverEnded = CountDownLatch(2)
+        val serverSockets = CopyOnWriteArrayList<WebSocket>()
+        val modes = CopyOnWriteArrayList<CaptureMode>()
+
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSockets += webSocket
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        when {
+                            text.contains("\"messageType\":\"hello\"") -> {
+                                firstHello.countDown()
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s-first","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true}""",
+                                )
+                            }
+                            text.contains("\"messageType\":\"calibration_markers\"") -> {
+                                firstCalibration.countDown()
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"calibration_status","sessionId":"s-first","status":"complete"}""",
+                                )
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"control_message","sessionId":"s-first","command":"set_mode","mode":"tracking"}""",
+                                )
+                            }
+                        }
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        serverEnded.countDown()
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        serverEnded.countDown()
+                    }
+                },
+            ),
+        )
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSockets += webSocket
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        when {
+                            text.contains("\"messageType\":\"hello\"") -> {
+                                secondHello.countDown()
+                                // A conservative PC may ask again. Android must reuse the confirmed coordinates.
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s-second","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true}""",
+                                )
+                            }
+                            text.contains("\"messageType\":\"calibration_markers\"") ->
+                                cachedCalibration.countDown()
+                        }
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        serverEnded.countDown()
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        serverEnded.countDown()
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {},
+            onModeChanged = {
+                modes += it
+                if (it == CaptureMode.TRACKING) trackingStarted.countDown()
+            },
+        )
+        try {
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, "123456"))
+            assertTrue(firstHello.await(2, TimeUnit.SECONDS))
+            client.submitCalibration(sampleCalibration())
+            assertTrue(firstCalibration.await(2, TimeUnit.SECONDS))
+            assertTrue(trackingStarted.await(2, TimeUnit.SECONDS))
+
+            client.onNetworkLost()
+            client.onNetworkAvailable()
+
+            assertTrue(secondHello.await(2, TimeUnit.SECONDS))
+            assertTrue(cachedCalibration.await(2, TimeUnit.SECONDS))
+            assertEquals(
+                listOf(CaptureMode.CALIBRATION, CaptureMode.TRACKING, CaptureMode.TRACKING),
+                modes.toList(),
+            )
+        } finally {
+            client.disconnect()
+            serverSockets.forEach { it.close(1000, "test complete") }
+            serverEnded.await(2, TimeUnit.SECONDS)
+            client.close()
+            server.shutdown()
+        }
+    }
+
     private fun sampleHand() = HandDetectionResult(
         capturedAtMonotonicMs = 100,
         sourceWidth = 640,
@@ -202,4 +322,29 @@ class YubiBoardWebSocketClientTest {
         handedness = "RIGHT",
         handednessScore = 0.9f,
     )
+
+    private fun sampleCalibration(): MarkerDetectionResult {
+        fun marker(id: Int, x: Float, y: Float) = DetectedMarker(
+            id = id,
+            center = NormalizedPoint(x, y),
+            corners = listOf(
+                NormalizedPoint(x - 0.02f, y - 0.02f),
+                NormalizedPoint(x + 0.02f, y - 0.02f),
+                NormalizedPoint(x + 0.02f, y + 0.02f),
+                NormalizedPoint(x - 0.02f, y + 0.02f),
+            ),
+        )
+        return MarkerDetectionResult(
+            capturedAtMonotonicMs = 200,
+            sourceWidth = 1280,
+            sourceHeight = 720,
+            markers = listOf(
+                marker(10, 0.1f, 0.1f),
+                marker(11, 0.9f, 0.1f),
+                marker(12, 0.9f, 0.9f),
+                marker(13, 0.1f, 0.9f),
+            ),
+            stable = true,
+        )
+    }
 }

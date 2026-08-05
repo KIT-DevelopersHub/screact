@@ -4,7 +4,7 @@ Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクラ�
 
 ## 接続
 
-Androidは接続直後に既存要件どおり`hello`を送る。`capabilities`には`aruco_calibration`、`hand_landmarks_21`、`calibration_status`、`hello_error`を含める。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。`calibrationRequired=true`なら位置合わせモード、`false`なら通常トラッキングモードへ入る。
+Androidは接続直後に既存要件どおり`hello`を送る。`capabilities`には`aruco_calibration`、`hand_landmarks_21`、`calibration_status`、`hello_error`を含める。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。`calibrationRequired=true`なら位置合わせモード、`false`なら通常トラッキングモードへ入る。ただし、通信断前にPCが位置合わせ完了を確認済みで、同じ自動再接続中に限り、Androidは保存済み`calibration_markers`を新しい`sessionId`で再送して手追跡を継続する。手動切断や接続先変更では保存座標を破棄する。
 
 6桁の`pairingToken`はアプリ終了後に保存しない。IPとポートのみ端末内に保存する。
 
