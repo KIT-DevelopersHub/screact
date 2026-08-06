@@ -165,6 +165,31 @@ class Marker {
   }
 }
 
+/// 受信: slide_corners（スマホが検出したスライドの四隅・カメラ正規化・順不同）。
+/// 斜め/正面/下から等、見る角度による歪みは四隅の形に現れる。PC側は
+/// この4点からホモグラフィを作り、手の位置をスライド座標へ正確に写す。
+class SlideCorners {
+  final int capturedAtMonotonicMs;
+  final List<Vec2> corners;
+  const SlideCorners(this.capturedAtMonotonicMs, this.corners);
+
+  bool get isValid =>
+      corners.length == 4 &&
+      corners.every((c) => c.x.isFinite && c.y.isFinite);
+
+  static SlideCorners fromJson(Map<String, dynamic> j) {
+    final cs = <Vec2>[];
+    for (final e in (j['corners'] as List?) ?? const []) {
+      final l = e as List;
+      cs.add(Vec2((l[0] as num).toDouble(), (l[1] as num).toDouble()));
+    }
+    return SlideCorners(
+      (j['capturedAtMonotonicMs'] as num?)?.toInt() ?? 0,
+      cs,
+    );
+  }
+}
+
 /// 受信: calibration_markers（ArUco検出結果・4 ID想定）。
 class CalibrationMarkers {
   final int capturedAtMonotonicMs;

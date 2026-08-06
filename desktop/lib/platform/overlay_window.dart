@@ -1,7 +1,9 @@
 import 'package:flutter/services.dart';
 
-/// macOSネイティブの「オーバーレイ窓」（透過・最前面・クリック透過）との境界。
+/// ネイティブの「オーバーレイ窓」（透過・最前面・クリック透過）との境界。
 /// スライドの上にインクを重ねるモードの入退場を担う。
+/// 実装は macOS(Swift: OverlayModeController) / Windows(Win32:
+/// overlay_mode_controller.cpp) が同じチャネル契約で提供する。
 /// ネイティブ未接続（他OS・旧ビルド）では isAvailable=false のまま劣化動作し、
 /// 共通UIは通常モードだけで動き続ける。
 class OverlayWindowController {

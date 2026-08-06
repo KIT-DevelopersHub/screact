@@ -207,8 +207,9 @@ class _HomePageState extends State<HomePage> {
           _overlayAvailable
               ? 'ウィンドウを透過・最前面・クリック透過にして全画面へ広げ、'
                   'スライドの上にインクとポインタだけを重ねます。'
-                  '解除はメニューバーの ✏ アイコン、または ⌘⇧O。'
-              : 'このビルドではオーバーレイ窓が未接続です（macOSネイティブが必要）。',
+                  '解除は macOS: メニューバーの ✏ アイコン / ⌘⇧O、'
+                  'Windows: Ctrl+Shift+O。'
+              : 'このビルドではオーバーレイ窓が未接続です（macOS/Windowsネイティブが必要）。',
           style: const TextStyle(fontSize: 11, color: Colors.black54),
         ),
         const Divider(height: 24),

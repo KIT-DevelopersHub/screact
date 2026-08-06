@@ -58,6 +58,9 @@ class InputServer {
     this.port = 8765,
   });
 
+  /// バインド済みポート（port=0 指定時のテスト用）。未起動なら null。
+  int? get boundPort => _http?.port;
+
   Future<void> start() async {
     _http = await HttpServer.bind(InternetAddress.anyIPv4, port);
     _emit(listening: true);
@@ -107,6 +110,9 @@ class InputServer {
       case 'calibration_markers':
         _onCalibration(CalibrationMarkers.fromJson(j));
         break;
+      case 'slide_corners':
+        _onSlideCorners(SlideCorners.fromJson(j));
+        break;
       case 'heartbeat':
         break; // 受信のみ（生存確認）
       default:
@@ -136,6 +142,19 @@ class InputServer {
       _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
     }
     _emit(error: ok ? null : 'calibration failed (need 4 markers)');
+  }
+
+  /// スマホ検出のスライド四隅で位置合わせ（ArUcoなしの経路）。
+  void _onSlideCorners(SlideCorners sc) {
+    if (!sc.isValid) {
+      _emit(error: 'slide_corners requires 4 finite corners');
+      return;
+    }
+    final ok = engine.calibrateFromCorners(sc.corners);
+    if (ok) {
+      _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
+    }
+    _emit(error: ok ? null : 'slide_corners calibration failed (degenerate quad)');
   }
 
   void _enqueueFrame(HandFrame f) {

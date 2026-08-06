@@ -44,6 +44,18 @@ PCアプリを起動するたびに位置合わせ状態を未完了から開始
 
 - `hand_frame`: 検出ごとに増加する`frameId`、単調時刻、補正済み画像情報、0〜20の21点を送る。x/yは送信境界で0〜1へ収め、zはMediaPipe値を維持する。未検出時は`hand.detected=false`とする。
 - `calibration_markers`: Android側で4 IDの配置と安定性を確認した後、ArUco ID、中心、時計回りの4頂点を正規化座標で送る。安定判定の進捗は端末UIだけに表示し、通信フィールドには含めない。
+- `slide_corners`: Android側で検出したスライドの四隅を正規化カメラ座標で送る（ArUcoを使わない位置合わせ経路）。四隅の順序は任意で、PC側が TL/TR/BR/BL に並べ替えて射影変換（ホモグラフィ）を作る。斜め・下から等、見る角度による台形歪みはこの4点に含めたまま送ってよい。位置合わせ成功時、PCは`control_message`で`tracking`への切替を返す。
+
+```json
+{
+  "schemaVersion": 1,
+  "messageType": "slide_corners",
+  "sessionId": "session-fc30f9a1",
+  "capturedAtMonotonicMs": 19385000,
+  "corners": [[0.18, 0.20], [0.84, 0.12], [0.95, 0.80], [0.08, 0.68]]
+}
+```
+
 - `heartbeat`: 5秒ごとに次の形式で送る。
 
 ```json

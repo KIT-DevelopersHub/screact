@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'geom.dart';
 import '../protocol/messages.dart';
 
@@ -26,12 +28,18 @@ class Homography {
   }
 
   /// 4つのArUcoマーカー中心から、画面の四隅(0,0)(1,0)(1,1)(0,1)へのホモグラフィ。
-  /// マーカーIDの割当に依存しないよう、重心まわりの角度で TL,TR,BR,BL に並べ替える。
+  /// マーカーIDの割当に依存しないよう、四隅を TL,TR,BR,BL に並べ替える。
   static Homography? fromMarkers(List<Marker> markers) {
     if (markers.length < 4) return null;
-    final pts = markers.take(4).map((m) => m.center).toList();
-    final ordered = _orderCorners(pts);
-    final dst = const [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)];
+    return fromCorners(markers.take(4).map((m) => m.center).toList());
+  }
+
+  /// スライドの四隅（順不同・カメラ正規化）→ スライド座標(0..1)のホモグラフィ。
+  /// 斜め・下から等の台形歪みも full homography（射影変換）で正確に写す。
+  static Homography? fromCorners(List<Vec2> corners) {
+    if (corners.length != 4) return null;
+    final ordered = orderQuadCorners(corners);
+    const dst = [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)];
     return fromCorrespondences(ordered, dst);
   }
 
@@ -43,31 +51,21 @@ class Homography {
     return Vec2((h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w);
   }
 
-  /// TL,TR,BR,BL の順に並べ替え（重心からの象限で判定）。
-  static List<Vec2> _orderCorners(List<Vec2> pts) {
+  /// TL,TR,BR,BL の順に並べ替え。重心まわりの角度で時計回り（y下向き座標系）に
+  /// ソートし、x+y 最小の点を TL として回転させる。象限判定と違い、傾いた台形
+  /// （斜め・下から見た四隅）でも空象限が生じず正しく並ぶ。
+  static List<Vec2> orderQuadCorners(List<Vec2> pts) {
+    assert(pts.length == 4);
     final cx = pts.map((p) => p.x).reduce((a, b) => a + b) / pts.length;
     final cy = pts.map((p) => p.y).reduce((a, b) => a + b) / pts.length;
-    Vec2? tl, tr, br, bl;
-    for (final p in pts) {
-      final left = p.x < cx;
-      final top = p.y < cy;
-      if (left && top) {
-        tl = p;
-      } else if (!left && top) {
-        tr = p;
-      } else if (!left && !top) {
-        br = p;
-      } else {
-        bl = p;
-      }
+    final sorted = [...pts]..sort((a, b) => math
+        .atan2(a.y - cy, a.x - cx)
+        .compareTo(math.atan2(b.y - cy, b.x - cx)));
+    var tl = 0;
+    for (var i = 1; i < 4; i++) {
+      if (sorted[i].x + sorted[i].y < sorted[tl].x + sorted[tl].y) tl = i;
     }
-    // 退避: 象限に空きがあれば元順で埋める（歪んだ配置でも落ちないように）。
-    final ordered = [tl, tr, br, bl];
-    var k = 0;
-    for (var i = 0; i < 4; i++) {
-      ordered[i] ??= pts[k++ % pts.length];
-    }
-    return ordered.map((e) => e!).toList();
+    return [for (var i = 0; i < 4; i++) sorted[(tl + i) % 4]];
   }
 
   /// ガウスの消去法で A·x=b（正方）を解く。特異なら null。

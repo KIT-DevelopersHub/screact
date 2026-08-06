@@ -58,6 +58,16 @@ class InteractionEngine {
     return true;
   }
 
+  /// スマホが検出したスライド四隅（順不同・カメラ正規化）から位置合わせ。
+  /// 斜め・下から等の歪んだ台形でも射影変換で正確に写す。成功で tracking へ。
+  bool calibrateFromCorners(List<Vec2> corners) {
+    final h = Homography.fromCorners(corners);
+    if (h == null) return false;
+    _homography = h;
+    mode = EngineMode.tracking;
+    return true;
+  }
+
   /// 未校正時は恒等（カメラ座標をそのまま画面座標とみなす）。
   Vec2 _toScreen(Vec2 cam) {
     final s = _homography?.map(cam) ?? cam;
@@ -135,6 +145,7 @@ class InteractionEngine {
     _pressStart = null;
     _lastScrollAnchor = null;
     _screenFilter.reset();
+    _rec.reset();
     return events;
   }
 }

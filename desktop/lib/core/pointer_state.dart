@@ -17,6 +17,9 @@ class OverlayModel extends ChangeNotifier {
   final List<InkStroke> strokes = [];
   InkStroke? _active;
 
+  /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
+  static const double _minPointDist = 0.002;
+
   void apply(InteractionEvent e) {
     switch (e.kind) {
       case InteractionKind.pointerMove:
@@ -31,7 +34,12 @@ class OverlayModel extends ChangeNotifier {
         break;
       case InteractionKind.pressMove:
         cursor = e.screen;
-        _active?.points.add(e.screen);
+        final a = _active;
+        if (a != null &&
+            (a.points.isEmpty ||
+                a.points.last.distanceTo(e.screen) >= _minPointDist)) {
+          a.points.add(e.screen);
+        }
         break;
       case InteractionKind.click:
         cursor = e.screen;
