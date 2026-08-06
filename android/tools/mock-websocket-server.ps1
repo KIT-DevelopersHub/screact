@@ -8,7 +8,11 @@ param(
     [ValidateSet('tracking', 'calibration')]
     [string]$InitialMode = 'tracking',
 
-    [ValidateSet('happy', 'mode-switch', 'remote-disconnect', 'ack-timeout', 'invalid-json', 'wrong-session', 'schema-mismatch', 'drop', 'slow-reader')]
+    [ValidateSet(
+        'happy', 'production-happy', 'calibration-retry', 'pairing-rejected',
+        'unsupported-version', 'server-busy', 'mode-switch', 'remote-disconnect',
+        'ack-timeout', 'invalid-json', 'wrong-session', 'schema-mismatch', 'drop', 'slow-reader'
+    )]
     [string]$Scenario = 'happy',
 
     [ValidateRange(0, 3600)]
@@ -157,6 +161,59 @@ function Send-WebSocketText {
     Send-WebSocketFrame -Stream $Stream -Opcode 1 -Payload $utf8.GetBytes($Text)
 }
 
+function Send-HelloError {
+    param(
+        [System.IO.Stream]$Stream,
+        [string]$Code,
+        [bool]$Retryable
+    )
+    $payload = [ordered]@{
+        schemaVersion = 1
+        messageType = 'hello_error'
+        code = $Code
+        retryable = $Retryable
+    } | ConvertTo-Json -Compress
+    Send-WebSocketText -Stream $Stream -Text $payload
+    Write-DebugEvent -Name 'hello_error_sent' -Data @{ code = $Code; retryable = $Retryable }
+}
+
+function Send-CalibrationStatus {
+    param(
+        [System.IO.Stream]$Stream,
+        [string]$SessionId,
+        [ValidateSet('processing', 'retry_required', 'complete')]
+        [string]$Status,
+        [string]$Reason = ''
+    )
+    $payload = [ordered]@{
+        schemaVersion = 1
+        messageType = 'calibration_status'
+        sessionId = $SessionId
+        status = $Status
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) { $payload.reason = $Reason }
+    Send-WebSocketText -Stream $Stream -Text ($payload | ConvertTo-Json -Compress)
+    Write-DebugEvent -Name 'calibration_status_sent' -Data @{ status = $Status; reason = $Reason }
+}
+
+function Send-ModeControl {
+    param(
+        [System.IO.Stream]$Stream,
+        [string]$SessionId,
+        [ValidateSet('tracking', 'calibration')]
+        [string]$Mode
+    )
+    $payload = [ordered]@{
+        schemaVersion = 1
+        messageType = 'control_message'
+        sessionId = $SessionId
+        command = 'set_mode'
+        mode = $Mode
+    } | ConvertTo-Json -Compress
+    Send-WebSocketText -Stream $Stream -Text $payload
+    Write-DebugEvent -Name 'control_sent' -Data @{ command = 'set_mode'; mode = $Mode }
+}
+
 function Write-DebugEvent {
     param(
         [string]$Name,
@@ -257,6 +314,7 @@ $effectiveReadDelayMs = if ($Scenario -eq 'slow-reader' -and $ReadDelayMs -eq 0)
 
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
 $listener.Start()
+$calibrationComplete = $false
 Write-Host "YubiBoard mock WebSocket server: 0.0.0.0:$Port/ws/v1/input"
 Write-Host "Pairing token: $PairingToken / initial mode: $InitialMode / scenario: $Scenario"
 Write-Host "Results: $OutputDirectory"
@@ -330,9 +388,18 @@ try {
                 Write-DebugEvent -Name 'message_received' -Data @{ messageType = $message.messageType; bytes = $frame.Payload.Length; frameId = $message.frameId }
                 switch ($message.messageType) {
                     'hello' {
-                        if ($message.pairingToken -ne $PairingToken) {
+                        if ($message.pairingToken -ne $PairingToken -or $Scenario -eq 'pairing-rejected') {
                             Write-Warning "Rejected pairing token from $remote"
-                            throw 'Pairing token did not match'
+                            Send-HelloError -Stream $stream -Code 'pairing_code_mismatch' -Retryable $false
+                            break
+                        }
+                        if ($Scenario -eq 'unsupported-version') {
+                            Send-HelloError -Stream $stream -Code 'unsupported_version' -Retryable $false
+                            break
+                        }
+                        if ($Scenario -eq 'server-busy') {
+                            Send-HelloError -Stream $stream -Code 'server_busy' -Retryable $true
+                            break
                         }
                         if ($Scenario -eq 'ack-timeout') {
                             Write-Host 'Scenario ack-timeout: hello_ack suppressed'
@@ -344,7 +411,10 @@ try {
                             messageType = 'hello_ack'
                             sessionId = $sessionId
                             surface = [ordered]@{ surfaceId = 'mock-display'; widthPx = 1920; heightPx = 1080 }
-                            calibrationRequired = $InitialMode -eq 'calibration'
+                            calibrationRequired = -not $calibrationComplete -and (
+                                $InitialMode -eq 'calibration' -or
+                                $Scenario -in @('production-happy', 'calibration-retry')
+                            )
                         } | ConvertTo-Json -Compress
                         Send-WebSocketText -Stream $stream -Text $ack
                         Write-Host "Handshake accepted: $sessionId"
@@ -377,6 +447,25 @@ try {
                     'calibration_markers' {
                         $markerCount++
                         Write-Host "calibration_markers: $($message.markers.Count)/4"
+                        if ($Scenario -eq 'production-happy' -and -not $scenarioActionSent) {
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status processing
+                            Start-Sleep -Milliseconds 500
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status complete
+                            $calibrationComplete = $true
+                            Send-ModeControl -Stream $stream -SessionId $sessionId -Mode tracking
+                            $scenarioActionSent = $true
+                        } elseif ($Scenario -eq 'calibration-retry' -and $markerCount -eq 1) {
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status processing
+                            Start-Sleep -Milliseconds 300
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status retry_required -Reason invalid_geometry
+                        } elseif ($Scenario -eq 'calibration-retry' -and $markerCount -ge 2 -and -not $scenarioActionSent) {
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status processing
+                            Start-Sleep -Milliseconds 500
+                            Send-CalibrationStatus -Stream $stream -SessionId $sessionId -Status complete
+                            $calibrationComplete = $true
+                            Send-ModeControl -Stream $stream -SessionId $sessionId -Mode tracking
+                            $scenarioActionSent = $true
+                        }
                     }
                     'heartbeat' {
                         $heartbeatCount++

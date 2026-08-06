@@ -2,6 +2,8 @@
 
 背面カメラでArUcoマーカーまたは1つの手の21点ランドマークを検出し、PCへWebSocket/JSONで送るAndroidアプリです。Android側ではジェスチャー判定やPC座標変換を行いません。
 
+目標の本番フローは、初回ペアリング後に前回のPCへ自動接続し、スマホ固定後にPCで`配置OK`を押してからArUco位置合わせへ進む形です。現行実装はhost・portの復元までで、6桁コードなしの起動時自動接続と配置確認ゲートは未実装です。
+
 ## ビルド
 
 Android Studioではこの`android/`ディレクトリを開き、API 36 SDKとAndroid 7.0（API 24）以上の実機を使用します。
@@ -45,7 +47,7 @@ python .\android\tools\render_hand_video.py `
 
 デスクトップアプリがなくても、`tools/android-debug.ps1`とモックサーバーで実機のカメラ、検出、通信、再接続、性能を検証できます。スクリプトは`ANDROID_HOME`、`ANDROID_SDK_ROOT`、または標準のWindows SDK配置から`adb`を検出します。
 
-初めて環境を作る場合や、操作しながら見る場所を確認したい場合は、[Android実機デバッグ・チュートリアル](../docs/android-debug-tutorial.md)を先に参照してください。
+初めて環境を作る場合や、操作しながら見る場所を確認したい場合は、[Android実機デバッグ・チュートリアル](../docs/android/android-debug-tutorial.md)を先に参照してください。
 
 ```powershell
 .\android\tools\android-debug.ps1 doctor
@@ -77,7 +79,7 @@ Xiaomi系端末で`INSTALL_FAILED_USER_RESTRICTED`となる場合は、端末を
 
 ### アプリ内のデバッグモード
 
-メイン画面の「設定」を開き、「デバッグモード」を切り替えて「適用」を押します。設定は次回起動時にも保持されます。debug APKでは初回のみデバッグモード、本番APKでは初回のみ本番モードが選ばれます。
+debug APKは初回にデバッグ画面、release APKは常に本番画面を開きます。debug APKでは設定から本番画面へ切り替えられ、本番画面の「設定・ヘルプ」からデバッグへ戻れます。接続とカメラは切替時に維持します。release APKにはデバッグ切替を表示しません。
 
 デバッグモードでは接続カードの「診断」から次を確認できます。
 
@@ -85,6 +87,7 @@ Xiaomi系端末で`INSTALL_FAILED_USER_RESTRICTED`となる場合は、端末を
 - 21点座標、人差し指先端、左右分類、ArUco IDと中心
 - 接続状態、session、送信数、送信バイト、置換・失敗・キュー抑制
 - カメラなしで通信を試す「疑似21点」「疑似未検出」「疑似4マーカー」
+- 本番画面の全状態と操作を通信なしで試す「本番状態ラボ」
 - 直近500イベントのJSONL保存
 
 疑似入力は通信層の検証専用です。検出精度の評価には使わないでください。診断イベントはLogcatの`YubiBoardDiag`タグにもJSONで出力されます。本番モードでは診断ボタンと詳細なしきい値を隠し、イベント収集と疑似入力を停止します。ビルド種別にかかわらず設定から再度切り替えられます。
@@ -96,6 +99,11 @@ Xiaomi系端末で`INSTALL_FAILED_USER_RESTRICTED`となる場合は、端末を
 | 値 | 確認内容 |
 | --- | --- |
 | `happy` | 正常なhello、データ受信、heartbeat |
+| `production-happy` | PC主導の位置合わせ、計算中、完了、追跡開始 |
+| `calibration-retry` | 位置合わせ再試行理由を返した後に成功 |
+| `pairing-rejected` | 6桁コード不一致を明示 |
+| `unsupported-version` | 未対応バージョンを明示 |
+| `server-busy` | 再試行可能なPC処理中エラー |
 | `mode-switch` | 3秒後の遠隔モード切替 |
 | `remote-disconnect` | PCからの切断要求 |
 | `ack-timeout` | hello_ackなしと自動再接続 |
@@ -139,21 +147,22 @@ cd android
 1. PCでモックサーバーまたは互換PCアプリを起動する。
 2. Android実機でカメラを許可し、画面下部のカードへ接続先と6桁コードを入力して「PCへ接続」を押す。
 3. 通常撮影で骨格Overlay、検知fps、通信受信を確認する。
-4. 「位置合わせを開始」を押し、`DICT_4X4_50`のID 10（左上）、11（右上）、12（右下）、13（左下）を映す。端末は縦・横どちらでもよい。
+4. 現行デバッグUIでは「位置合わせを開始」を押し、`DICT_4X4_50`のID 10（左上）、11（右上）、12（右下）、13（左下）を映す。目標本番フローでは、スマホ固定後にPCで`配置OK`を押すとマーカーが表示される。端末は縦・横どちらでもよい。
 5. 「安定待ち 1/5」から進捗が増え、有効な5フレームが蓄積されると黄色の枠と「安定」を表示して`calibration_markers`を送る。ピクセルの完全一致は要求せず、中心移動は正規化距離`0.02`まで、検出欠落は連続2フレームまで許容する。
-6. PCサーバーを止めて再接続表示を確認し、再起動して自動復帰を確認する。
+6. PCサーバー停止・再起動に加え、サーバーを動かしたままAndroidのWi-Fiを切断・復帰し、即時再接続することを確認する。位置合わせ完了後の通信復帰ではArUcoを再撮影せず手追跡へ戻る。
 
 追加の受入確認として、640×480と960×540の両方で10分測定します。640×480では検出15 fps以上、crash/ANRなし、メモリが継続的に増え続けないことを確認します。PCとAndroidの単調時計は同期していないため、PC受信時刻から真のエンドツーエンド遅延は算出しません。診断画面の`network.capture_to_send_ms`をAndroid内部の撮影から送信要求までの遅延として扱います。
 
 ## 設定と既定値
 
 - UI: Jetpack Compose Material 3。接続、切断、撮影モード切替を横幅いっぱいの主要操作として表示
-- 動作モード: debug APKの初回はデバッグ、本番APKの初回は本番。アプリ内設定で切替・保存可能
-- 解析解像度: `640×480`（詳細設定で`960×540`へ変更可能）
+- 動作モード: debug APKの初回はデバッグで本番との切替可能。release APKは本番固定
+- 解析解像度: 本番は`1280×720`、失敗時に`960×540`、`640×480`へフォールバック。debugでは`1920×1080`比較も可能
 - MediaPipe検出・存在・追跡信頼度: 各`0.5`
 - PC送信上限: `20 fps`（5〜20 fps）
 - heartbeat: 5秒
-- 再接続: 1、2、4、8、以後10秒
-- IPとポートは保存するが、ペアリングコードは保存しない
+- 再接続: 1、2、4、8、以後10秒。Androidのデフォルトネットワーク復帰時は即時再試行
+- 現行実装はIPとポートを保存するが、ペアリングコードは保存せず、起動時自動接続もしない
+- 目標仕様では初回成功時の`resumeToken`をAndroid Keystoreで保護し、2回目以降は入力なしで自動接続する
 
-現在の実装全体は[`docs/android-current-spec.md`](../docs/android-current-spec.md)、通信JSONの詳細は[`docs/android-protocol-v1.md`](../docs/android-protocol-v1.md)を参照してください。
+現在の実装全体は[`docs/android/android-current-spec.md`](../docs/android/android-current-spec.md)、通信JSONの詳細は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を参照してください。
