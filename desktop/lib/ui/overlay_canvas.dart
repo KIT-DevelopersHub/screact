@@ -36,13 +36,26 @@ class _OverlayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     for (final stroke in model.strokes) {
-      if (stroke.points.length < 2) continue;
-      final first = _p(stroke.points.first, size);
-      final path = Path()..moveTo(first.dx, first.dy);
-      for (final pt in stroke.points.skip(1)) {
-        final o = _p(pt, size);
-        path.lineTo(o.dx, o.dy);
+      final pts = stroke.points;
+      if (pts.isEmpty) continue;
+      if (pts.length == 1) {
+        // 1点だけのストローク（タップ）は点として残す。
+        canvas.drawCircle(
+            _p(pts.first, size), ink.strokeWidth / 2, Paint()..color = ink.color);
+        continue;
       }
+      // 中点スムージング: 各点を制御点に、隣接中点を終点にした2次ベジェで
+      // 連続した滑らかな線にする（折れ線のカクつきを除去）。
+      final path = Path();
+      final first = _p(pts.first, size);
+      path.moveTo(first.dx, first.dy);
+      for (var i = 1; i < pts.length - 1; i++) {
+        final c = _p(pts[i], size);
+        final n = _p(pts[i + 1], size);
+        path.quadraticBezierTo(c.dx, c.dy, (c.dx + n.dx) / 2, (c.dy + n.dy) / 2);
+      }
+      final last = _p(pts.last, size);
+      path.lineTo(last.dx, last.dy);
       canvas.drawPath(path, ink);
     }
 
