@@ -22,6 +22,8 @@ class ProtocolCodecTest {
         assertEquals(1, root.getValue("schemaVersion").jsonPrimitive.content.toInt())
         assertEquals("hello", root.getValue("messageType").jsonPrimitive.content)
         assertTrue(encoded.contains("hand_landmarks_21"))
+        assertTrue(encoded.contains("calibration_status"))
+        assertTrue(encoded.contains("hello_error"))
     }
 
     @Test
@@ -79,5 +81,20 @@ class ProtocolCodecTest {
                 """{"schemaVersion":1,"messageType":"future_message"}""",
             ),
         )
+    }
+
+    @Test
+    fun `hello error and calibration status are decoded`() {
+        val helloError = ProtocolCodec.decodeServerMessage(
+            """{"schemaVersion":1,"messageType":"hello_error","code":"pairing_code_mismatch","retryable":false}""",
+        )
+        val calibration = ProtocolCodec.decodeServerMessage(
+            """{"schemaVersion":1,"messageType":"calibration_status","sessionId":"s1","status":"retry_required","reason":"invalid_geometry"}""",
+        )
+
+        assertTrue(helloError is HelloErrorMessage)
+        assertEquals("pairing_code_mismatch", (helloError as HelloErrorMessage).code)
+        assertTrue(calibration is CalibrationStatusMessage)
+        assertEquals("retry_required", (calibration as CalibrationStatusMessage).status)
     }
 }

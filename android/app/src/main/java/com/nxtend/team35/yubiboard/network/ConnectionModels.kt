@@ -24,9 +24,19 @@ enum class ConnectionStatus {
     ERROR,
 }
 
+enum class ConnectionErrorCode {
+    PAIRING_CODE_MISMATCH,
+    UNSUPPORTED_VERSION,
+    SERVER_BUSY,
+    UNREACHABLE,
+    ACK_TIMEOUT,
+    UNKNOWN,
+}
+
 data class ConnectionSnapshot(
     val status: ConnectionStatus,
     val sessionId: String? = null,
     val retryInSeconds: Int? = null,
     val detail: String? = null,
+    val errorCode: ConnectionErrorCode? = null,
 )

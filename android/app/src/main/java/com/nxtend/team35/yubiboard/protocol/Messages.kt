@@ -15,7 +15,12 @@ data class HelloMessage(
     val pairingToken: String,
     val interactionProfile: String = "single_user_single_active_hand",
     val coordinateSpace: String = "normalized_camera",
-    val capabilities: List<String> = listOf("aruco_calibration", "hand_landmarks_21"),
+    val capabilities: List<String> = listOf(
+        "aruco_calibration",
+        "hand_landmarks_21",
+        "calibration_status",
+        "hello_error",
+    ),
 )
 
 @Serializable
@@ -98,6 +103,23 @@ data class ControlMessage(
     val sessionId: String,
     val command: String,
     val mode: String? = null,
+) : ServerMessage
+
+@Serializable
+data class HelloErrorMessage(
+    val schemaVersion: Int,
+    val messageType: String,
+    val code: String,
+    val retryable: Boolean = false,
+) : ServerMessage
+
+@Serializable
+data class CalibrationStatusMessage(
+    val schemaVersion: Int,
+    val messageType: String,
+    val sessionId: String,
+    val status: String,
+    val reason: String? = null,
 ) : ServerMessage
 
 enum class CaptureMode {

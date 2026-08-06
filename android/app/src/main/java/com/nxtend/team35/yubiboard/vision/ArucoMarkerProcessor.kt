@@ -106,4 +106,9 @@ class ArucoMarkerProcessor(
             onError(it)
         }
     }
+
+    fun reset() {
+        stabilityTracker.reset()
+        AppDiagnostics.event("vision", "aruco_reset")
+    }
 }

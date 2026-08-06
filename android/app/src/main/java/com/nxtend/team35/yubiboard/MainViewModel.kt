@@ -11,7 +11,14 @@ import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
+import com.nxtend.team35.yubiboard.protocol.CalibrationStatusMessage
 import com.nxtend.team35.yubiboard.settings.AppSettings
+import com.nxtend.team35.yubiboard.ui.CalibrationRetryReason
+import com.nxtend.team35.yubiboard.ui.CalibrationUiState
+import com.nxtend.team35.yubiboard.ui.CameraUiState
+import com.nxtend.team35.yubiboard.ui.ExperienceMode
+import com.nxtend.team35.yubiboard.ui.ProductionUiState
+import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
@@ -25,11 +32,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableMode = MutableLiveData(CaptureMode.TRACKING)
     private val mutableLog = MutableLiveData<String>()
     private val mutableSettings = MutableLiveData(loadSettings())
+    private var productionSnapshot = ProductionUiState(
+        experience = if (mutableSettings.value?.debugModeEnabled == true) {
+            ExperienceMode.DEBUG
+        } else {
+            ExperienceMode.PRODUCTION
+        },
+    )
+    private val mutableProductionState = MutableLiveData(productionSnapshot)
+    private val mutableCalibrationReset = MutableLiveData<Long>()
 
     val connection: LiveData<ConnectionSnapshot> = mutableConnection
     val mode: LiveData<CaptureMode> = mutableMode
     val log: LiveData<String> = mutableLog
     val settings: LiveData<AppSettings> = mutableSettings
+    val productionState: LiveData<ProductionUiState> = mutableProductionState
+    val calibrationReset: LiveData<Long> = mutableCalibrationReset
     val currentSettings: AppSettings get() = mutableSettings.value ?: AppSettings()
     val savedHost: String get() = preferences.getString(KEY_HOST, "") ?: ""
     val savedPort: Int get() = preferences.getInt(KEY_PORT, DEFAULT_PORT)
@@ -37,8 +55,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val webSocketClient = YubiBoardWebSocketClient(
         deviceId = getOrCreateDeviceId(),
         clientVersion = BuildConfig.VERSION_NAME,
-        onStateChanged = mutableConnection::postValue,
-        onModeChanged = mutableMode::postValue,
+        onStateChanged = ::handleConnectionChanged,
+        onModeChanged = ::handleModeChanged,
+        onCalibrationStatus = ::handleCalibrationStatus,
         onLog = mutableLog::postValue,
     )
 
@@ -61,13 +80,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun disconnect() = webSocketClient.disconnect()
 
-    fun submitHand(result: HandDetectionResult) = webSocketClient.submitHand(result)
+    fun retryNow() = webSocketClient.retryNow()
 
-    fun submitCalibration(result: MarkerDetectionResult) = webSocketClient.submitCalibration(result)
+    fun onNetworkLost() = webSocketClient.onNetworkLost()
+
+    fun onNetworkAvailable() = webSocketClient.onNetworkAvailable()
+
+    fun changeConnectionSettings() {
+        webSocketClient.disconnect()
+        updateProduction {
+            it.copy(
+                connection = ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
+                calibration = CalibrationUiState.Inactive,
+                tracking = TrackingUiState.INACTIVE,
+            )
+        }
+    }
+
+    fun updateCameraState(state: CameraUiState, notice: String? = null) {
+        updateProduction { it.copy(camera = state, notice = notice) }
+    }
+
+    fun submitHand(result: HandDetectionResult) {
+        webSocketClient.submitHand(result)
+        updateProduction { current ->
+            if (current.captureMode != CaptureMode.TRACKING) return@updateProduction current
+            val nextTracking = when (result.trackingState) {
+                com.nxtend.team35.yubiboard.vision.TrackingState.CANDIDATE -> TrackingUiState.CANDIDATE
+                com.nxtend.team35.yubiboard.vision.TrackingState.TRACKING -> TrackingUiState.TRACKING
+                com.nxtend.team35.yubiboard.vision.TrackingState.TEMPORARILY_LOST ->
+                    TrackingUiState.TEMPORARILY_LOST
+                com.nxtend.team35.yubiboard.vision.TrackingState.UNDETECTED -> {
+                    if (current.tracking in setOf(
+                            TrackingUiState.TRACKING,
+                            TrackingUiState.TEMPORARILY_LOST,
+                            TrackingUiState.LONG_LOST,
+                        )
+                    ) {
+                        TrackingUiState.LONG_LOST
+                    } else {
+                        TrackingUiState.READY_NO_HAND
+                    }
+                }
+            }
+            current.copy(
+                tracking = nextTracking,
+                indexTip = result.landmarks.getOrNull(8),
+                sourceWidth = result.sourceWidth,
+                sourceHeight = result.sourceHeight,
+            )
+        }
+    }
+
+    fun submitCalibration(result: MarkerDetectionResult) {
+        if (result.stable) webSocketClient.submitCalibration(result)
+        updateProduction { current ->
+            if (current.captureMode != CaptureMode.CALIBRATION) return@updateProduction current
+            val calibration = when {
+                result.stable -> CalibrationUiState.WaitingForPc
+                result.markers.size < 4 -> CalibrationUiState.FindingMarkers(result.markers.size)
+                else -> CalibrationUiState.Stabilizing(
+                    result.stableFrameCount,
+                    result.requiredStableFrames,
+                )
+            }
+            current.copy(
+                calibration = calibration,
+                markers = result.markers,
+                sourceWidth = result.sourceWidth,
+                sourceHeight = result.sourceHeight,
+            )
+        }
+    }
 
     fun setModeManually(mode: CaptureMode) {
         AppDiagnostics.event("ui", "manual_mode", mapOf("mode" to mode))
-        mutableMode.value = mode
+        handleModeChanged(mode)
+    }
+
+    fun setExperienceMode(mode: ExperienceMode) {
+        if (!BuildConfig.DEBUG && mode == ExperienceMode.DEBUG) return
+        val debugEnabled = mode == ExperienceMode.DEBUG
+        val updated = currentSettings.copy(debugModeEnabled = debugEnabled)
+        preferences.edit().putBoolean(KEY_DEBUG_MODE, debugEnabled).apply()
+        AppDiagnostics.setEnabled(debugEnabled)
+        mutableSettings.value = updated
+        updateProduction { it.copy(experience = mode) }
     }
 
     fun submitDebugHand(detected: Boolean) {
@@ -122,20 +220,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun handleConnectionChanged(snapshot: ConnectionSnapshot) {
+        mutableConnection.postValue(snapshot)
+        updateProduction { current ->
+            val resetCaptureState = snapshot.status !in setOf(ConnectionStatus.CONNECTED)
+            current.copy(
+                connection = snapshot,
+                calibration = if (resetCaptureState) CalibrationUiState.Inactive else current.calibration,
+                tracking = if (resetCaptureState) TrackingUiState.INACTIVE else current.tracking,
+            )
+        }
+    }
+
+    private fun handleModeChanged(mode: CaptureMode) {
+        mutableMode.postValue(mode)
+        if (mode == CaptureMode.CALIBRATION) mutableCalibrationReset.postValue(SystemClock.uptimeMillis())
+        updateProduction { current ->
+            if (mode == CaptureMode.CALIBRATION) {
+                current.copy(
+                    captureMode = mode,
+                    calibration = CalibrationUiState.FindingMarkers(0),
+                    tracking = TrackingUiState.INACTIVE,
+                    markers = emptyList(),
+                    indexTip = null,
+                )
+            } else {
+                current.copy(
+                    captureMode = mode,
+                    calibration = CalibrationUiState.Complete,
+                    tracking = TrackingUiState.READY_NO_HAND,
+                    markers = emptyList(),
+                )
+            }
+        }
+    }
+
+    private fun handleCalibrationStatus(message: CalibrationStatusMessage) {
+        val state = when (message.status) {
+            "processing" -> CalibrationUiState.WaitingForPc
+            "complete" -> CalibrationUiState.Complete
+            "retry_required" -> CalibrationUiState.RetryRequired(
+                when (message.reason) {
+                    "markers_not_visible" -> CalibrationRetryReason.MARKERS_NOT_VISIBLE
+                    "invalid_geometry" -> CalibrationRetryReason.INVALID_GEOMETRY
+                    "unstable" -> CalibrationRetryReason.UNSTABLE
+                    "screen_mismatch" -> CalibrationRetryReason.SCREEN_MISMATCH
+                    "internal_error" -> CalibrationRetryReason.INTERNAL_ERROR
+                    else -> CalibrationRetryReason.UNKNOWN
+                },
+            )
+            else -> return
+        }
+        if (state is CalibrationUiState.RetryRequired) {
+            mutableCalibrationReset.postValue(SystemClock.uptimeMillis())
+        }
+        updateProduction { it.copy(calibration = state) }
+    }
+
+    @Synchronized
+    private fun updateProduction(transform: (ProductionUiState) -> ProductionUiState) {
+        productionSnapshot = transform(productionSnapshot)
+        mutableProductionState.postValue(productionSnapshot)
+    }
+
     fun updateSettings(settings: AppSettings): String? {
-        settings.validate()?.let { return it }
+        val effective = if (BuildConfig.DEBUG) settings else settings.copy(debugModeEnabled = false)
+        effective.validate()?.let { return it }
         preferences.edit()
-            .putInt(KEY_ANALYSIS_WIDTH, settings.analysisWidth)
-            .putInt(KEY_ANALYSIS_HEIGHT, settings.analysisHeight)
-            .putFloat(KEY_DETECTION_CONFIDENCE, settings.minDetectionConfidence)
-            .putFloat(KEY_PRESENCE_CONFIDENCE, settings.minPresenceConfidence)
-            .putFloat(KEY_TRACKING_CONFIDENCE, settings.minTrackingConfidence)
-            .putInt(KEY_MAX_SEND_FPS, settings.maxSendFps)
-            .putBoolean(KEY_DEBUG_MODE, settings.debugModeEnabled)
+            .putInt(KEY_ANALYSIS_WIDTH, effective.analysisWidth)
+            .putInt(KEY_ANALYSIS_HEIGHT, effective.analysisHeight)
+            .putFloat(KEY_DETECTION_CONFIDENCE, effective.minDetectionConfidence)
+            .putFloat(KEY_PRESENCE_CONFIDENCE, effective.minPresenceConfidence)
+            .putFloat(KEY_TRACKING_CONFIDENCE, effective.minTrackingConfidence)
+            .putInt(KEY_MAX_SEND_FPS, effective.maxSendFps)
+            .putBoolean(KEY_DEBUG_MODE, effective.debugModeEnabled)
             .apply()
-        webSocketClient.setMaxFrameRate(settings.maxSendFps)
-        AppDiagnostics.setEnabled(settings.debugModeEnabled)
-        mutableSettings.value = settings
+        webSocketClient.setMaxFrameRate(effective.maxSendFps)
+        AppDiagnostics.setEnabled(effective.debugModeEnabled)
+        mutableSettings.value = effective
+        updateProduction {
+            it.copy(
+                experience = if (effective.debugModeEnabled) ExperienceMode.DEBUG else ExperienceMode.PRODUCTION,
+            )
+        }
         return null
     }
 
@@ -152,13 +319,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadSettings() = AppSettings(
-        analysisWidth = preferences.getInt(KEY_ANALYSIS_WIDTH, 640),
-        analysisHeight = preferences.getInt(KEY_ANALYSIS_HEIGHT, 480),
+        analysisWidth = preferences.getInt(KEY_ANALYSIS_WIDTH, 1280),
+        analysisHeight = preferences.getInt(KEY_ANALYSIS_HEIGHT, 720),
         minDetectionConfidence = preferences.getFloat(KEY_DETECTION_CONFIDENCE, 0.5f),
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
-        debugModeEnabled = preferences.getBoolean(KEY_DEBUG_MODE, BuildConfig.DEBUG),
+        debugModeEnabled = BuildConfig.DEBUG && preferences.getBoolean(KEY_DEBUG_MODE, true),
     ).let { if (it.validate() == null) it else AppSettings() }
 
     companion object {
