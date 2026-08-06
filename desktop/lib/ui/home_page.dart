@@ -3,12 +3,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/calibration_config.dart';
 import '../core/interaction_engine.dart';
 import '../core/mock_hand.dart';
 import '../core/pointer_state.dart';
 import '../net/input_server.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
+import 'calibration_flow.dart';
 import 'overlay_canvas.dart';
 
 /// 共通の操作面＋オーバーレイのライブプレビュー。macOSではこれ自体がアプリの
@@ -20,9 +22,13 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _engine = InteractionEngine();
+  /// キャリブ調整値。既定は同梱ターゲット画像のマーカー実測位置
+  /// （設定パネルから変更可能・エンジンと同一インスタンスを共有）。
+  final _calibConfig = CalibrationConfig.forCalibrationTarget();
+  late final _engine = InteractionEngine(config: _calibConfig);
   final _overlay = OverlayModel();
   final _bridge = DesktopBridge.forPlatform();
+  final _flow = CalibrationFlowController();
 
   InputServer? _server;
   ServerStatus _status = const ServerStatus();
@@ -33,26 +39,42 @@ class _HomePageState extends State<HomePage> {
   late final OverlayWindowController _overlayWin;
   bool _overlayOn = false;
   bool _overlayAvailable = false;
+  bool _autoFlowFired = false;
 
-  static const int _port = 8765;
+  /// 検証用に --dart-define=YUBI_PORT=8766 等で差し替え可能（既定 8765）。
+  static const int _port = int.fromEnvironment('YUBI_PORT', defaultValue: 8765);
+
+  /// 検証用の自動フロー: 起動時にサーバ開始し、クライアント接続で
+  /// 「スマホ設置完了」をウィンドウ内表示で自動実行する（既定 off）。
+  static const bool _autoFlow = bool.fromEnvironment('YUBI_AUTOFLOW');
+
+  static const String _targetAsset = 'assets/calibration-target-1920x1080.png';
 
   @override
   void initState() {
     super.initState();
     _overlayWin = OverlayWindowController(
-      onExited: () => setState(() => _overlayOn = false),
+      onExited: () => setState(() {
+        _overlayOn = false;
+        _flow.cancel(); // 脱出経路で抜けたらキャリブ表示も中止
+      }),
       onEntered: () => setState(() => _overlayOn = true),
     );
     _overlayWin.probe().then((ok) {
       if (mounted) setState(() => _overlayAvailable = ok);
     });
+    _flow.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadIps();
+    if (_autoFlow) scheduleMicrotask(_startServer);
   }
 
   @override
   void dispose() {
     _mockTimer?.cancel();
     _server?.stop();
+    _flow.dispose();
     super.dispose();
   }
 
@@ -80,7 +102,7 @@ class _HomePageState extends State<HomePage> {
       engine: _engine,
       port: _port,
       onEvents: _applyEvents,
-      onStatus: (st) => setState(() => _status = st),
+      onStatus: _onServerStatus,
     );
     await s.start();
     await _bridge.setOverlayVisible(true);
@@ -90,7 +112,47 @@ class _HomePageState extends State<HomePage> {
   Future<void> _stopServer() async {
     await _server?.stop();
     await _bridge.setOverlayVisible(false);
+    _flow.cancel();
     setState(() => _server = null);
+  }
+
+  void _onServerStatus(ServerStatus st) {
+    if (!mounted) return;
+    setState(() => _status = st);
+    // 四隅受信→位置合わせ成功なら、キャリブ画像を自動クローズ。
+    _flow.onEngineEpoch(_engine.calibrationCount);
+    // 検証用自動フロー: クライアント接続後に「スマホ設置完了」を自動実行。
+    if (_autoFlow && !_autoFlowFired && st.clientId != null) {
+      _autoFlowFired = true;
+      _startCalibrationDisplay(intoOverlay: false);
+    }
+  }
+
+  /// 「スマホ設置完了」: キャリブ画像を最前面（オーバーレイ）に全画面表示し、
+  /// スマホをマーカー検出（calibration）モードへ切り替える。四隅を受信して
+  /// 位置合わせが完了すると画像は自動で閉じ、従来フロー（描画）へ進む。
+  Future<void> _onPhonePlaced() =>
+      _startCalibrationDisplay(intoOverlay: _overlayAvailable);
+
+  Future<void> _startCalibrationDisplay({required bool intoOverlay}) async {
+    final server = _server;
+    if (server == null) return;
+    server.requestMode('calibration');
+    _flow.start(_engine.calibrationCount);
+    if (intoOverlay && !_overlayOn) await _enterOverlay();
+    if (mounted) setState(() {});
+  }
+
+  /// キャリブ画像の全画面表示（白背景＋ArUcoターゲットを画面いっぱいに引き伸ばす。
+  /// マーカー中心位置の比率が設定のインセット既定値と一致する）。
+  Widget _calibrationTarget() {
+    return Container(
+      color: Colors.white,
+      alignment: Alignment.center,
+      child: SizedBox.expand(
+        child: Image.asset(_targetAsset, fit: BoxFit.fill),
+      ),
+    );
   }
 
   /// 電話なしの結合確認: モックの位置合わせ＋手フレームをエンジンへ直接流す。
@@ -119,7 +181,12 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     if (_overlayOn) {
-      // オーバーレイモード: 背景を完全透過にし、インクとポインタだけ描画する。
+      // オーバーレイモード。キャリブ表示中はArUcoターゲットを最前面に出し、
+      // 四隅の受信で自動的にインク描画（透過）へ切り替わる。
+      if (_flow.showingTarget) {
+        return Material(child: _calibrationTarget());
+      }
+      // 背景を完全透過にし、インクとポインタだけ描画する。
       // 窓はネイティブ側でクリック透過になっているため操作UIは出さない。
       return Material(
         type: MaterialType.transparency,
@@ -138,13 +205,56 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: Row(
+      body: Stack(
         children: [
-          SizedBox(width: 300, child: _controls(running)),
-          const VerticalDivider(width: 1),
-          Expanded(child: _preview()),
+          Row(
+            children: [
+              SizedBox(width: 300, child: _controls(running)),
+              const VerticalDivider(width: 1),
+              Expanded(child: _preview()),
+            ],
+          ),
+          // オーバーレイ窓が使えない環境（未接続ビルド・検証時）は
+          // ウィンドウ内いっぱいにキャリブ画像を表示する。
+          if (_flow.showingTarget && !_overlayOn)
+            Positioned.fill(child: _inWindowCalibration()),
         ],
       ),
+    );
+  }
+
+  Widget _inWindowCalibration() {
+    return Stack(
+      children: [
+        Positioned.fill(child: _calibrationTarget()),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 16,
+          child: Center(
+            child: Card(
+              color: Colors.black87,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'キャリブレーション中: スマホのカメラでこの画面全体を映してください',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    const SizedBox(width: 12),
+                    TextButton(
+                      onPressed: _flow.cancel,
+                      child: const Text('中止'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -176,11 +286,34 @@ class _HomePageState extends State<HomePage> {
         kv('受信フレーム', '${_status.frames} (id ${_status.lastFrameId ?? "-"})'),
         kv('手検出', _status.handDetected ? 'あり' : 'なし'),
         kv('OS出力', _bridge.name),
+        kv('状態', _stateLabel(running)),
         if (_status.lastError != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text('※ ${_status.lastError}', style: const TextStyle(color: Colors.red)),
           ),
+        const Divider(height: 24),
+        const Text('スマホの設置とキャリブレーション',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        FilledButton.icon(
+          onPressed:
+              running && !_flow.showingTarget ? _onPhonePlaced : null,
+          icon: const Icon(Icons.smartphone),
+          label: const Text('スマホ設置完了'),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _flow.showingTarget
+              ? 'キャリブ画像を表示中。スマホのカメラで画面全体を映すと、'
+                  '四隅の検知が終わり次第自動で閉じます。'
+                  '中止は macOS: ✏ / ⌘⇧O、Windows: Ctrl+Shift+O。'
+              : 'スマホを設置してから押してください。画面の最前面に四隅判定用の'
+                  'マーカー画像を全画面表示し、スマホが四隅を検知して送ってくると'
+                  '自動で閉じて操作可能になります。',
+          style: const TextStyle(fontSize: 11, color: Colors.black54),
+        ),
+        _calibrationSettings(),
         const Divider(height: 24),
         const Text('モード切替', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
@@ -226,6 +359,115 @@ class _HomePageState extends State<HomePage> {
           'ジェスチャー認識→描画）を駆動します。ピンチで線が描かれます。',
           style: TextStyle(fontSize: 11, color: Colors.black54),
         ),
+      ],
+    );
+  }
+
+  String _stateLabel(bool running) {
+    if (!running) return '停止中';
+    if (_flow.showingTarget) return 'キャリブレーション中';
+    if (_engine.isCalibrated && _status.mode == EngineMode.tracking) {
+      return '操作可能（ピンチで描画）';
+    }
+    return '位置合わせ待ち';
+  }
+
+  /// キャリブレーションの調整値パネル。値はエンジンと共有する
+  /// CalibrationConfig をその場で書き換えて即時反映する。
+  Widget _calibrationSettings() {
+    Widget numField({
+      required String label,
+      required String initial,
+      required void Function(double) onValue,
+      double min = 0,
+      double max = 45,
+    }) {
+      return SizedBox(
+        width: 126,
+        child: TextFormField(
+          initialValue: initial,
+          decoration: InputDecoration(
+            labelText: label,
+            isDense: true,
+            border: const OutlineInputBorder(),
+          ),
+          style: const TextStyle(fontSize: 12),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: (t) {
+            final v = double.tryParse(t);
+            if (v != null && v >= min && v <= max) onValue(v);
+          },
+        ),
+      );
+    }
+
+    String pct(double v) => (v * 100).toStringAsFixed(2);
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: const Text('キャリブレーション設定',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text(
+            '内側率(%) = 検知点が画面端からどれだけ内側にあるか。マーカー内側率の'
+            '既定はキャリブ画像のマーカー中心位置（X 12.50 / Y 22.22）。'
+            '四隅内側率は slide_corners 用の補正（既定 0）。',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          numField(
+            label: 'マーカー内側率X %',
+            initial: pct(_calibConfig.markerInsetX),
+            onValue: (v) => _calibConfig.markerInsetX = v / 100,
+          ),
+          numField(
+            label: 'マーカー内側率Y %',
+            initial: pct(_calibConfig.markerInsetY),
+            onValue: (v) => _calibConfig.markerInsetY = v / 100,
+          ),
+          numField(
+            label: '四隅内側率X %',
+            initial: pct(_calibConfig.cornerInsetX),
+            onValue: (v) => _calibConfig.cornerInsetX = v / 100,
+          ),
+          numField(
+            label: '四隅内側率Y %',
+            initial: pct(_calibConfig.cornerInsetY),
+            onValue: (v) => _calibConfig.cornerInsetY = v / 100,
+          ),
+          numField(
+            label: '安定メッセージ数',
+            initial: '${_calibConfig.requiredStableMessages}',
+            min: 1,
+            max: 30,
+            onValue: (v) => _calibConfig.requiredStableMessages = v.round(),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          const Text('使用メッセージ', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 8),
+          DropdownButton<CalibrationSource>(
+            value: _calibConfig.source,
+            isDense: true,
+            style: const TextStyle(fontSize: 12, color: Colors.black87),
+            items: const [
+              DropdownMenuItem(
+                  value: CalibrationSource.any, child: Text('両方')),
+              DropdownMenuItem(
+                  value: CalibrationSource.arucoOnly,
+                  child: Text('ArUcoのみ')),
+              DropdownMenuItem(
+                  value: CalibrationSource.slideCornersOnly,
+                  child: Text('四隅のみ')),
+            ],
+            onChanged: (v) =>
+                setState(() => _calibConfig.source = v ?? _calibConfig.source),
+          ),
+        ]),
       ],
     );
   }
