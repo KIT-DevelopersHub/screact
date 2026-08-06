@@ -144,6 +144,52 @@ void main() {
       expect(m['messageType'], 'hello_ack');
     });
 
+    test('LAN側IP宛でも接続できる（0.0.0.0バインドの回帰）', () async {
+      final lanIp = await currentWifiIp();
+      if (lanIp == null) return; // ネットワークが無い環境ではスキップ
+      final server = await startServer(code: '123456');
+      final ws = await WebSocket.connect(
+          'ws://$lanIp:${server.boundPort}/ws/v1/input');
+      addTearDown(ws.close);
+      final ack = ws
+          .map((d) => (jsonDecode(d as String) as Map).cast<String, dynamic>())
+          .firstWhere((m) => m['messageType'] == 'hello_ack');
+      ws.add(jsonEncode(hello('123456')));
+      await ack.timeout(const Duration(seconds: 5));
+    });
+
+    test('接続ログに段階（listen→request→upgrade→hello→hello_error）が残る',
+        () async {
+      final logs = <String>[];
+      final server = InputServer(
+        engine: InteractionEngine(),
+        port: 0,
+        onEvents: (_) {},
+        onStatus: (_) {},
+        pairingCode: '123456',
+        onLog: logs.add,
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      final ws = await WebSocket.connect(
+          'ws://localhost:${server.boundPort}/ws/v1/input');
+      final done = Completer<void>();
+      ws.listen((_) {}, onDone: done.complete);
+      ws.add(jsonEncode(hello('999999')));
+      await done.future.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      String stage(String kw) =>
+          logs.firstWhere((l) => l.contains(kw), orElse: () => '');
+      expect(stage('listen 開始'), contains('0.0.0.0'));
+      expect(stage('6桁コード'), contains('123456'));
+      expect(stage('http request'), contains('WS upgrade要求'));
+      expect(stage('ws upgraded'), isNotEmpty);
+      expect(stage('hello 受信'), contains('pairing-test'));
+      expect(stage('hello_error'), contains('コード不一致'));
+    });
+
     test('稼働中に enforcePairing を切り替えられる', () async {
       final server = await startServer(code: '123456');
       server.enforcePairing = false; // UIトグル相当
