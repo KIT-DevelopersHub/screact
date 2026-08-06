@@ -8,6 +8,18 @@ Androidは接続直後に既存要件どおり`hello`を送る。PCは5秒以内
 
 6桁の`pairingToken`はアプリ終了後に保存しない。IPとポートのみ端末内に保存する。既定ポートは`8765`（Android/デスクトップ共通）。
 
+PCはサーバ開始時に6桁コードを生成して画面に表示し、`hello`の`pairingToken`と照合する（照合は設定でオフにできる）。不一致の場合は次の`hello_error`を返して切断する（`retryable=false`のため自動再接続しない）。
+
+```json
+{
+  "schemaVersion": 1,
+  "messageType": "hello_error",
+  "code": "pairing_code_mismatch",
+  "message": "6桁コードが一致しません",
+  "retryable": false
+}
+```
+
 ## 画面位置合わせ（キャリブレーション）フロー
 
 チーム確定のシーケンス（詳細図は `docs/sequence-calibration-flow.md`）。

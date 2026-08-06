@@ -59,6 +59,26 @@ class HelloAck {
       };
 }
 
+/// 送信: hello_error（接続拒否。6桁コード不一致等）。
+class HelloError {
+  final String code; // pairing_code_mismatch など
+  final String message;
+  final bool retryable;
+  const HelloError({
+    required this.code,
+    required this.message,
+    this.retryable = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'schemaVersion': kSchemaVersion,
+        'messageType': 'hello_error',
+        'code': code,
+        'message': message,
+        'retryable': retryable,
+      };
+}
+
 /// 送信: control_message（モード切替 / 切断要求）。
 class ControlMessage {
   final String sessionId;

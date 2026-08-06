@@ -39,6 +39,12 @@ class InputServer {
   final void Function(HandFrame)? onFrame;
   final int port;
 
+  /// 6桁ペアリングコード（null なら照合しない）。UIがサーバ開始時に生成して表示する。
+  final String? pairingCode;
+
+  /// コード照合を行うか（UIのトグルで切替可能・既定ON）。
+  bool enforcePairing;
+
   HttpServer? _http;
   WebSocket? _socket;
   String? _sessionId;
@@ -57,7 +63,15 @@ class InputServer {
     required this.onStatus,
     this.onFrame,
     this.port = 8765,
+    this.pairingCode,
+    this.enforcePairing = true,
   });
+
+  /// 6桁コードの生成（サーバ開始時にUIが呼ぶ）。
+  static String generatePairingCode() {
+    final r = math.Random.secure();
+    return List.generate(6, (_) => r.nextInt(10)).join();
+  }
 
   /// バインド済みポート（port=0 指定時のテスト用）。未起動なら null。
   int? get boundPort => _http?.port;
@@ -122,6 +136,19 @@ class InputServer {
   }
 
   void _onHello(Hello hello) {
+    // 6桁コード照合（不一致は hello_error で拒否して切断）。
+    if (enforcePairing &&
+        pairingCode != null &&
+        hello.pairingToken != pairingCode) {
+      _send(const HelloError(
+        code: 'pairing_code_mismatch',
+        message: '6桁コードが一致しません',
+      ).toJson());
+      _socket?.close(4001, 'pairing_code_mismatch');
+      _socket = null;
+      _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
+      return;
+    }
     _clientId = hello.deviceId;
     _sessionId = 'session-${_randHex(8)}';
     final ack = HelloAck(

@@ -1,13 +1,14 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/calibration_config.dart';
 import '../core/interaction_engine.dart';
 import '../core/mock_hand.dart';
 import '../core/pointer_state.dart';
 import '../net/input_server.dart';
+import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
@@ -34,7 +35,9 @@ class _HomePageState extends State<HomePage> {
 
   InputServer? _server;
   ServerStatus _status = const ServerStatus();
-  List<String> _ips = const [];
+  String? _wifiIp; // Wi-Fi(en0等)の実IPv4のみ表示（utun等は除外）
+  String? _pairingCode; // サーバ開始時に生成する6桁コード
+  bool _enforcePairing = true;
   Timer? _mockTimer;
   int _mockI = 0;
 
@@ -72,7 +75,7 @@ class _HomePageState extends State<HomePage> {
     _flow.addListener(() {
       if (mounted) setState(() {});
     });
-    _loadIps();
+    _refreshWifiIp();
     if (_autoFlow) scheduleMicrotask(_startServer);
   }
 
@@ -84,15 +87,10 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  Future<void> _loadIps() async {
-    try {
-      final ifs = await NetworkInterface.list(type: InternetAddressType.IPv4);
-      setState(() => _ips = [
-            for (final i in ifs)
-              for (final a in i.addresses)
-                if (!a.isLoopback) a.address
-          ]);
-    } catch (_) {}
+  /// Wi-Fi IPを再取得（テザリング切替等でネットワークが変わっても更新できる）。
+  Future<void> _refreshWifiIp() async {
+    final ip = await currentWifiIp();
+    if (mounted) setState(() => _wifiIp = ip);
   }
 
   void _applyEvents(List<InteractionEvent> events) {
@@ -104,14 +102,18 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _startServer() async {
     if (_server != null) return;
+    _pairingCode = InputServer.generatePairingCode();
     final s = InputServer(
       engine: _engine,
       port: _port,
       onEvents: _applyEvents,
       onStatus: _onServerStatus,
+      pairingCode: _pairingCode,
+      enforcePairing: _enforcePairing,
     );
     await s.start();
     await _bridge.setOverlayVisible(true);
+    await _refreshWifiIp(); // 開始時点の実IPを表示（テザリング切替に追従）
     setState(() => _server = s);
   }
 
@@ -264,6 +266,74 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  String get _displayIp => _wifiIp ?? '(IP取得不可)';
+
+  /// Android側に打ち込む3点セット（Wi-Fi IP・ポート・6桁コード）を
+  /// 一目で読める形でまとめたカード。値はコピー可能。
+  Widget _connectionInfoCard(bool running) {
+    Widget row(String label, String? value, {bool copyable = true}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          SizedBox(
+              width: 88,
+              child: Text(label,
+                  style: const TextStyle(fontSize: 11, color: Colors.black54))),
+          Expanded(
+            child: SelectableText(
+              value ?? '-',
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace'),
+            ),
+          ),
+          if (copyable && value != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: 14,
+              tooltip: 'コピー',
+              onPressed: () => Clipboard.setData(ClipboardData(text: value)),
+              icon: const Icon(Icons.copy),
+            ),
+        ]),
+      );
+    }
+
+    return Card(
+      color: const Color(0xFFEDF2FA),
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Expanded(
+                child: Text('Androidに入力する接続情報',
+                    style:
+                        TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                tooltip: 'Wi-Fi IPを再取得（テザリング切替時など）',
+                onPressed: _refreshWifiIp,
+                icon: const Icon(Icons.refresh),
+              ),
+            ]),
+            row('IP (Wi-Fi)', _wifiIp),
+            row('ポート', '$_port'),
+            row('6桁コード', running ? _pairingCode : null),
+            if (!running)
+              const Text('コードはサーバ開始時に発行されます',
+                  style: TextStyle(fontSize: 10, color: Colors.black54)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _controls(bool running) {
     Widget kv(String k, String v) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -283,8 +353,21 @@ class _HomePageState extends State<HomePage> {
           label: Text(running ? 'サーバ停止' : 'サーバ開始'),
         ),
         const SizedBox(height: 8),
-        kv('待受', running ? 'ws://<PC>:$_port/ws/v1/input' : '停止中'),
-        kv('PCのIP', _ips.isEmpty ? '(取得中)' : _ips.join(', ')),
+        _connectionInfoCard(running),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('6桁コードを照合する', style: TextStyle(fontSize: 12)),
+          subtitle: const Text('オフにするとコード無しでも接続できます',
+              style: TextStyle(fontSize: 10, color: Colors.black54)),
+          value: _enforcePairing,
+          onChanged: (v) => setState(() {
+            _enforcePairing = v;
+            _server?.enforcePairing = v; // 稼働中サーバへ即反映
+          }),
+        ),
+        kv('待受', running ? 'ws://$_displayIp:$_port/ws/v1/input' : '停止中'),
         kv('セッション', _status.sessionId ?? '-'),
         kv('端末', _status.clientId ?? '-'),
         kv('モード', _status.mode == EngineMode.tracking ? 'tracking' : 'calibration'),
