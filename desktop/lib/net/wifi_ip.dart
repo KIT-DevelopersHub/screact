@@ -14,12 +14,28 @@ class InterfaceAddrs {
 /// 仮想/非物理インターフェース（表示すべきでないもの）。
 bool _isVirtual(String name) {
   final n = name.toLowerCase();
-  const prefixes = ['utun', 'awdl', 'llw', 'bridge', 'vmnet', 'lo', 'gif', 'stf', 'ap'];
+  const prefixes = [
+    'utun',
+    'awdl',
+    'llw',
+    'bridge',
+    'vmnet',
+    'lo',
+    'gif',
+    'stf',
+    'ap',
+  ];
   return prefixes.any(n.startsWith);
 }
 
+bool _isWifi(String name) {
+  final n = name.toLowerCase();
+  return n == 'wi-fi' || n == 'wifi' || n.startsWith('wlan');
+}
+
 /// Wi-Fi として表示すべき IPv4 を1つ選ぶ（テスト可能な純関数）。
-/// 優先順: en0 → en1..enN（番号順） → その他の非仮想IF。無ければ null。
+/// 優先順: en0 → en1..enN（番号順） → Windows Wi-Fi → その他の非仮想IF。
+/// 無ければ null。
 String? pickWifiIp(List<InterfaceAddrs> interfaces) {
   final withV4 = interfaces.where((i) => i.v4.isNotEmpty).toList();
 
@@ -28,9 +44,16 @@ String? pickWifiIp(List<InterfaceAddrs> interfaces) {
     return m != null ? int.parse(m.group(1)!) : 1 << 20;
   }
 
-  final en = withV4.where((i) => enRank(i.name) < (1 << 20)).toList()
-    ..sort((a, b) => enRank(a.name).compareTo(enRank(b.name)));
+  final en =
+      withV4.where((i) => enRank(i.name) < (1 << 20)).toList()
+        ..sort((a, b) => enRank(a.name).compareTo(enRank(b.name)));
   if (en.isNotEmpty) return en.first.v4.first;
+
+  // WindowsではVirtualBox等のホストオンリーNICがWi-Fiより先に列挙される
+  // ことがあるため、実際の無線LANインターフェース名を明示的に優先する。
+  for (final i in withV4) {
+    if (_isWifi(i.name)) return i.v4.first;
+  }
 
   for (final i in withV4) {
     if (!_isVirtual(i.name)) return i.v4.first;
@@ -46,7 +69,7 @@ Future<String?> currentWifiIp() async {
       for (final i in ifs)
         InterfaceAddrs(i.name, [
           for (final a in i.addresses)
-            if (!a.isLoopback) a.address
+            if (!a.isLoopback) a.address,
         ]),
     ]);
   } catch (_) {
