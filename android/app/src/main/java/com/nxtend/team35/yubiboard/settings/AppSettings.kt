@@ -1,8 +1,8 @@
 package com.nxtend.team35.yubiboard.settings
 
 data class AppSettings(
-    val analysisWidth: Int = 640,
-    val analysisHeight: Int = 480,
+    val analysisWidth: Int = 1280,
+    val analysisHeight: Int = 720,
     val minDetectionConfidence: Float = 0.5f,
     val minPresenceConfidence: Float = 0.5f,
     val minTrackingConfidence: Float = 0.5f,
@@ -18,13 +18,18 @@ data class AppSettings(
         else -> null
     }
 
-    fun toggledResolution(): AppSettings = if (analysisWidth == 640) {
-        copy(analysisWidth = 960, analysisHeight = 540)
-    } else {
-        copy(analysisWidth = 640, analysisHeight = 480)
+    fun toggledResolution(): AppSettings = when (analysisWidth to analysisHeight) {
+        1280 to 720 -> copy(analysisWidth = 960, analysisHeight = 540)
+        960 to 540 -> copy(analysisWidth = 640, analysisHeight = 480)
+        else -> copy(analysisWidth = 1280, analysisHeight = 720)
     }
 
     companion object {
-        val SUPPORTED_RESOLUTIONS = setOf(640 to 480, 960 to 540)
+        val SUPPORTED_RESOLUTIONS = setOf(
+            640 to 480,
+            960 to 540,
+            1280 to 720,
+            1920 to 1080,
+        )
     }
 }
