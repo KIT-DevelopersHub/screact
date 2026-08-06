@@ -45,6 +45,9 @@ class InputServer {
   /// コード照合を行うか（UIのトグルで切替可能・既定ON）。
   bool enforcePairing;
 
+  /// 接続診断ログ（UI/ファイルへ流す。null なら無効）。
+  final void Function(String)? onLog;
+
   HttpServer? _http;
   WebSocket? _socket;
   String? _sessionId;
@@ -65,7 +68,10 @@ class InputServer {
     this.port = 8765,
     this.pairingCode,
     this.enforcePairing = true,
+    this.onLog,
   });
+
+  void _log(String m) => onLog?.call(m);
 
   /// 6桁コードの生成（サーバ開始時にUIが呼ぶ）。
   static String generatePairingCode() {
@@ -78,29 +84,56 @@ class InputServer {
 
   Future<void> start() async {
     _http = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    _log('listen 開始: ws://0.0.0.0:${_http!.port}/ws/v1/input '
+        '(全インターフェースで待受・コード照合=${enforcePairing ? "ON" : "OFF"})');
+    if (pairingCode != null) _log('6桁コード: $pairingCode');
     _emit(listening: true);
     _http!.listen((req) async {
-      if (req.uri.path == '/ws/v1/input' &&
-          WebSocketTransformer.isUpgradeRequest(req)) {
-        final ws = await WebSocketTransformer.upgrade(req);
-        _attach(ws);
-      } else {
-        req.response.statusCode = HttpStatus.notFound;
-        await req.response.close();
+      final from = _remoteOf(req);
+      try {
+        if (req.uri.path == '/ws/v1/input' &&
+            WebSocketTransformer.isUpgradeRequest(req)) {
+          _log('http request from $from path=${req.uri.path} (WS upgrade要求)');
+          final ws = await WebSocketTransformer.upgrade(req);
+          _log('ws upgraded ($from) — WebSocket確立');
+          _attach(ws, from);
+        } else {
+          _log('http request from $from path=${req.uri.path} '
+              '(upgrade無し→404: パス誤りか疎通確認)');
+          req.response.statusCode = HttpStatus.notFound;
+          await req.response.close();
+        }
+      } catch (e) {
+        _log('upgrade失敗 ($from): $e');
       }
-    });
+    }, onError: (Object e) => _log('listenエラー: $e'));
   }
 
-  void _attach(WebSocket ws) {
+  static String _remoteOf(HttpRequest req) {
+    final info = req.connectionInfo;
+    return info == null
+        ? '(不明)'
+        : '${info.remoteAddress.address}:${info.remotePort}';
+  }
+
+  void _attach(WebSocket ws, String from) {
     // 単一クライアント運用（single_user）。既存があれば置き換える。
+    if (_socket != null) _log('既存接続を置き換え（新しい接続を優先）');
     _socket?.close();
     _socket = ws;
     _clientId = null;
     _frames = 0;
     ws.listen(
       (data) => _onMessage(data),
-      onDone: _onClose,
-      onError: (_) => _onClose(),
+      onDone: () {
+        _log('切断 ($from) closeCode=${ws.closeCode ?? "-"} '
+            'reason=${ws.closeReason ?? "-"}');
+        _onClose();
+      },
+      onError: (Object e) {
+        _log('ソケットエラー ($from): $e');
+        _onClose();
+      },
       cancelOnError: true,
     );
     _emit();
@@ -111,6 +144,7 @@ class InputServer {
     try {
       j = (jsonDecode(data as String) as Map).cast<String, dynamic>();
     } catch (_) {
+      _log('不正JSONを受信（無視）');
       _emit(error: 'invalid json');
       return;
     }
@@ -136,10 +170,14 @@ class InputServer {
   }
 
   void _onHello(Hello hello) {
+    _log('hello 受信: deviceId=${hello.deviceId} '
+        'version=${hello.clientVersion ?? "-"} '
+        'token=${hello.pairingToken == null ? "(なし)" : "(あり)"}');
     // 6桁コード照合（不一致は hello_error で拒否して切断）。
     if (enforcePairing &&
         pairingCode != null &&
         hello.pairingToken != pairingCode) {
+      _log('hello_error 送信: 6桁コード不一致 → 切断 (端末: ${hello.deviceId})');
       _send(const HelloError(
         code: 'pairing_code_mismatch',
         message: '6桁コードが一致しません',
@@ -151,6 +189,8 @@ class InputServer {
     }
     _clientId = hello.deviceId;
     _sessionId = 'session-${_randHex(8)}';
+    _log('hello_ack 送信: session=$_sessionId '
+        'calibrationRequired=${!engine.isCalibrated} — 接続完了');
     final ack = HelloAck(
       sessionId: _sessionId!,
       surfaceId: 'primary-display',
@@ -171,6 +211,7 @@ class InputServer {
     }
     final ok = engine.calibrate(markers);
     if (ok) {
+      _log('calibration_markers で位置合わせ成功 → set_mode tracking 送信');
       // 「画面位置合わせ完了」の通知（チームシーケンス図）。Androidはこれで
       // マーカー検出ループを抜けて通常トラッキングへ移る。
       _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
@@ -212,6 +253,7 @@ class InputServer {
       final f = _pending!;
       _pending = null;
       _frames++;
+      if (_frames == 1) _log('hand_frame 受信開始 (frameId=${f.frameId})');
       _lastFrameId = f.frameId;
       _handDetected = f.detected;
       onFrame?.call(f);
@@ -242,6 +284,7 @@ class InputServer {
   }
 
   Future<void> stop() async {
+    _log('サーバ停止');
     await _socket?.close();
     await _http?.close(force: true);
     _http = null;

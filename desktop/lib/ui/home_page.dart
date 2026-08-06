@@ -7,6 +7,7 @@ import '../core/calibration_config.dart';
 import '../core/interaction_engine.dart';
 import '../core/mock_hand.dart';
 import '../core/pointer_state.dart';
+import '../net/connection_log.dart';
 import '../net/input_server.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
@@ -32,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   final _overlay = OverlayModel();
   final _bridge = DesktopBridge.forPlatform();
   final _flow = CalibrationFlowController();
+  final _connLog = ConnectionLog();
 
   InputServer? _server;
   ServerStatus _status = const ServerStatus();
@@ -75,6 +77,10 @@ class _HomePageState extends State<HomePage> {
     _flow.addListener(() {
       if (mounted) setState(() {});
     });
+    _connLog.init();
+    _connLog.addListener(() {
+      if (mounted) setState(() {});
+    });
     _refreshWifiIp();
     if (_autoFlow) scheduleMicrotask(_startServer);
   }
@@ -84,6 +90,7 @@ class _HomePageState extends State<HomePage> {
     _mockTimer?.cancel();
     _server?.stop();
     _flow.dispose();
+    _connLog.dispose();
     super.dispose();
   }
 
@@ -110,6 +117,7 @@ class _HomePageState extends State<HomePage> {
       onStatus: _onServerStatus,
       pairingCode: _pairingCode,
       enforcePairing: _enforcePairing,
+      onLog: _connLog.add,
     );
     await s.start();
     await _bridge.setOverlayVisible(true);
@@ -446,6 +454,55 @@ class _HomePageState extends State<HomePage> {
           'モックは実プロトコルと同じデータでパイプライン（位置合わせ→変換→平滑化→'
           'ジェスチャー認識→描画）を駆動します。ピンチで線が描かれます。',
           style: TextStyle(fontSize: 11, color: Colors.black54),
+        ),
+        const Divider(height: 24),
+        _connectionLogSection(),
+      ],
+    );
+  }
+
+  /// 接続ログ欄: Androidから繋がらない時に「どの段階まで届いているか」を
+  /// その場で確認できる。全文コピー可・同じ内容をログファイルにも書く。
+  Widget _connectionLogSection() {
+    final entries = _connLog.entries;
+    final recent =
+        entries.length > 12 ? entries.sublist(entries.length - 12) : entries;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Expanded(
+            child: Text('接続ログ', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 14,
+            tooltip: '全ログをコピー',
+            onPressed: entries.isEmpty
+                ? null
+                : () => Clipboard.setData(ClipboardData(text: _connLog.joined)),
+            icon: const Icon(Icons.copy),
+          ),
+        ]),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E2530),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: SelectableText(
+            entries.isEmpty ? '(サーバ開始後にここへ接続の各段階が出ます)' : recent.join('\n'),
+            style: const TextStyle(
+                fontSize: 10, color: Color(0xFFB8F5C8), fontFamily: 'monospace'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'ログファイル: ${_connLog.filePath ?? "(未作成)"}\n'
+          '見方: http request が出ない=Androidの通信がMacまで届いていない（ネットワーク層）／'
+          'ws upgraded まで出て hello が無い=アプリ層／hello_error=6桁コード不一致。',
+          style: const TextStyle(fontSize: 10, color: Colors.black54),
         ),
       ],
     );
