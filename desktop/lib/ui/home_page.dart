@@ -8,6 +8,7 @@ import '../core/mock_hand.dart';
 import '../core/pointer_state.dart';
 import '../net/input_server.dart';
 import '../platform/desktop_bridge.dart';
+import '../platform/overlay_window.dart';
 import 'overlay_canvas.dart';
 
 /// 共通の操作面＋オーバーレイのライブプレビュー。macOSではこれ自体がアプリの
@@ -29,11 +30,22 @@ class _HomePageState extends State<HomePage> {
   Timer? _mockTimer;
   int _mockI = 0;
 
+  late final OverlayWindowController _overlayWin;
+  bool _overlayOn = false;
+  bool _overlayAvailable = false;
+
   static const int _port = 8765;
 
   @override
   void initState() {
     super.initState();
+    _overlayWin = OverlayWindowController(
+      onExited: () => setState(() => _overlayOn = false),
+      onEntered: () => setState(() => _overlayOn = true),
+    );
+    _overlayWin.probe().then((ok) {
+      if (mounted) setState(() => _overlayAvailable = ok);
+    });
     _loadIps();
   }
 
@@ -97,8 +109,23 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
+  /// スライドの上にインクを重ねるオーバーレイモードへ。
+  /// 解除はメニューバーのアイコン or Cmd+Shift+O（ネイティブ側の脱出経路）。
+  Future<void> _enterOverlay() async {
+    final ok = await _overlayWin.enter();
+    if (ok && mounted) setState(() => _overlayOn = true);
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_overlayOn) {
+      // オーバーレイモード: 背景を完全透過にし、インクとポインタだけ描画する。
+      // 窓はネイティブ側でクリック透過になっているため操作UIは出さない。
+      return Material(
+        type: MaterialType.transparency,
+        child: SizedBox.expand(child: OverlayCanvas(model: _overlay)),
+      );
+    }
     final running = _server != null;
     return Scaffold(
       appBar: AppBar(
@@ -167,6 +194,23 @@ class _HomePageState extends State<HomePage> {
             child: const Text('トラッキング'),
           ),
         ]),
+        const Divider(height: 24),
+        const Text('スライドに上乗せ', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        FilledButton.icon(
+          onPressed: _overlayAvailable ? _enterOverlay : null,
+          icon: const Icon(Icons.layers_outlined),
+          label: const Text('オーバーレイ表示'),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _overlayAvailable
+              ? 'ウィンドウを透過・最前面・クリック透過にして全画面へ広げ、'
+                  'スライドの上にインクとポインタだけを重ねます。'
+                  '解除はメニューバーの ✏ アイコン、または ⌘⇧O。'
+              : 'このビルドではオーバーレイ窓が未接続です（macOSネイティブが必要）。',
+          style: const TextStyle(fontSize: 11, color: Colors.black54),
+        ),
         const Divider(height: 24),
         const Text('動作確認（電話なし）', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
