@@ -27,21 +27,47 @@ class Homography {
     return Homography([...sol, 1.0]);
   }
 
-  /// 4つのArUcoマーカー中心から、画面の四隅(0,0)(1,0)(1,1)(0,1)へのホモグラフィ。
-  /// マーカーIDの割当に依存しないよう、四隅を TL,TR,BR,BL に並べ替える。
-  static Homography? fromMarkers(List<Marker> markers) {
+  /// キャリブ画像のマーカーID → 画面四隅の対応（TL, TR, BR, BL の順）。
+  /// チーム確定仕様:「マーカーIDと画面四隅の対応付け」はPC側の責務。
+  static const List<int> cornerMarkerIds = [10, 11, 12, 13];
+
+  /// 4つのArUcoマーカー中心から画面へのホモグラフィ。
+  /// ID 10..13 が揃っていれば「ID→四隅の対応付け」で割り当てる（スマホが
+  /// 逆さま・横向きでも正しく写る）。揃わない場合は幾何順序（TL,TR,BR,BL）
+  /// へ並べ替える従来動作にフォールバックする。
+  /// [insetX]/[insetY] はマーカー中心が画面端から内側にある割合
+  /// （キャリブ画像の余白ぶんを外挿して画面全域へ写すための補正）。
+  static Homography? fromMarkers(List<Marker> markers,
+      {double insetX = 0, double insetY = 0}) {
     if (markers.length < 4) return null;
-    return fromCorners(markers.take(4).map((m) => m.center).toList());
+    final byId = {for (final m in markers) m.id: m};
+    final List<Vec2> src;
+    if (cornerMarkerIds.every(byId.containsKey)) {
+      src = [for (final id in cornerMarkerIds) byId[id]!.center];
+    } else {
+      src = orderQuadCorners(markers.take(4).map((m) => m.center).toList());
+    }
+    return fromCorrespondences(src, insetRect(insetX, insetY));
   }
 
   /// スライドの四隅（順不同・カメラ正規化）→ スライド座標(0..1)のホモグラフィ。
   /// 斜め・下から等の台形歪みも full homography（射影変換）で正確に写す。
-  static Homography? fromCorners(List<Vec2> corners) {
+  /// [insetX]/[insetY] は検知点が実画面端より内側にある場合の外挿補正。
+  static Homography? fromCorners(List<Vec2> corners,
+      {double insetX = 0, double insetY = 0}) {
     if (corners.length != 4) return null;
     final ordered = orderQuadCorners(corners);
-    const dst = [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)];
-    return fromCorrespondences(ordered, dst);
+    return fromCorrespondences(ordered, insetRect(insetX, insetY));
   }
+
+  /// 画面端から (ix, iy) だけ内側の矩形の四隅（TL,TR,BR,BL）。
+  /// 検知点をここへ対応付けると、外側の画面全域まで外挿されて写る。
+  static List<Vec2> insetRect(double ix, double iy) => [
+        Vec2(ix, iy),
+        Vec2(1 - ix, iy),
+        Vec2(1 - ix, 1 - iy),
+        Vec2(ix, 1 - iy),
+      ];
 
   /// カメラ正規化点 → 画面正規化点。
   Vec2 map(Vec2 p) {

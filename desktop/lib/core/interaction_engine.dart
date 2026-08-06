@@ -1,9 +1,15 @@
+import 'calibration_config.dart';
 import 'geom.dart';
 import 'homography.dart';
 import 'one_euro.dart';
 import 'gesture_recognizer.dart';
 import '../protocol/messages.dart';
 
+/// チーム確定仕様のジェスチャー分岐:
+/// - ポインタ移動/描画/ドラッグ = 人差し指先端（pointerMove/pressDown/pressMove/pressUp）
+/// - スクロール = 二本指の移動量（scroll）
+/// - ピンチズーム = 二本指間距離の変化（未実装。追加時は zoom kind を足し、
+///   onFrame の scrolling 分岐と同列に距離変化の分岐を挿す）
 enum InteractionKind {
   pointerMove,
   pressDown, // ピンチ押下（描画/クリック/ドラッグの開始）
@@ -29,8 +35,22 @@ enum EngineMode { calibration, tracking }
 class InteractionEngine {
   final GestureRecognizer _rec;
   final Vec2Filter _screenFilter;
+
+  /// キャリブレーションの調整値（インセット補正・安定判定・受付ソース）。
+  /// UIの設定パネルから同一インスタンスを書き換えて反映する。
+  final CalibrationConfig config;
+
   Homography? _homography;
   EngineMode mode;
+
+  /// 位置合わせが成功した回数（エポック）。UI はこの増加で
+  /// 「四隅受信→キャリブ画像の自動クローズ」を検知する。
+  int _calibrationCount = 0;
+  int get calibrationCount => _calibrationCount;
+
+  // 連続安定メッセージのカウンタ（ソース別）。
+  int _arucoStreak = 0;
+  int _cornersStreak = 0;
 
   // ピンチ状態機械
   bool _pressed = false;
@@ -43,29 +63,60 @@ class InteractionEngine {
   static const int _clickMaxMs = 260;
   static const double _clickMaxMove = 0.02;
 
-  InteractionEngine({GestureRecognizer? recognizer, this.mode = EngineMode.calibration})
-      : _rec = recognizer ?? GestureRecognizer(),
-        _screenFilter = Vec2Filter();
+  InteractionEngine({
+    GestureRecognizer? recognizer,
+    this.mode = EngineMode.calibration,
+    CalibrationConfig? config,
+  })  : _rec = recognizer ?? GestureRecognizer(),
+        _screenFilter = Vec2Filter(),
+        config = config ?? CalibrationConfig();
 
   bool get isCalibrated => _homography != null;
 
-  /// ArUcoマーカーからホモグラフィを作成（位置合わせ）。成功で tracking へ。
+  /// ArUcoマーカーからホモグラフィを作成（位置合わせ）。
+  /// ID 10..13→画面四隅の対応付けとマーカーインセット外挿は config に従う。
+  /// config.requiredStableMessages 回連続で妥当なら確定し tracking へ。
   bool calibrate(CalibrationMarkers markers) {
-    final h = Homography.fromMarkers(markers.markers);
-    if (h == null) return false;
-    _homography = h;
-    mode = EngineMode.tracking;
+    if (!config.acceptsAruco) return false;
+    final h = Homography.fromMarkers(
+      markers.markers,
+      insetX: config.markerInsetX,
+      insetY: config.markerInsetY,
+    );
+    if (h == null) {
+      _arucoStreak = 0;
+      return false;
+    }
+    if (++_arucoStreak < config.requiredStableMessages) return false;
+    _applyHomography(h);
     return true;
   }
 
   /// スマホが検出したスライド四隅（順不同・カメラ正規化）から位置合わせ。
-  /// 斜め・下から等の歪んだ台形でも射影変換で正確に写す。成功で tracking へ。
+  /// 斜め・下から等の歪んだ台形でも射影変換で正確に写す。
+  /// 検知点が画面端より内側の場合は config の四隅インセットで外挿する。
   bool calibrateFromCorners(List<Vec2> corners) {
-    final h = Homography.fromCorners(corners);
-    if (h == null) return false;
+    if (!config.acceptsSlideCorners) return false;
+    final h = Homography.fromCorners(
+      corners,
+      insetX: config.cornerInsetX,
+      insetY: config.cornerInsetY,
+    );
+    if (h == null) {
+      _cornersStreak = 0;
+      return false;
+    }
+    if (++_cornersStreak < config.requiredStableMessages) return false;
+    _applyHomography(h);
+    return true;
+  }
+
+  void _applyHomography(Homography h) {
     _homography = h;
     mode = EngineMode.tracking;
-    return true;
+    _calibrationCount++;
+    _arucoStreak = 0;
+    _cornersStreak = 0;
   }
 
   /// 未校正時は恒等（カメラ座標をそのまま画面座標とみなす）。

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../core/homography.dart';
 import '../core/interaction_engine.dart';
 import '../protocol/messages.dart';
 
@@ -137,15 +138,27 @@ class InputServer {
   }
 
   void _onCalibration(CalibrationMarkers markers) {
+    if (!engine.config.acceptsAruco) {
+      _emit(); // 設定で除外中のソースは静かに無視
+      return;
+    }
     final ok = engine.calibrate(markers);
     if (ok) {
+      // 「画面位置合わせ完了」の通知（チームシーケンス図）。Androidはこれで
+      // マーカー検出ループを抜けて通常トラッキングへ移る。
       _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
     }
-    _emit(error: ok ? null : 'calibration failed (need 4 markers)');
+    // 安定判定の蓄積中（4マーカー揃いだが未確定）はエラーにしない。
+    final invalid = markers.markers.length < 4;
+    _emit(error: invalid ? 'calibration failed (need 4 markers)' : null);
   }
 
   /// スマホ検出のスライド四隅で位置合わせ（ArUcoなしの経路）。
   void _onSlideCorners(SlideCorners sc) {
+    if (!engine.config.acceptsSlideCorners) {
+      _emit(); // 設定で除外中のソースは静かに無視
+      return;
+    }
     if (!sc.isValid) {
       _emit(error: 'slide_corners requires 4 finite corners');
       return;
@@ -154,7 +167,9 @@ class InputServer {
     if (ok) {
       _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
     }
-    _emit(error: ok ? null : 'slide_corners calibration failed (degenerate quad)');
+    // 安定判定の蓄積中はエラーにしない（退化した四隅だけを報告）。
+    final degenerate = Homography.fromCorners(sc.corners) == null;
+    _emit(error: degenerate ? 'slide_corners calibration failed (degenerate quad)' : null);
   }
 
   void _enqueueFrame(HandFrame f) {
