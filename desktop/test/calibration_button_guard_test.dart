@@ -51,6 +51,14 @@ void main() {
   bool enabled(WidgetTester tester, Finder f) =>
       (tester.widget(f) as FilledButton).onPressed != null;
 
+  // Liveバインディングはドラッグでのスクロールが不安定なため、
+  // パネルの ListView を jumpTo で直接動かして対象を組み立てる。
+  Future<void> jump(WidgetTester tester, double offset) async {
+    final st = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    st.position.jumpTo(offset.clamp(0, st.position.maxScrollExtent));
+    await tester.pump();
+  }
+
   testWidgets('スマホ未接続では設置完了ボタン無効・接続で有効・オーバーレイ失敗でも例外なし',
       (tester) async {
     mockNative(enterSucceeds: false); // macOSフルスクリーン中の拒否と同じ応答
@@ -60,15 +68,24 @@ void main() {
     final placed = buttonFinder('スマホ設置完了');
 
     // 1. サーバ停止中: 無効
+    await jump(tester, 420); // 設置セクションを表示
     expect(enabled(tester, placed), isFalse, reason: 'サーバ停止中は押せない');
 
     // 2. サーバ開始（スマホ未接続）: まだ無効
+    await jump(tester, 0);
     await tester.tap(buttonFinder('サーバ開始'));
     await settle(tester);
+    await jump(tester, 420);
     expect(enabled(tester, placed), isFalse, reason: '未接続では押せない');
     expect(find.textContaining('スマホ未接続です'), findsOneWidget);
+    await jump(tester, 0); // 接続情報カード（コード表示）へ戻る
 
     // 3. スマホが接続（hello 完了）: 有効になる
+    // 6桁コードは左パネルに表示された実値を読んで使う（表示＝照合値のE2E）。
+    final code = tester
+        .widgetList<SelectableText>(find.byType(SelectableText))
+        .map((w) => w.data ?? '')
+        .firstWhere((t) => RegExp(r'^\d{6}$').hasMatch(t));
     final ws = await WebSocket.connect('ws://localhost:$port/ws/v1/input');
     addTearDown(() => ws.close());
     ws.listen((_) {});
@@ -76,8 +93,10 @@ void main() {
       'schemaVersion': 1,
       'messageType': 'hello',
       'deviceId': 'guard-test-phone',
+      'pairingToken': code,
     }));
     await settle(tester);
+    await jump(tester, 420);
     expect(enabled(tester, placed), isTrue, reason: '接続後は押せる');
 
     // 4. 押下: ネイティブ enterOverlay が false（フルスクリーン拒否相当）でも
@@ -93,9 +112,11 @@ void main() {
     await settle(tester);
     await tester.tap(find.text('中止')); // フローを中止してから活性状態を確認
     await tester.pump();
+    await jump(tester, 420);
     expect(enabled(tester, placed), isFalse, reason: '切断後は再び押せない');
 
     // 後始末: サーバ停止してから破棄
+    await jump(tester, 0);
     await tester.tap(buttonFinder('サーバ停止'));
     await settle(tester);
     await tester.pumpWidget(const SizedBox());
@@ -112,25 +133,17 @@ void main() {
       of: find.text('位置合わせ'),
       matching: find.byWidgetPredicate((w) => w is OutlinedButton),
     );
-    // Liveバインディングはドラッグでのスクロールが不安定なため、
-    // ScrollableState.jumpTo で直接スクロールして対象を組み立てる。
-    Future<void> jump(double offset) async {
-      final st = tester.state<ScrollableState>(find.byType(Scrollable).first);
-      st.position.jumpTo(offset.clamp(0, st.position.maxScrollExtent));
-      await tester.pump();
-    }
-
-    await jump(10000); // 末尾（モード切替セクション）へ
+    await jump(tester, 10000); // 末尾（モード切替セクション）へ
     expect((tester.widget(calib) as OutlinedButton).onPressed, isNull);
 
-    await jump(0); // 先頭（接続セクション）へ
+    await jump(tester, 0); // 先頭（接続セクション）へ
     await tester.tap(buttonFinder('サーバ開始'));
     await settle(tester);
-    await jump(10000);
+    await jump(tester, 10000);
     expect((tester.widget(calib) as OutlinedButton).onPressed, isNull,
         reason: 'サーバ稼働中でも未接続なら無効');
 
-    await jump(0);
+    await jump(tester, 0);
     await tester.tap(buttonFinder('サーバ停止'));
     await settle(tester);
     await tester.pumpWidget(const SizedBox());
