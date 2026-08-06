@@ -500,7 +500,9 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 4),
         Text(
           'ログファイル: ${_connLog.filePath ?? "(未作成)"}\n'
-          '見方: http request が出ない=Androidの通信がMacまで届いていない（ネットワーク層）／'
+          '見方: http request が出ない=Androidの通信がMacまで届いていない'
+          '（システム設定>プライバシーとセキュリティ>ローカルネットワークの許可・'
+          'Nortonファイアウォールの受信許可・テザリングの子機間通信を確認）／'
           'ws upgraded まで出て hello が無い=アプリ層／hello_error=6桁コード不一致。',
           style: const TextStyle(fontSize: 10, color: Colors.black54),
         ),

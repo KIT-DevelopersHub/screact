@@ -10,10 +10,12 @@ import 'package:flutter/foundation.dart';
 /// - "http request" あり → TCPはMacまで到達している
 /// - "ws upgraded" あり → WebSocket確立済み（以後はプロトコル層）
 /// - "hello_error" → 6桁コード不一致
+///
+/// ファイルは1行ごとに同期書き込み＋flush（アプリがクラッシュしても直前まで残る）。
 class ConnectionLog extends ChangeNotifier {
   static const int maxEntries = 300;
   final List<String> entries = [];
-  IOSink? _sink;
+  File? _file;
   String? _filePath;
 
   String? get filePath => _filePath;
@@ -25,11 +27,15 @@ class ConnectionLog extends ChangeNotifier {
       if (home == null) return;
       final dir = Directory('$home/Library/Logs/yubiboard');
       await dir.create(recursive: true);
-      final file = File('${dir.path}/desktop.log');
-      _sink = file.openWrite(mode: FileMode.append);
-      _filePath = file.path;
+      _file = File('${dir.path}/desktop.log');
+      _filePath = _file!.path;
+      // init 完了前に記録されたぶん（起動直後の listen ログ等）も書き出す。
+      if (entries.isNotEmpty) {
+        _file!.writeAsStringSync('${entries.join('\n')}\n',
+            mode: FileMode.append, flush: true);
+      }
     } catch (_) {
-      _sink = null;
+      _file = null;
     }
   }
 
@@ -41,16 +47,11 @@ class ConnectionLog extends ChangeNotifier {
     entries.add(line);
     if (entries.length > maxEntries) entries.removeAt(0);
     try {
-      _sink?.writeln('${now.toIso8601String()} $message');
+      _file?.writeAsStringSync('${now.toIso8601String()} $message\n',
+          mode: FileMode.append, flush: true);
     } catch (_) {}
     notifyListeners();
   }
 
   String get joined => entries.join('\n');
-
-  @override
-  void dispose() {
-    _sink?.close();
-    super.dispose();
-  }
 }
