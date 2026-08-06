@@ -13,6 +13,7 @@ import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -21,6 +22,116 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class YubiBoardWebSocketClientTest {
+    @Test
+    fun `hello ack delivers resume token for secure persistence`() {
+        val server = MockWebServer()
+        val issued = CountDownLatch(1)
+        val received = AtomicReference<Pair<ConnectionConfig, String>>()
+        val serverSocket = AtomicReference<WebSocket>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSocket.set(webSocket)
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        if (text.contains("\"messageType\":\"hello\"")) {
+                            webSocket.send(
+                                """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s-issued","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":false,"resumeToken":"issued-resume"}""",
+                            )
+                        }
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {},
+            onModeChanged = {},
+            onTrustedConnectionIssued = { config, token ->
+                received.set(config to token)
+                issued.countDown()
+            },
+        )
+        try {
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, pairingToken = "123456"))
+
+            assertTrue(issued.await(2, TimeUnit.SECONDS))
+            assertEquals("issued-resume", received.get().second)
+            assertEquals("123456", received.get().first.pairingToken)
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            client.close()
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `invalid resume token stops automatic retry and returns to initial connection`() {
+        val server = MockWebServer()
+        val invalidated = CountDownLatch(1)
+        val disconnected = CountDownLatch(1)
+        val hello = AtomicReference<String>()
+        val states = CopyOnWriteArrayList<ConnectionSnapshot>()
+        val serverSocket = AtomicReference<WebSocket>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSocket.set(webSocket)
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        if (text.contains("\"messageType\":\"hello\"")) {
+                            hello.set(text)
+                            webSocket.send(
+                                """{"schemaVersion":1,"messageType":"hello_error","code":"resume_token_invalid","retryable":false}""",
+                            )
+                        }
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {
+                states += it
+                if (it.status == ConnectionStatus.DISCONNECTED &&
+                    it.errorCode == ConnectionErrorCode.RESUME_TOKEN_INVALID
+                ) {
+                    disconnected.countDown()
+                }
+            },
+            onModeChanged = {},
+            onTrustedConnectionInvalid = { invalidated.countDown() },
+        )
+        try {
+            val url = server.url("/")
+            client.connect(
+                ConnectionConfig(url.host, url.port, resumeToken = "saved-resume"),
+                automatic = true,
+            )
+
+            assertTrue(invalidated.await(2, TimeUnit.SECONDS))
+            assertTrue(disconnected.await(2, TimeUnit.SECONDS))
+            assertTrue(hello.get().contains("\"resumeToken\":\"saved-resume\""))
+            assertTrue(!hello.get().contains("pairingToken"))
+            assertTrue(states.none { it.status == ConnectionStatus.RECONNECTING })
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            client.close()
+            server.shutdown()
+        }
+    }
+
     @Test
     fun `hand frame is sent only after hello acknowledgement`() {
         val server = MockWebServer()
@@ -202,7 +313,8 @@ class YubiBoardWebSocketClientTest {
         val server = MockWebServer()
         val firstHello = CountDownLatch(1)
         val firstCalibration = CountDownLatch(1)
-        val trackingStarted = CountDownLatch(1)
+        val firstTrackingStarted = CountDownLatch(1)
+        val trackingStarted = CountDownLatch(2)
         val secondHello = CountDownLatch(1)
         val cachedCalibration = CountDownLatch(1)
         val serverEnded = CountDownLatch(2)
@@ -262,8 +374,12 @@ class YubiBoardWebSocketClientTest {
                                     """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s-second","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true}""",
                                 )
                             }
-                            text.contains("\"messageType\":\"calibration_markers\"") ->
+                            text.contains("\"messageType\":\"calibration_markers\"") -> {
                                 cachedCalibration.countDown()
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"control_message","sessionId":"s-second","command":"set_mode","mode":"tracking"}""",
+                                )
+                            }
                         }
                     }
 
@@ -284,7 +400,10 @@ class YubiBoardWebSocketClientTest {
             onStateChanged = {},
             onModeChanged = {
                 modes += it
-                if (it == CaptureMode.TRACKING) trackingStarted.countDown()
+                if (it == CaptureMode.TRACKING) {
+                    firstTrackingStarted.countDown()
+                    trackingStarted.countDown()
+                }
             },
         )
         try {
@@ -293,21 +412,109 @@ class YubiBoardWebSocketClientTest {
             assertTrue(firstHello.await(2, TimeUnit.SECONDS))
             client.submitCalibration(sampleCalibration())
             assertTrue(firstCalibration.await(2, TimeUnit.SECONDS))
-            assertTrue(trackingStarted.await(2, TimeUnit.SECONDS))
+            assertTrue(firstTrackingStarted.await(2, TimeUnit.SECONDS))
 
             client.onNetworkLost()
             client.onNetworkAvailable()
 
             assertTrue(secondHello.await(2, TimeUnit.SECONDS))
             assertTrue(cachedCalibration.await(2, TimeUnit.SECONDS))
+            assertTrue(trackingStarted.await(2, TimeUnit.SECONDS))
             assertEquals(
-                listOf(CaptureMode.CALIBRATION, CaptureMode.TRACKING, CaptureMode.TRACKING),
+                listOf(
+                    CaptureMode.CALIBRATION,
+                    CaptureMode.TRACKING,
+                    CaptureMode.CALIBRATION,
+                    CaptureMode.TRACKING,
+                ),
                 modes.toList(),
             )
         } finally {
             client.disconnect()
             serverSockets.forEach { it.close(1000, "test complete") }
             serverEnded.await(2, TimeUnit.SECONDS)
+            client.close()
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `manual disconnect discards confirmed calibration before a new connection`() {
+        val server = MockWebServer()
+        val firstTracking = CountDownLatch(1)
+        val secondHello = CountDownLatch(1)
+        val unexpectedCachedCalibration = CountDownLatch(1)
+        val sockets = CopyOnWriteArrayList<WebSocket>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        sockets += webSocket
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        when {
+                            text.contains("\"messageType\":\"hello\"") -> webSocket.send(
+                                """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"manual-first","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true}""",
+                            )
+                            text.contains("\"messageType\":\"calibration_markers\"") -> {
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"calibration_status","sessionId":"manual-first","status":"complete"}""",
+                                )
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"control_message","sessionId":"manual-first","command":"set_mode","mode":"tracking"}""",
+                                )
+                            }
+                        }
+                    }
+                },
+            ),
+        )
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        sockets += webSocket
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        when {
+                            text.contains("\"messageType\":\"hello\"") -> {
+                                secondHello.countDown()
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"manual-second","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true}""",
+                                )
+                            }
+                            text.contains("\"messageType\":\"calibration_markers\"") ->
+                                unexpectedCachedCalibration.countDown()
+                        }
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {},
+            onModeChanged = { if (it == CaptureMode.TRACKING) firstTracking.countDown() },
+        )
+        try {
+            val url = server.url("/")
+            val config = ConnectionConfig(url.host, url.port, pairingToken = "123456")
+            client.connect(config)
+            client.submitCalibration(sampleCalibration())
+            assertTrue(firstTracking.await(2, TimeUnit.SECONDS))
+
+            client.disconnect()
+            sockets.first().close(1000, "manual disconnect")
+            client.connect(config)
+
+            assertTrue(secondHello.await(2, TimeUnit.SECONDS))
+            assertFalse(unexpectedCachedCalibration.await(500, TimeUnit.MILLISECONDS))
+        } finally {
+            client.disconnect()
+            sockets.forEach { it.close(1000, "test complete") }
             client.close()
             server.shutdown()
         }

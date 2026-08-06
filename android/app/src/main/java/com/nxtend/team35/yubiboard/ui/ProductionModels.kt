@@ -5,6 +5,7 @@ import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
+import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 
 enum class ExperienceMode { PRODUCTION, DEBUG }
 
@@ -18,11 +19,25 @@ enum class CameraUiState {
 
 sealed interface CalibrationUiState {
     data object Inactive : CalibrationUiState
+    data object PlacementWaiting : CalibrationUiState
     data class FindingMarkers(val found: Int) : CalibrationUiState
     data class Stabilizing(val current: Int, val required: Int) : CalibrationUiState
     data object WaitingForPc : CalibrationUiState
     data class RetryRequired(val reason: CalibrationRetryReason) : CalibrationUiState
     data object Complete : CalibrationUiState
+}
+
+fun calibrationUiStateAfterFrame(
+    current: CalibrationUiState,
+    result: MarkerDetectionResult,
+): CalibrationUiState = when {
+    current in setOf(CalibrationUiState.WaitingForPc, CalibrationUiState.Complete) -> current
+    result.stable -> CalibrationUiState.WaitingForPc
+    current == CalibrationUiState.PlacementWaiting && result.markers.isEmpty() ->
+        CalibrationUiState.PlacementWaiting
+    current is CalibrationUiState.RetryRequired && result.markers.isEmpty() -> current
+    result.markers.size < 4 -> CalibrationUiState.FindingMarkers(result.markers.size)
+    else -> CalibrationUiState.Stabilizing(result.stableFrameCount, result.requiredStableFrames)
 }
 
 enum class CalibrationRetryReason {
@@ -62,6 +77,7 @@ enum class ProductionStage {
     CAMERA_ERROR,
     CONNECT,
     CONNECTING,
+    AUTO_CONNECTING,
     CONNECTION_ERROR,
     RECONNECTING,
     CALIBRATION,
@@ -75,7 +91,7 @@ fun ProductionUiState.stage(): ProductionStage = when {
     connection.status == ConnectionStatus.ERROR -> ProductionStage.CONNECTION_ERROR
     connection.status == ConnectionStatus.RECONNECTING -> ProductionStage.RECONNECTING
     connection.status in setOf(ConnectionStatus.CONNECTING, ConnectionStatus.AWAITING_ACK) ->
-        ProductionStage.CONNECTING
+        if (connection.automatic) ProductionStage.AUTO_CONNECTING else ProductionStage.CONNECTING
     connection.status == ConnectionStatus.DISCONNECTED -> ProductionStage.CONNECT
     captureMode == CaptureMode.CALIBRATION -> ProductionStage.CALIBRATION
     else -> ProductionStage.READY

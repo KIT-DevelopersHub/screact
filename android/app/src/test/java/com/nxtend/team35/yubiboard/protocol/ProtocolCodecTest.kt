@@ -24,6 +24,42 @@ class ProtocolCodecTest {
         assertTrue(encoded.contains("hand_landmarks_21"))
         assertTrue(encoded.contains("calibration_status"))
         assertTrue(encoded.contains("hello_error"))
+        assertTrue(encoded.contains("trusted_reconnect"))
+        assertTrue(encoded.contains("\"pairingToken\":\"482731\""))
+        assertTrue(!encoded.contains("resumeToken"))
+    }
+
+    @Test
+    fun `trusted hello sends resume token without pairing token`() {
+        val encoded = ProtocolCodec.encode(
+            HelloMessage(
+                deviceId = "android-test",
+                clientVersion = "0.1.0",
+                resumeToken = "opaque-resume-token",
+            ),
+        )
+
+        assertTrue(encoded.contains("\"resumeToken\":\"opaque-resume-token\""))
+        assertTrue(!encoded.contains("pairingToken"))
+    }
+
+    @Test
+    fun `hello authentication fields are exclusive`() {
+        assertTrue(
+            runCatching {
+                HelloMessage(deviceId = "android-test", clientVersion = "0.1.0")
+            }.isFailure,
+        )
+        assertTrue(
+            runCatching {
+                HelloMessage(
+                    deviceId = "android-test",
+                    clientVersion = "0.1.0",
+                    pairingToken = "123456",
+                    resumeToken = "resume",
+                )
+            }.isFailure,
+        )
     }
 
     @Test
@@ -81,6 +117,15 @@ class ProtocolCodecTest {
                 """{"schemaVersion":1,"messageType":"future_message"}""",
             ),
         )
+    }
+
+    @Test
+    fun `hello acknowledgement exposes issued resume token`() {
+        val decoded = ProtocolCodec.decodeServerMessage(
+            """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s1","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":true,"resumeToken":"issued-token","future":42}""",
+        ) as HelloAckMessage
+
+        assertEquals("issued-token", decoded.resumeToken)
     }
 
     @Test

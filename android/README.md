@@ -2,7 +2,7 @@
 
 背面カメラでArUcoマーカーまたは1つの手の21点ランドマークを検出し、PCへWebSocket/JSONで送るAndroidアプリです。Android側ではジェスチャー判定やPC座標変換を行いません。
 
-目標の本番フローは、初回ペアリング後に前回のPCへ自動接続し、スマホ固定後にPCで`配置OK`を押してからArUco位置合わせへ進む形です。現行実装はhost・portの復元までで、6桁コードなしの起動時自動接続と配置確認ゲートは未実装です。
+本番フローは、初回ペアリング後に前回のPCへ自動接続し、スマホ固定後にPCで`配置OK`を押してからArUco位置合わせへ進みます。`resumeToken`はAndroid Keystore鍵で保護して保存します。
 
 ## ビルド
 
@@ -162,7 +162,7 @@ cd android
 - PC送信上限: `20 fps`（5〜20 fps）
 - heartbeat: 5秒
 - 再接続: 1、2、4、8、以後10秒。Androidのデフォルトネットワーク復帰時は即時再試行
-- 現行実装はIPとポートを保存するが、ペアリングコードは保存せず、起動時自動接続もしない
-- 目標仕様では初回成功時の`resumeToken`をAndroid Keystoreで保護し、2回目以降は入力なしで自動接続する
+- ペアリングコードは保存せず、初回成功時の`resumeToken`をAndroid Keystoreで保護する
+- 保存済みhost・port・resumeTokenがある場合は、2回目以降に入力なしで自動接続する
 
 現在の実装全体は[`docs/android/android-current-spec.md`](../docs/android/android-current-spec.md)、通信JSONの詳細は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を参照してください。

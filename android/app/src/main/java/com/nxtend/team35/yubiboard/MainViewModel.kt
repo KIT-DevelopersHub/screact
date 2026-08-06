@@ -13,12 +13,17 @@ import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.CalibrationStatusMessage
 import com.nxtend.team35.yubiboard.settings.AppSettings
+import com.nxtend.team35.yubiboard.settings.AndroidKeystoreResumeTokenProtector
+import com.nxtend.team35.yubiboard.settings.SharedPreferencesTrustedConnectionValues
+import com.nxtend.team35.yubiboard.settings.TrustedConnectionCoordinator
+import com.nxtend.team35.yubiboard.settings.TrustedConnectionStore
 import com.nxtend.team35.yubiboard.ui.CalibrationRetryReason
 import com.nxtend.team35.yubiboard.ui.CalibrationUiState
 import com.nxtend.team35.yubiboard.ui.CameraUiState
 import com.nxtend.team35.yubiboard.ui.ExperienceMode
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.TrackingUiState
+import com.nxtend.team35.yubiboard.ui.calibrationUiStateAfterFrame
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
@@ -49,8 +54,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val productionState: LiveData<ProductionUiState> = mutableProductionState
     val calibrationReset: LiveData<Long> = mutableCalibrationReset
     val currentSettings: AppSettings get() = mutableSettings.value ?: AppSettings()
-    val savedHost: String get() = preferences.getString(KEY_HOST, "") ?: ""
-    val savedPort: Int get() = preferences.getInt(KEY_PORT, DEFAULT_PORT)
+
+    private val trustedConnectionStore = TrustedConnectionStore(
+        SharedPreferencesTrustedConnectionValues(preferences),
+        AndroidKeystoreResumeTokenProtector(),
+    )
+    @Volatile
+    private var trustedConnection = trustedConnectionStore.load()
+    val savedHost: String get() = trustedConnection?.host.orEmpty()
+    val savedPort: Int get() = trustedConnection?.port ?: DEFAULT_PORT
+    val hasTrustedPc: Boolean get() = trustedConnection != null
 
     private val webSocketClient = YubiBoardWebSocketClient(
         deviceId = getOrCreateDeviceId(),
@@ -58,27 +71,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onStateChanged = ::handleConnectionChanged,
         onModeChanged = ::handleModeChanged,
         onCalibrationStatus = ::handleCalibrationStatus,
+        onTrustedConnectionIssued = ::handleTrustedConnectionIssued,
+        onTrustedConnectionInvalid = ::handleTrustedConnectionInvalid,
+        onCalibrationReuseQueued = ::handleCalibrationReuseQueued,
         onLog = mutableLog::postValue,
+    )
+    private val trustedConnectionCoordinator = TrustedConnectionCoordinator(
+        trustedConnectionStore,
+        webSocketClient::connect,
     )
 
     init {
         webSocketClient.setMaxFrameRate(currentSettings.maxSendFps)
         AppDiagnostics.setEnabled(currentSettings.debugModeEnabled)
+        trustedConnectionCoordinator.autoConnect()
     }
 
     fun connect(host: String, portText: String, pairingToken: String): String? {
         val port = portText.toIntOrNull() ?: return "ポートは数字で入力してください"
-        val config = ConnectionConfig(host.trim(), port, pairingToken.trim())
+        val config = ConnectionConfig(
+            host = host.trim(),
+            port = port,
+            pairingToken = pairingToken.trim(),
+        )
         config.validate()?.let { return it }
-        preferences.edit()
-            .putString(KEY_HOST, config.host)
-            .putInt(KEY_PORT, config.port)
-            .apply()
         webSocketClient.connect(config)
         return null
     }
 
-    fun disconnect() = webSocketClient.disconnect()
+    fun disconnect() {
+        webSocketClient.disconnect()
+        trustedConnectionCoordinator.forget()
+        trustedConnection = null
+    }
 
     fun retryNow() = webSocketClient.retryNow()
 
@@ -88,6 +113,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun changeConnectionSettings() {
         webSocketClient.disconnect()
+        trustedConnectionCoordinator.forget()
+        trustedConnection = null
         updateProduction {
             it.copy(
                 connection = ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
@@ -96,6 +123,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
+
+    fun forgetTrustedPc() = changeConnectionSettings()
 
     fun updateCameraState(state: CameraUiState, notice: String? = null) {
         updateProduction { it.copy(camera = state, notice = notice) }
@@ -136,14 +165,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (result.stable) webSocketClient.submitCalibration(result)
         updateProduction { current ->
             if (current.captureMode != CaptureMode.CALIBRATION) return@updateProduction current
-            val calibration = when {
-                result.stable -> CalibrationUiState.WaitingForPc
-                result.markers.size < 4 -> CalibrationUiState.FindingMarkers(result.markers.size)
-                else -> CalibrationUiState.Stabilizing(
-                    result.stableFrameCount,
-                    result.requiredStableFrames,
-                )
-            }
+            val calibration = calibrationUiStateAfterFrame(current.calibration, result)
             current.copy(
                 calibration = calibration,
                 markers = result.markers,
@@ -239,7 +261,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (mode == CaptureMode.CALIBRATION) {
                 current.copy(
                     captureMode = mode,
-                    calibration = CalibrationUiState.FindingMarkers(0),
+                    calibration = CalibrationUiState.PlacementWaiting,
                     tracking = TrackingUiState.INACTIVE,
                     markers = emptyList(),
                     indexTip = null,
@@ -275,6 +297,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mutableCalibrationReset.postValue(SystemClock.uptimeMillis())
         }
         updateProduction { it.copy(calibration = state) }
+    }
+
+    private fun handleTrustedConnectionIssued(config: ConnectionConfig, resumeToken: String) {
+        val saved = trustedConnectionCoordinator.save(config.host, config.port, resumeToken)
+        if (saved) {
+            trustedConnection = trustedConnectionStore.load()
+        } else {
+            updateProduction {
+                it.copy(notice = "信頼済み接続情報を安全に保存できませんでした。次回は6桁コードが必要です。")
+            }
+        }
+    }
+
+    private fun handleTrustedConnectionInvalid() {
+        trustedConnectionCoordinator.forget()
+        trustedConnection = null
+        updateProduction {
+            it.copy(notice = "保存済みの接続情報が無効です。6桁コードで接続し直してください。")
+        }
+    }
+
+    private fun handleCalibrationReuseQueued() {
+        updateProduction { it.copy(calibration = CalibrationUiState.WaitingForPc) }
     }
 
     @Synchronized
@@ -331,8 +376,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val PREFERENCES = "yubiboard_connection"
         private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_HOST = "host"
-        private const val KEY_PORT = "port"
         private const val KEY_ANALYSIS_WIDTH = "analysis_width"
         private const val KEY_ANALYSIS_HEIGHT = "analysis_height"
         private const val KEY_DETECTION_CONFIDENCE = "detection_confidence"
