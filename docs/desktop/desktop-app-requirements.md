@@ -94,6 +94,8 @@ flowchart TB
 
 - WebSocketサーバーの起動
 - Android端末との接続管理
+- 初回ペアリングと信頼済み再接続用トークンの発行・検証・失効
+- スマホ配置案内とPC上の「配置OK」操作
 - 位置合わせモードの開始・終了
 - ArUcoオーバーレイ表示
 - ArUco検出座標の受信
@@ -165,19 +167,23 @@ flowchart TB
 stateDiagram-v2
     [*] --> 起動中
     起動中 --> 接続待機
-    接続待機 --> 接続済み: Android接続
-    接続済み --> 位置合わせ中: 位置合わせ開始
-    位置合わせ中 --> 操作可能: 位置合わせ成功
-    位置合わせ中 --> 位置合わせエラー: 検出失敗・行列生成失敗
-    位置合わせエラー --> 位置合わせ中: 再試行
-    操作可能 --> 位置合わせ中: 再位置合わせ
+    接続待機 --> 配置確認待ち: Android接続・位置合わせ必要
+    接続待機 --> 操作可能: 同一PCプロセス内の再接続
+    配置確認待ち --> マーカー認識中: 配置OK
+    マーカー認識中 --> ホモグラフィ計算中: 安定マーカー受信
+    ホモグラフィ計算中 --> 操作可能: 位置合わせ成功
+    マーカー認識中 --> 位置合わせエラー: 検出失敗
+    ホモグラフィ計算中 --> 位置合わせエラー: 行列生成失敗
+    位置合わせエラー --> 配置確認待ち: 再試行
+    操作可能 --> 配置確認待ち: 再位置合わせ
     操作可能 --> 接続待機: 通信切断
-    接続済み --> 接続待機: 通信切断
+    配置確認待ち --> 接続待機: 通信切断
+    マーカー認識中 --> 接続待機: 通信切断
     接続待機 --> [*]: 終了
     操作可能 --> [*]: 終了
 ```
 
-PCアプリは、起動時にWebSocketサーバーを起動し、Android端末からの接続を待機する。接続後は、位置合わせ、操作可能、位置合わせエラー、通信切断の状態を管理する。
+PCアプリは、起動時にWebSocketサーバーを起動し、Android端末からの接続を待機する。接続後は、配置確認、マーカー認識、ホモグラフィ計算、操作可能、位置合わせエラー、通信切断を個別の状態として管理する。
 
 
 ## 4. 基本シーケンス
@@ -199,11 +205,18 @@ sequenceDiagram
     PC->>PC: WebSocketサーバーを起動
     PC-->>User: 接続待機状態を表示
     User->>Android: Androidアプリを起動
-    Android->>PC: 接続要求
-    PC-->>Android: 接続許可・セッション情報
+    alt 信頼済み端末
+        Android->>PC: resumeTokenで自動接続
+    else 初回接続
+        User->>Android: IP・ポート・6桁コードを入力
+        Android->>PC: pairingTokenで接続
+    end
+    PC-->>Android: 接続許可・セッション・resumeToken
     Android-->>User: 接続済みを表示
     PC-->>User: Android接続済みを表示
-    User->>PC: 画面位置合わせを開始
+    PC-->>User: スマホを配置・固定する案内
+    Android-->>User: PCで配置OKを押す案内
+    User->>PC: 配置OK
     PC->>Screen: 4つのArUcoマーカーを表示
     loop Androidで有効5フレームが安定するまで
         Camera-->>Android: カメラ画像
@@ -216,7 +229,8 @@ sequenceDiagram
     PC->>PC: 変換行列を保存
     alt 位置合わせ成功
         PC->>Screen: ArUcoマーカーを非表示
-        PC-->>Android: 位置合わせ完了
+        PC-->>Android: calibration_status complete
+        PC-->>Android: set_mode tracking
         PC-->>User: 操作可能状態を表示
     else 位置合わせ失敗
         PC-->>Android: 再検出要求
@@ -372,6 +386,8 @@ flowchart TD
 
 PCアプリは、接続開始メッセージを検証し、セッションID、対象画面情報、位置合わせの要否を含む接続応答を返す。
 
+初回`hello`は6桁の`pairingToken`、信頼済み再接続は`resumeToken`を含む。両方を同時に受け付けず、いずれか一方を必須とする。初回成功時は端末IDへ紐づけた高エントロピーの`resumeToken`を発行する。詳細なエラーと保存規則は[Android通信プロトコル v1](../android/android-protocol-v1.md)を正本とする。
+
 
 ```json
 {
@@ -397,9 +413,12 @@ PCアプリは、接続開始メッセージを検証し、セッションID、�
 "widthPx": 1920,
 "heightPx": 1080
 },
-"calibrationRequired": true
+"calibrationRequired": true,
+"resumeToken": "opaque-high-entropy-token"
 }
 ```
+
+PCアプリ起動後の最初の認証成功では`calibrationRequired=true`を返す。同一PCプロセス内で位置合わせ完了後に一時切断した端末の再接続だけ`false`を返せる。
 
 ## 6. 受信メッセージ仕様
 
@@ -561,7 +580,9 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    Start[位置合わせ開始]
+    Start[Android接続・位置合わせ必要]
+    Guide[PCがスマホ固定を案内]
+    Confirm[利用者がPCで配置OK]
     Show[PCが4つのArUcoを表示]
     Capture[Androidが画面を撮影]
     Detect{4つすべて検出したか}
@@ -574,7 +595,7 @@ flowchart TD
     Hide[ArUco表示を終了]
     Ready[操作可能]
     Retry[検出を再試行]
-    Start --> Show --> Capture --> Detect
+    Start --> Guide --> Confirm --> Show --> Capture --> Detect
     Detect -->|いいえ| Retry --> Capture
     Detect -->|はい| Stable
     Stable -->|いいえ| Capture
@@ -586,7 +607,8 @@ flowchart TD
 ### 7.3 PC側の処理
 
 - 位置合わせモードを開始・終了する。
-- 対象画面上に異なるIDを持つ4つのArUcoマーカーを表示する。
+- Android接続後、マーカーを表示せずスマホの配置・固定を案内する。
+- PC上の`配置OK`を受けた後に限り、対象画面上に異なるIDを持つ4つのArUcoマーカーを表示する。
 - AndroidからArUco ID、中心座標、4頂点座標、撮影画像サイズ、検出時刻を受信する。
 - 各ArUco IDと対象画面上の既知の座標を対応付ける。
 - Android側で安定判定済みの`calibration_markers`を受信し、IDと対象画面上の既知位置を検証する。
@@ -594,6 +616,8 @@ flowchart TD
 - 変換行列を保存する。
 - 成功時にマーカーを非表示にし、操作可能状態へ移行する。
 - 任意のタイミングで再位置合わせを実行できるようにする。
+
+PCアプリを起動し直した場合は保存済み変換行列を自動採用せず、配置確認から位置合わせをやり直す。同一PCプロセス内で一時的に通信が切れた場合だけ、画面・端末配置が変わっていない前提で確認済み位置合わせを再利用できる。
 
 
 ### 7.4 再位置合わせ条件
@@ -848,13 +872,15 @@ flowchart TB
 | FR-003 | 接続状態表示 | PCおよびAndroidアプリは、未接続、接続中、接続済み、再接続中、切断、エラーを表示できること。 |
 | FR-004 | ペアリング | ペアリングコードまたは同等の認証方法を使用できること。 |
 | FR-006 | 切断時解除 | 通信が切断された場合、PCは実行中の入力操作を終了すること。 |
+| FR-007 | 信頼済み接続 | 初回認証成功時に端末IDへ紐づく高エントロピーの`resumeToken`を発行し、以後の接続で検証できること。 |
+| FR-008 | トークン失効 | 接続先削除や管理操作により保存済み`resumeToken`を失効できること。 |
 
 ### 12.2 画面位置合わせ機能
 
 | ID | 要件名 | 内容 |
 | --- | --- | --- |
-| FR-010 | 位置合わせモード | 利用者の操作によって画面位置合わせモードを開始できること。 |
-| FR-011 | ArUco表示 | 異なるIDを持つ4つのArUcoマーカーを表示できること。 |
+| FR-010 | 配置確認 | Android接続後にスマホ固定を案内し、PC上で利用者が`配置OK`を押せること。 |
+| FR-011 | ArUco表示 | `配置OK`の後に限り、異なるIDを持つ4つのArUcoマーカーを表示できること。 |
 | FR-016 | 対応付け | PCはマーカーIDと対象画面上の既知位置を対応付けられること。 |
 | FR-017 | 変換行列作成 | ホモグラフィ変換行列を作成できること。 |
 | FR-018 | 変換行列検証 | 変換行列が正常に利用可能かを検証できること。 |
@@ -1004,6 +1030,8 @@ flowchart TB
 | NFR-040 | Androidアプリは利用者が指定したPCへ接続すること。 |
 | NFR-041 | ペアリングコードなどにより意図しない端末の接続を防止できること。 |
 | NFR-042 | WebSocketサーバーを必要のない外部ネットワークへ公開しないこと。 |
+| NFR-043 | `resumeToken`は十分なエントロピーを持たせ、PC側では平文保存せず端末IDと関連付けること。 |
+| NFR-044 | 不正または失効済み`resumeToken`を受信した場合は接続を許可せず、Androidが初回ペアリングへ戻れるエラーを返すこと。 |
 
 ## 15. エラー処理
 
@@ -1067,6 +1095,10 @@ flowchart TD
 | AC-018 | 受信した21点骨格データを時系列で保存できること。 |
 | AC-019 | 保存した骨格データを再生し、ジェスチャー認識を再実行できること。 |
 | AC-020 | 10分以上連続して利用してもシステムが停止しないこと。 |
+| AC-021 | PCの`配置OK`前はマーカーを表示せず、押下後に4マーカーを全画面表示すること。 |
+| AC-022 | 初回ペアリング後、Androidアプリ再起動時に6桁コードなしで認証できること。 |
+| AC-023 | PCアプリ再起動後は位置合わせを要求し、同一PCプロセス内の一時切断では確認済み結果を再利用できること。 |
+| AC-024 | 受信骨格を検証・時系列化し、カメラ座標平滑化、指形状認識、ホモグラフィ、画面座標処理、描画の順で処理できること。 |
 
 ## 17. 未確定事項
 
@@ -1239,33 +1271,33 @@ ADRでは、透過・クリックスルーのオーバーレイ窓をC++/Win32�
 
 以下は、機能を段階的に接続して確認するための順序であり、デスクトップアプリ内部のクラス構成や担当モジュールを指定するものではない。
 
-1. Androidから送信されるJSONを受信する
-2. 受信した21点骨格データをデバッグ表示する
-3. ArUco検出結果を受信し、画面位置合わせを行う
-4. 指先座標を対象画面座標へ変換する
-5. ポインターまたは自前カーソルを追従させる
-6. 描画と軌跡補間を実装する
-7. ピンチ、クリック、ドラッグを実装する
-8. スクロールを実装する
-9. 拡大・縮小を実装する
+1. WebSocketサーバー、初回6桁認証、`resumeToken`認証を実装する
+2. 接続待機、配置確認待ち、`配置OK`、四隅マーカー表示を一本道で実装する
+3. `calibration_markers`を受信し、ホモグラフィ作成・検証・完了通知まで実装する
+4. `hand_frame`を受信検証・時系列化し、21点をデバッグ表示・ログ保存する
+5. カメラ座標上の軽い平滑化と指形状・ジェスチャー認識の入力を実装する
+6. 人差し指先端をホモグラフィ変換し、画面座標の平滑化とポインター追従を実装する
+7. 描画と軌跡補間を実装して、起動から線を描くまでのデモ経路を完成させる
+8. ピンチ、クリック、ドラッグを実装する
+9. スクロールと拡大・縮小を実装する
 10. Windowsネイティブのオーバーレイ・OS入力と接続する
-11. ログ保存・再生とパラメータ調整を実装する
-12. Windows実機で統合テストを行う
+11. 切断・手喪失時の解除、ログ再生、パラメータ調整を実装する
+12. 初回接続、自動接続、PC再起動、一時通信断、位置合わせ再試行をWindows実機で統合テストする
 
 ```mermaid
 flowchart TB
-    Step1[1. JSON受信]
-    Step2[2. 21点骨格表示]
+    Step1[1. 初回認証・自動接続]
+    Step2[2. 配置確認・マーカー表示]
     Step3[3. ArUco位置合わせ]
-    Step4[4. 指先座標変換]
-    Step5[5. ポインター追従]
-    Step6[6. 描画・補間]
-    Step7[7. ピンチ・クリック・ドラッグ]
-    Step8[8. スクロール]
-    Step9[9. 拡大・縮小]
-    Step10[10. Windowsネイティブ層と接続]
-    Step11[11. ログ・調整]
-    Step12[12. Windows統合テスト]
+    Step4[4. 21点受信・表示・ログ]
+    Step5[5. 平滑化・指形状認識]
+    Step6[6. ホモグラフィ・ポインター]
+    Step7[7. 描画・補間]
+    Step8[8. ピンチ・ドラッグ]
+    Step9[9. スクロール・ズーム]
+    Step10[10. Windowsネイティブ層]
+    Step11[11. 障害復旧・ログ再生]
+    Step12[12. 正常系・再接続統合テスト]
     Step1 --> Step2 --> Step3 --> Step4 --> Step5 --> Step6 --> Step7 --> Step8 --> Step9 --> Step10 --> Step11 --> Step12
 ```
 
@@ -1278,7 +1310,9 @@ flowchart TB
 ```mermaid
 flowchart TD
     Start[PCアプリ起動]
-    Connect[Androidアプリと接続]
+    Connect[Androidが自動接続または初回ペアリング]
+    Placement[スマホを配置・固定]
+    PlacementOk[PCで配置OK]
     CalibrationMode[画面位置合わせモード]
     ShowArUco[PCが4つのArUcoを表示]
     DetectArUco[Androidが4 IDを検出]
@@ -1294,7 +1328,7 @@ flowchart TD
     Interpolate[描画軌跡補間]
     Output[描画・クリック・スクロール・ズーム]
     Screen[対象画面へ反映]
-    Start --> Connect --> CalibrationMode --> ShowArUco --> DetectArUco --> SendArUco --> Matrix --> Ready --> Capture --> HandLandmarks --> SendHand --> Smooth
+    Start --> Connect --> Placement --> PlacementOk --> CalibrationMode --> ShowArUco --> DetectArUco --> SendArUco --> Matrix --> Ready --> Capture --> HandLandmarks --> SendHand --> Smooth
     Smooth --> Gesture
     Smooth --> Transform --> Interpolate
     Gesture --> Output

@@ -27,6 +27,8 @@ docs/
 
 - [システム全体要件定義書](./system/system-requirements.md): AndroidとPCを含む製品の目的、責任境界、完成形
 
+正常系の正本はシステム全体要件定義書の「デモクリティカルな利用フロー」とする。各担当資料では、接続、配置確認、ArUco、追跡、PC処理の順序を変更しない。
+
 ### Android
 
 - [Androidアプリ要件定義書](./android/android-app-requirements.md): Android側の機能・非機能要件
