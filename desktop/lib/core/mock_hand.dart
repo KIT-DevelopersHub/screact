@@ -28,7 +28,17 @@ class MockHand {
     final cx = 0.5 + 0.28 * math.cos(t);
     final cy = 0.5 + 0.28 * math.sin(t);
     final pinch = (i ~/ 20) % 2 == 1; // 20フレームごとにピンチON/OFF
-    final tip = Vec2(cx, cy);
+    return at(frameId: i, tip: Vec2(cx, cy), pinch: pinch);
+  }
+
+  /// 人差し指先端 [tip]（カメラ正規化）とピンチ有無から21点の手を合成する。
+  /// 任意の軌跡（傾いた四隅での線引き等）のテスト・モックに使う。
+  static HandFrame at({
+    required int frameId,
+    required Vec2 tip,
+    required bool pinch,
+  }) {
+    final cx = tip.x, cy = tip.y;
     final wrist = Vec2(cx, cy + 0.25);
 
     // 21点を初期化（既定は手首位置）してから主要点を設定。
@@ -50,8 +60,8 @@ class MockHand {
     set(HandFrame.pinkyTip, Vec2(cx + 0.09, cy + 0.15));
 
     return HandFrame(
-      frameId: i,
-      capturedAtMonotonicMs: i * 33, // ~30fps
+      frameId: frameId,
+      capturedAtMonotonicMs: frameId * 33, // ~30fps
       detected: true,
       handedness: 'RIGHT',
       landmarks: lm,
