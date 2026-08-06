@@ -36,20 +36,25 @@ flutter run -d macos  # or -d windows
 - 電話が無い時は「モックの手を流す」で、実プロトコルと同じデータでパイプラインを駆動して確認できる（ピンチで線が描かれる）。
 - ネットワーク経路まで試すには、サーバ開始後に別ターミナルで `dart run tool/mock_android.dart` を実行。
 
-## 各OSネイティブ（次段・実機で実装/検証）
+## 現在の実装範囲
 
 - Android端末とのWebSocket接続
 - 初回6桁コード認証と信頼済み`resumeToken`の発行・検証
 - スマホ固定案内とPC上の`配置OK`
 - `配置OK`後の四隅ArUcoマーカー表示
-- 受信した手指骨格データの解析
-- カメラ座標から画面座標への変換
-- ポインター、クリック、ドラッグ、スクロール、描画などの操作
+- 受信した手指骨格データの解析と画面座標への変換
+- ポインター、クリック、ドラッグ、スクロール、描画用イベントの生成
 - ログ保存とデバッグ表示
 
-- **Windows**（`windows/` ランナー・C++/Win32）: 複数ポインター注入・透過クリックスルー窓。ADR-0001 準拠（MouseMux SDK 併用は要検討）。
-- **macOS**（`macos/` ランナー・Swift/CGEvent）: 単一ポインター注入・オーバーレイ窓。
+正常系は、`接続待機 → 配置確認待ち → マーカー認識中 → ホモグラフィ計算中 → 操作可能`。
+通信JSONと再接続条件は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を正本とする。
 
-使用する言語・フレームワーク・ビルド方法は、デスクトップアプリの担当者が決定した後に追記します。
+## OSネイティブ実装
 
-実装する正常系は、`接続待機 → 配置確認待ち → マーカー認識中 → ホモグラフィ計算中 → 操作可能`です。骨格フレームは、受信検証・時系列化、カメラ座標平滑化、指形状認識、ホモグラフィ変換、画面座標処理、描画・OS入力の順で処理します。通信JSONと再接続条件は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を正本とします。
+`yubiboard/overlay_window` チャネルの透過・最前面・クリックスルーオーバーレイはWindowsとmacOSの両方に実装済み。
+
+- **Windows**（`windows/` ランナー・C++/Win32）: オーバーレイ窓を実装済み。
+- **macOS**（`macos/` ランナー・Swift）: オーバーレイ窓を実装済み。
+
+OSへの実入力は`DesktopBridge`の`yubiboard/desktop_input` MethodChannelで分離している。
+ネイティブ側が未接続の間は **no-op** となり、共通UIのアプリ内描画で動作確認できる。
