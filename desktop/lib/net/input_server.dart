@@ -94,7 +94,11 @@ class InputServer {
         if (req.uri.path == '/ws/v1/input' &&
             WebSocketTransformer.isUpgradeRequest(req)) {
           _log('http request from $from path=${req.uri.path} (WS upgrade要求)');
-          final ws = await WebSocketTransformer.upgrade(req);
+          // 圧縮拡張は必ずオフにする。Dart既定の permessage-deflate 応答
+          // （client_max_window_bits付き）を Android の OkHttp が拒否し、
+          // closeCode=1010 で即切断される（実機で確認した接続不可の根本原因）。
+          final ws = await WebSocketTransformer.upgrade(req,
+              compression: CompressionOptions.compressionOff);
           _log('ws upgraded ($from) — WebSocket確立');
           _attach(ws, from);
         } else {

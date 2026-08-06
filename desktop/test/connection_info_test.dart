@@ -190,6 +190,34 @@ void main() {
       expect(stage('hello_error'), contains('コード不一致'));
     });
 
+    test('WS応答に Sec-WebSocket-Extensions を含めない（OkHttp互換・1010切断の回帰）',
+        () async {
+      // AndroidのOkHttpは permessage-deflate; client_max_window_bits を含む
+      // 応答を拒否して closeCode=1010 で切断する（実機で発生）。
+      // 生ソケットで圧縮拡張を提示し、応答ヘッダに拡張が無いことを確認する。
+      final server = await startServer(code: '123456');
+      final socket = await Socket.connect('localhost', server.boundPort!);
+      addTearDown(socket.destroy);
+      socket.write('GET /ws/v1/input HTTP/1.1\r\n'
+          'Host: localhost\r\n'
+          'Upgrade: websocket\r\n'
+          'Connection: Upgrade\r\n'
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+          'Sec-WebSocket-Version: 13\r\n'
+          'Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n'
+          '\r\n');
+      final buf = StringBuffer();
+      await for (final chunk in socket) {
+        buf.write(String.fromCharCodes(chunk));
+        if (buf.toString().contains('\r\n\r\n')) break;
+      }
+      final headers = buf.toString().toLowerCase();
+      expect(headers, contains('101'));
+      expect(headers, contains('upgrade'));
+      expect(headers, isNot(contains('sec-websocket-extensions')),
+          reason: '拡張応答があるとOkHttpが1010で切断する');
+    });
+
     test('稼働中に enforcePairing を切り替えられる', () async {
       final server = await startServer(code: '123456');
       server.enforcePairing = false; // UIトグル相当
