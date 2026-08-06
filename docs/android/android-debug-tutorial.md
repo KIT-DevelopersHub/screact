@@ -300,3 +300,336 @@ python -m unittest android/tools/tests/test_render_hand_video.py
 - [ ] 既存疑似入力、詳細Overlay、JSONL保存が利用できる
 
 ハッカソンデモでは、状態ラボ → `production-happy` → 手追跡 → モック停止と自動復帰の順に見せる。これで本番UI、実検出、通信、位置合わせ、障害復旧を最短経路で確認できる。
+
+## 17. 現行デバッグ環境の全体シーケンス
+
+次の図は、debug APK、`android-debug.ps1`、`mock-websocket-server.ps1`を使う現在の検証経路を、端末準備から認証、位置合わせ、手追跡、障害復旧、ログ出力まで通して示す。実線の矢印はプロセス間または主要コンポーネント間の通信、点線の矢印は応答または状態通知である。
+
+AndroidからPCへ送るアプリデータは`hello`、`calibration_markers`、`hand_frame`、`heartbeat`だけであり、カメラ映像そのものは送らない。PCの`配置OK`はモックプロセス内のローカル操作なので、Androidへの専用通信は発生しない。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 利用者
+    participant CLI as PC PowerShell<br/>デバッグツール
+    participant ADB as ADB・USB reverse
+    participant App as Android UI・ViewModel
+    participant Store as SharedPreferences<br/>Android Keystore
+    participant Camera as CameraX<br/>ImageAnalysis
+    participant Vision as ArUco・MediaPipe<br/>状態機械
+    participant WS as OkHttp<br/>WebSocketクライアント
+    participant Mock as mock-websocket-server.ps1
+    participant Trust as デバッグ信頼ストア<br/>mock-trusted-devices.json
+    participant Logs as 診断・検証ログ
+
+    rect rgb(235, 245, 255)
+        Note over User,Logs: 1. PC・実機・モックの準備
+        User->>CLI: android-debug.ps1 production -Port 8080
+        CLI->>CLI: 実機解決・assembleDebug・APK位置確認
+        CLI->>ADB: adb install -r app-debug.apk
+        CLI->>ADB: adb reverse tcp:8080 tcp:8080
+        ADB-->>CLI: USB経路準備完了
+        CLI->>ADB: am start Androidアプリ
+        ADB->>App: MainActivity起動
+        User->>CLI: mock-websocket-server.ps1<br/>-Scenario production-happy
+        CLI->>Mock: TCP listener開始<br/>0.0.0.0:8080/ws/v1/input
+        Mock->>Trust: デバッグ用deviceId・resumeTokenを読込
+        Mock->>Logs: events.jsonl・hand-frames.jsonl・<br/>connections.csvの出力先を初期化
+    end
+
+    rect rgb(245, 245, 245)
+        Note over App,Vision: 2. Android起動・カメラ準備
+        App->>Store: deviceId・設定・信頼済みPCを読込
+        Note over App,WS: ViewModel初期化時のautoConnectは<br/>カメラ準備と独立して開始し得る<br/>図では読みやすさのため接続詳細を次段へ展開
+        Store->>Store: 暗号化resumeTokenを<br/>Keystore非エクスポートAES/GCM鍵で復号
+        alt カメラ権限がない
+            App-->>User: 利用理由と権限許可UI
+            User->>App: カメラを許可
+        else カメラ権限済み
+            App->>App: 権限画面を省略
+        end
+        App->>Camera: 背面カメラを1280x720で要求
+        Camera->>Camera: 利用不可なら960x540・640x480へフォールバック
+        Camera->>Camera: PreviewとImageAnalysisを同じViewPortへbind
+        Camera->>Camera: RGBA_8888・KEEP_ONLY_LATESTを設定
+        Camera-->>App: onReady・実解像度・rotation・cropRect
+        App->>Logs: camera requested/actual resolution・first frameを診断記録
+    end
+
+    rect rgb(255, 248, 230)
+        Note over User,Trust: 3. 初回ペアリングまたは信頼済み自動接続
+        alt 保存済みhost・port・resumeTokenがある
+            App-->>User: 前回のPCに接続しています
+            App->>WS: connect(host, port, resumeToken, automatic=true)
+        else 信頼済みPCがない
+            App-->>User: host・port・6桁コード入力画面
+            User->>App: 接続する
+            App->>App: host・port・6桁pairingTokenを検証
+            App->>WS: connect(host, port, pairingToken)
+        end
+        WS->>Mock: TCP接続・HTTP WebSocket Upgrade<br/>GET /ws/v1/input
+        Mock-->>WS: 101 Switching Protocols
+        WS-->>App: CONNECTING → AWAITING_ACK
+        WS->>Mock: hello schemaVersion=1・deviceId・capabilities<br/>pairingToken XOR resumeToken
+        Mock->>Mock: JSON・schemaVersion・deviceId・<br/>coordinateSpace・認証フィールド排他を検証
+
+        alt pairingTokenによる初回認証
+            Mock->>Mock: 6桁コードを比較
+            Mock->>Mock: CSPRNG 32 byteから<br/>Base64URL resumeTokenを生成
+            Mock->>Trust: deviceIdと発行トークンをデバッグ永続化
+            Mock->>Logs: trusted_device_issued<br/>トークン値はイベントへ出さない
+        else resumeTokenによる信頼済み認証
+            Mock->>Trust: deviceIdに対応するトークンを取得
+            Mock->>Mock: 保存値と受信値を照合
+            Mock->>Logs: trusted_device_resumed<br/>トークン値はイベントへ出さない
+        end
+
+        alt pairing-rejected
+            Mock-->>WS: hello_error pairing_code_mismatch<br/>retryable=false
+            WS-->>App: ERROR・自動再試行停止
+            App-->>User: 6桁コードを入力し直す案内
+        else resume-token-invalid
+            Mock-->>WS: hello_error resume_token_invalid<br/>retryable=false
+            WS->>App: 信頼済み情報無効通知
+            App->>Store: host・port・暗号化resumeTokenを削除
+            App-->>User: 初回接続画面へ戻す<br/>自動再試行しない
+        else unsupported-version
+            Mock-->>WS: hello_error unsupported_version<br/>retryable=false
+            WS-->>App: ERROR・自動再試行停止
+        else server-busy
+            Mock-->>WS: hello_error server_busy<br/>retryable=true
+            WS->>WS: ソケット破棄・段階的再接続へ
+        else ack-timeout
+            Mock->>Mock: hello_ackを意図的に送信しない
+            WS->>WS: 5秒でACK timeout・ソケット破棄
+            WS-->>App: RECONNECTING
+        else schema-mismatch
+            Mock-->>WS: hello_ack schemaVersion=99
+            WS->>WS: 未対応schemaのACKを無視
+            WS->>WS: 5秒でACK timeout・再接続へ
+        else 認証成功
+            Mock->>Mock: 新しいsessionIdを生成
+            Mock->>Mock: プロセス内calibrationCompleteから<br/>calibrationRequiredを決定
+            Mock-->>WS: hello_ack schemaVersion=1・sessionId・surface・<br/>calibrationRequired・初回のみresumeToken
+            WS->>WS: sessionIdを確定・再接続回数をリセット
+            opt hello_ackにresumeTokenがある
+                WS->>App: 発行トークン保存要求
+                App->>Store: AES/GCMで暗号化し<br/>host・portとSharedPreferencesへ保存
+            end
+            WS-->>App: CONNECTED
+            WS->>WS: 5秒heartbeatと10秒pingを開始
+        end
+    end
+
+    rect rgb(240, 255, 240)
+        Note over User,Mock: 4. calibrationRequired=trueの配置確認・ArUco位置合わせ
+        alt calibrationRequired=true
+            WS->>App: CaptureMode.CALIBRATION
+            App->>Vision: 安定履歴をreset
+            App-->>User: スマホを固定してください<br/>0/4はエラーにしない
+            loop 配置OK前もCameraX解析は継続
+                Camera->>Vision: 最新ImageProxy<br/>古い未解析フレームは破棄
+                Vision->>Vision: DICT_4X4_50から<br/>ID 10・11・12・13を探索
+                Vision-->>App: 0 markerならPlacementWaitingを維持
+            end
+            User->>CLI: スマホ固定後にEnter<br/>または-AutoPlacementOk
+            CLI->>Mock: PCローカルの配置OK
+            Note over CLI,App: 配置OK専用のWebSocketメッセージは存在しない
+            Mock->>Logs: placement_ok
+            Mock-->>User: ArUcoターゲット全画面表示を案内
+            User->>CLI: 4隅のArUcoターゲットを表示
+
+            loop 各CameraXフレーム
+                Camera->>Vision: RGBAフレーム・rotation/crop情報
+                Vision->>Vision: Bitmap変換・OpenCV ArUco検出・<br/>中心と4頂点を0..1正規化
+                Vision->>Vision: ID集合10,11,12,13・凸形状・<br/>面積0.01以上・同一回転方向を検証
+                alt 4マーカー未満または配置不正
+                    Vision->>Vision: invalid countを加算<br/>2フレームまでは有効履歴を保持
+                    Vision->>Vision: 3連続invalidで安定履歴を消去
+                    Vision-->>App: FindingMarkers(found)または再試行表示
+                else 有効な4マーカー
+                    Vision->>Vision: 基準中心から移動0.02以内か検証
+                    Vision->>Vision: 有効フレームを最大5件蓄積
+                    Vision-->>App: Stabilizing current/5・Overlay更新
+                end
+            end
+
+            Vision->>Vision: 有効5フレームでstable=true
+            Vision-->>App: WaitingForPc・端末を動かさない案内
+            App->>WS: stable結果を最新calibration単一スロットへ格納
+            WS->>WS: 200ms周期・queue 256KiB以下でJSON化
+            WS->>Mock: calibration_markers sessionId・source・<br/>4 IDのcenter/corners
+            Mock->>Mock: schema・sessionId・ID集合・<br/>centerと4 cornersを検証
+            Mock->>Logs: message_received・validation結果
+
+            alt production-happy
+                Mock-->>WS: calibration_status processing
+                WS-->>App: PC確認中
+                Mock->>Mock: 500msのPC処理を模擬
+                Mock-->>WS: calibration_status complete
+                WS->>WS: 位置合わせ確定結果をメモリ保持
+                Mock-->>WS: control_message set_mode tracking
+            else calibration-retryの初回
+                Mock-->>WS: calibration_status processing
+                Mock->>Mock: 300ms待機
+                Mock-->>WS: calibration_status retry_required<br/>reason=invalid_geometry
+                WS->>App: RetryRequired
+                App->>Vision: 安定履歴をreset
+                Note over User,Mock: 再検出・2回目のcalibration_markers後は<br/>processing → complete → set_mode tracking
+            else 後方互換PC
+                Mock-->>WS: calibration_statusを省略し<br/>control_message set_mode tracking
+            end
+            WS->>App: set_mode=trackingを最終成功条件として反映
+            App-->>User: 操作できます
+        else calibrationRequired=false
+            WS->>App: CaptureMode.TRACKING
+            App-->>User: 位置合わせを省略して操作できます
+        end
+    end
+
+    rect rgb(250, 240, 255)
+        Note over User,Logs: 5. 手追跡・21点送信・常時制御通信
+        loop CameraXの最新フレーム
+            Camera->>Vision: trackingモードのImageProxy
+            Vision->>Vision: MediaPipe Hand Landmarker<br/>1アクティブハンド・21点・左右分類
+            Vision->>Vision: 3連続検出でCANDIDATE→TRACKING
+            alt 手を検出
+                Vision-->>App: detected=true・21点・handedness
+                App-->>User: 取得中／追跡中・人差し指リング
+            else 手を検出しない
+                Vision->>Vision: TRACKING直後はTEMPORARILY_LOST<br/>300ms継続でUNDETECTED
+                Vision-->>App: detected=false
+                App-->>User: 一時喪失／長時間喪失
+            end
+            App->>WS: 結果を最新hand単一スロットへ格納<br/>未送信の古い結果は置換
+            WS->>WS: 20ms sender tick・設定fps 5..20を制限
+            alt OkHttp queueが256KiB超
+                WS->>WS: 今回の送信を見送り・蓄積しない
+            else 送信可能
+                WS->>WS: x/yを0..1へclamp・zを維持<br/>frameId加算・captureToSend計測
+                WS->>Mock: hand_frame sessionId・frameId・source・<br/>detected・最大21 landmarks
+                Mock->>Mock: sessionId・detected・21点・<br/>x/y正規化範囲を検証
+                Mock->>Logs: 全hand_frameをhand-frames.jsonlへ保存<br/>受信数・欠落・frameId gap・fpsを集計
+            end
+        end
+
+        par 5秒ごとのアプリheartbeat
+            WS->>Mock: heartbeat sessionId・monotonic time
+            Mock->>Logs: heartbeat countを更新
+        and 10秒ごとのWebSocket ping
+            WS->>Mock: WebSocket Ping frame
+            Mock-->>WS: WebSocket Pong frame
+        end
+
+        opt slow-reader
+            Mock->>Mock: 各受信後に既定500ms遅延
+            Note over WS,Mock: Androidは最新単一スロットとqueue上限により<br/>古いhand frameを無制限に蓄積しない
+        end
+    end
+
+    rect rgb(255, 245, 245)
+        Note over User,Logs: 6. debug APK固有の切り分け経路
+        alt 疑似21点
+            User->>App: 診断 → 疑似21点
+            App->>App: detected=trueの正規化21点を生成
+            App->>WS: 実カメラ結果と同じhand単一スロットへ投入
+        else 疑似未検出
+            User->>App: 診断 → 疑似未検出
+            App->>WS: hand detected=falseを投入
+        else 疑似4マーカー
+            User->>App: 診断 → 疑似4マーカー
+            App->>App: ID 10..13・stable=trueを生成
+            App->>WS: 実検出と同じcalibration単一スロットへ投入
+        else 本番状態ラボ
+            User->>App: 診断 → 本番状態ラボ
+            App->>App: 自動接続・配置待ち・探索・安定化・<br/>PC確認・追跡等のProductionUiStateを差し替え
+            Note over App,Mock: 状態ラボは表示確認専用<br/>カメラ・WebSocket・PC状態を変更しない
+        end
+        App->>Logs: 端末・カメラ・検出・通信イベントと<br/>counter・gaugeをAppDiagnosticsへ記録
+        opt JSONL保存
+            User->>App: 診断ログを書き出す
+            App-->>User: Storage Access FrameworkでJSONLを保存
+        end
+    end
+
+    rect rgb(240, 248, 255)
+        Note over User,Trust: 7. 通信断・再接続・切断操作
+        alt drop・Wi-Fi切断・onClosed・onFailure
+            Mock--xWS: ソケット切断または到達不能
+            WS->>WS: sessionId破棄・heartbeat停止<br/>位置合わせ確定値はメモリ保持
+            WS-->>App: RECONNECTING・残り秒数
+            loop 接続が戻るまで
+                WS->>WS: 1秒・2秒・4秒・8秒・以後10秒待機
+                WS->>Mock: WebSocket Upgradeとhelloを再実行
+            end
+            opt Android default networkが復帰
+                App->>WS: onNetworkAvailable
+                WS->>Mock: 待機を打ち切って即時再接続
+            end
+            Note over App,WS: 同一アプリプロセスでは現在のdesiredConfigを再利用<br/>アプリ再生成後はKeystore復号済みresumeTokenを使用
+            alt 同じモックプロセスで位置合わせ完了済み
+                Mock-->>WS: hello_ack calibrationRequired=false
+                WS->>App: trackingへ復帰
+            else PCが再度calibrationRequired=trueを返す<br/>かつ確認済み4点をメモリ保持
+                WS->>WS: 新sessionIdでcached calibrationを再キュー
+                WS->>Mock: calibration_markersを再送
+                WS->>App: PC確認中
+                Mock-->>WS: complete・set_mode tracking
+            else モック再起動
+                Mock->>Trust: 永続化済み信頼情報を読込
+                Mock-->>WS: 認証成功・calibrationRequired=true
+                Note over User,Mock: 位置合わせ完了状態はプロセス内だけなので<br/>配置OKと位置合わせを再実行
+            end
+        else 今すぐ再接続
+            User->>App: 今すぐ再接続
+            App->>WS: retryNow
+            WS->>Mock: 待機中タスクを破棄して即時接続
+        else 接続設定を変更・このPCを忘れる・手動切断
+            User->>App: 明示的な切断操作
+            App->>WS: disconnect
+            WS->>Mock: WebSocket Close 1000 user disconnect
+            Mock-->>WS: Close frame
+            WS->>WS: 再接続停止・session・送信slot・<br/>cached calibrationを破棄
+            App->>Store: 信頼済みhost・port・resumeTokenを削除
+            App-->>User: 初回接続画面
+        else remote-disconnect
+            Mock-->>WS: control_message command=disconnect
+            WS->>Mock: WebSocket Close 1000
+            WS->>WS: 再接続停止・sessionと位置合わせを破棄
+            Note over App,Store: PC要求の切断はWebSocketクライアント内で処理し<br/>保存済み信頼情報は維持する
+        else invalid-json・未知messageType
+            Mock-->>WS: 不正JSONまたは未知メッセージ
+            WS->>Logs: invalid messageを記録
+            WS->>WS: 接続と現在状態を維持
+        else wrong-session
+            Mock-->>WS: 異なるsessionIdのcontrol/status
+            WS->>Logs: ignored control/statusを記録
+            WS->>WS: 状態を変更しない
+        else mode-switch
+            Mock-->>WS: 3秒後にcontrol_message<br/>set_mode calibrationまたはtracking
+            WS->>App: CaptureModeを切替
+            App->>Vision: calibrationなら安定履歴reset<br/>trackingならHand Landmarkerへ切替
+        end
+    end
+
+    rect rgb(245, 245, 245)
+        Note over CLI,Logs: 8. モック停止・検証成果物
+        User->>CLI: Ctrl+CまたはDurationSeconds満了
+        CLI->>Mock: サーバー停止
+        Mock->>Logs: 接続ごとのduration・hand/missing/marker/<br/>heartbeat/error/gap/bytes/fpsをCSVへ確定
+        Mock->>Logs: summary.mdを生成
+        opt RenderVideo
+            Mock->>CLI: render_hand_video.pyを起動
+            CLI->>Logs: hand-frames.jsonlからhand-tracking.mp4を生成
+        end
+        Note over Trust,Logs: 信頼ストアは次回モックへ引き継ぐ<br/>calibrationCompleteは引き継がない
+    end
+```
+
+### 17.1 図を読むときの注意
+
+- `calibration_status`は任意だが、`set_mode=tracking`はAndroidが操作可能になる最終条件である。
+- `invalid-json`、未知メッセージ、異なる`sessionId`はログへ残すだけで、正常なセッションを切断しない。
+- `hand_frame`は検出結果ごとのキューではなく単一スロットであり、ネットワークが遅い場合は未送信の古い結果を新しい結果で置き換える。
+- 初回ペアリング直後の同一プロセス再接続では、その接続に使った`desiredConfig`を再利用する。アプリを再生成した後はKeystoreで復号した`resumeToken`による自動接続になる。
+- モックの信頼情報はデバッグ用にファイルへ残るが、位置合わせ完了状態はプロセス内だけに残る。この差により、Wi-Fi一時切断とPC再起動を別々に検証できる。
