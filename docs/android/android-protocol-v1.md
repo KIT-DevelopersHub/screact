@@ -14,6 +14,8 @@ PCアプリを起動するたびに位置合わせ状態を未完了から開始
 
 6桁の`pairingToken`はアプリ終了後に保存しない。Androidは`resumeToken`をAndroid Keystoreの非エクスポート鍵で暗号化して保存する。PCは`SHA-256(resumeToken)`だけを`deviceId`へ紐づけて永続化し、受信値のハッシュを定数時間比較する。MVPでは自動ローテーションを行わず、再ペアリング時だけ旧トークンを失効して新しい値を発行する。利用者が`接続先を変更`または`このPCを忘れる`を選んだ場合、Androidは保存したホスト、ポート、`resumeToken`を削除する。
 
+PCはサーバ開始時に6桁コードを生成して画面に表示し、`hello`の`pairingToken`と照合する（照合はPC側設定でオフにできる）。不一致時は`hello_error`（`pairing_code_mismatch`・`retryable=false`）を返して切断する。既定ポートは`8765`（Android/デスクトップ共通）。
+
 ### `hello`認証フィールド
 
 | フィールド | 初回接続 | 信頼済み再接続 | 規則 |
@@ -39,6 +41,27 @@ PCアプリを起動するたびに位置合わせ状態を未完了から開始
 ```json
 {"schemaVersion":1,"messageType":"hello_ack","sessionId":"session-01","surface":{"surfaceId":"display-1","widthPx":1920,"heightPx":1080},"calibrationRequired":true,"resumeToken":"opaque-high-entropy-token"}
 ```
+
+## 画面位置合わせ（キャリブレーション）フロー
+
+チーム確定のシーケンス（詳細図は `docs/sequence-calibration-flow.md`）。
+
+1. PC側で「スマホ設置完了」を押すと、PCは`control_message`（`set_mode: calibration`）を送り、同時に四隅判定用のArUcoターゲット画像（`android/tools/calibration-target-1920x1080.png` と同一・デスクトップは `desktop/assets/` に同梱）をオーバーレイ最前面へ全画面表示する。
+2. Androidは4つのID（10=左上, 11=右上, 12=右下, 13=左下, DICT_4X4_50）が安定検出されるまでループし、各マーカーのIDと中心・4頂点の正規化座標を`calibration_markers`で送る（生の検出座標のみ。対応付けはしない）。
+3. PC側で「マーカーIDと画面四隅の対応付け」を行い、ホモグラフィ行列を作成・保存する。ID 10..13が揃わない場合のみ幾何順序（TL/TR/BR/BL並べ替え）へフォールバックする。
+4. 位置合わせ成功時、PCは`control_message`（`set_mode: tracking`）を返す。これが「画面位置合わせ完了」の通知であり、Androidはマーカー検出ループを抜けて通常トラッキングへ移る。
+5. PCはArUcoターゲット画像を自動で非表示にし、「操作可能状態」を表示する。以後は従来どおり`hand_frame`→トラッキング→ピンチで描画。
+
+### マーカーインセット補正（PC側設定値）
+
+ターゲット画像のマーカー中心は画面端ではなく内側（全辺240px余白 = X方向12.5%・Y方向22.22%）にあるため、PCは検出点を「画面端から内側率(inset)だけ入った矩形」に対応付けてホモグラフィを作り、画面全域へ外挿する。この内側率のほか、以下をデスクトップの「キャリブレーション設定」パネルで調整できる。
+
+| 設定値 | 既定 | 意味 |
+| --- | --- | --- |
+| マーカー内側率 X/Y (%) | 12.50 / 22.22 | `calibration_markers`のマーカー中心が画面端から内側にある割合（同梱画像の実測値） |
+| 四隅内側率 X/Y (%) | 0 / 0 | `slide_corners`の検知四隅が実画面より内側になる場合の外挿補正 |
+| 安定メッセージ数 | 1 | この回数連続で妥当な位置合わせメッセージを受けたら確定（Android側でも5フレーム安定判定済み） |
+| 使用メッセージ | 両方 | `calibration_markers` / `slide_corners` のどちらを位置合わせに使うか |
 
 ## AndroidからPC
 

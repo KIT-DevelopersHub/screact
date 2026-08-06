@@ -24,6 +24,9 @@ Future<void> main(List<String> args) async {
   final pos = args.where((a) => !a.startsWith('--')).toList();
   final host = pos.isNotEmpty ? pos[0] : 'localhost';
   final port = pos.length > 1 ? int.parse(pos[1]) : 8765;
+  // 6桁コード照合が既定ONのため、アプリ左パネルに表示されたコードを渡す。
+  // 例: dart run tool/mock_android.dart localhost 8765 123456
+  final token = pos.length > 2 ? pos[2] : '000000';
   final ws = await WebSocket.connect('ws://$host:$port/ws/v1/input');
   stdout.writeln('connected ws://$host:$port/ws/v1/input (tilted=$tilted)');
 
@@ -46,7 +49,7 @@ Future<void> main(List<String> args) async {
     'messageType': 'hello',
     'deviceId': 'mock-android',
     'clientVersion': '0.1.0',
-    'pairingToken': '000000',
+    'pairingToken': token,
     'capabilities': [
       'aruco_calibration',
       'slide_corner_detection',

@@ -340,6 +340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_TRACKING_CONFIDENCE = "tracking_confidence"
         private const val KEY_MAX_SEND_FPS = "max_send_fps"
         private const val KEY_DEBUG_MODE = "debug_mode"
-        private const val DEFAULT_PORT = 8080
+        // デスクトップ側サーバの既定ポート（desktop/lib/ui/home_page.dart と一致させる）
+        private const val DEFAULT_PORT = 8765
     }
 }
