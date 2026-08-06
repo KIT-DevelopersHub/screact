@@ -35,6 +35,9 @@ class YubiBoardWebSocketClient(
     private val onStateChanged: (ConnectionSnapshot) -> Unit,
     private val onModeChanged: (CaptureMode) -> Unit,
     private val onCalibrationStatus: (CalibrationStatusMessage) -> Unit = {},
+    private val onTrustedConnectionIssued: (ConnectionConfig, String) -> Unit = { _, _ -> },
+    private val onTrustedConnectionInvalid: () -> Unit = {},
+    private val onCalibrationReuseQueued: () -> Unit = {},
     private val onLog: (String) -> Unit = {},
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(10, TimeUnit.SECONDS)
@@ -49,6 +52,7 @@ class YubiBoardWebSocketClient(
     private val latestCalibration = AtomicReference<MarkerDetectionResult?>()
     private val lastStableCalibration = AtomicReference<MarkerDetectionResult?>()
     private var desiredConfig: ConnectionConfig? = null
+    private var automaticConnection = false
     private var webSocket: WebSocket? = null
     private var sessionId: String? = null
     private var reconnectAttempt = 0
@@ -70,7 +74,7 @@ class YubiBoardWebSocketClient(
         )
     }
 
-    fun connect(config: ConnectionConfig) {
+    fun connect(config: ConnectionConfig, automatic: Boolean = false) {
         require(config.validate() == null) { config.validate().orEmpty() }
         synchronized(lock) {
             AppDiagnostics.event(
@@ -80,6 +84,7 @@ class YubiBoardWebSocketClient(
             )
             manuallyStopped = false
             desiredConfig = config
+            automaticConnection = automatic
             reconnectAttempt = 0
             calibrationConfirmed = false
             calibrationRequested = false
@@ -115,6 +120,7 @@ class YubiBoardWebSocketClient(
             AppDiagnostics.event("network", "disconnect_requested")
             manuallyStopped = true
             desiredConfig = null
+            automaticConnection = false
             sessionId = null
             latestHand.set(null)
             latestCalibration.set(null)
@@ -183,6 +189,7 @@ class YubiBoardWebSocketClient(
         publish(
             ConnectionSnapshot(
                 status = if (reconnecting) ConnectionStatus.RECONNECTING else ConnectionStatus.CONNECTING,
+                automatic = automaticConnection,
             ),
         )
         sessionId = null
@@ -355,6 +362,10 @@ class YubiBoardWebSocketClient(
         when (message) {
             is HelloAckMessage -> synchronized(lock) {
                 if (message.schemaVersion != SCHEMA_VERSION || webSocket !== socket) return
+                message.resumeToken?.let { token ->
+                    val activeConfig = desiredConfig ?: return
+                    onTrustedConnectionIssued(activeConfig, token)
+                }
                 sessionId = message.sessionId
                 val cachedCalibration = lastStableCalibration.get()
                 val reuseCalibration = reconnecting && calibrationConfirmed && cachedCalibration != null
@@ -374,7 +385,8 @@ class YubiBoardWebSocketClient(
                 if (reuseCalibration) {
                     latestCalibration.set(cachedCalibration)
                     AppDiagnostics.event("network", "cached_calibration_queued")
-                    onModeChanged(CaptureMode.TRACKING)
+                    onModeChanged(CaptureMode.CALIBRATION)
+                    onCalibrationReuseQueued()
                 } else {
                     onModeChanged(
                         if (message.calibrationRequired) CaptureMode.CALIBRATION else CaptureMode.TRACKING,
@@ -389,6 +401,7 @@ class YubiBoardWebSocketClient(
                     "pairing_code_mismatch" -> ConnectionErrorCode.PAIRING_CODE_MISMATCH
                     "unsupported_version" -> ConnectionErrorCode.UNSUPPORTED_VERSION
                     "server_busy" -> ConnectionErrorCode.SERVER_BUSY
+                    "resume_token_invalid" -> ConnectionErrorCode.RESUME_TOKEN_INVALID
                     else -> ConnectionErrorCode.UNKNOWN
                 }
                 AppDiagnostics.event(
@@ -405,7 +418,19 @@ class YubiBoardWebSocketClient(
                     sessionId = null
                     socket.close(NORMAL_CLOSE_CODE, "hello rejected")
                     webSocket = null
-                    publish(ConnectionSnapshot(ConnectionStatus.ERROR, errorCode = errorCode))
+                    if (errorCode == ConnectionErrorCode.RESUME_TOKEN_INVALID) {
+                        automaticConnection = false
+                        onTrustedConnectionInvalid()
+                        publish(
+                            ConnectionSnapshot(
+                                ConnectionStatus.DISCONNECTED,
+                                detail = "保存済みの接続情報が無効です。6桁コードで接続し直してください。",
+                                errorCode = errorCode,
+                            ),
+                        )
+                    } else {
+                        publish(ConnectionSnapshot(ConnectionStatus.ERROR, errorCode = errorCode))
+                    }
                 }
             }
 
@@ -491,6 +516,7 @@ class YubiBoardWebSocketClient(
                 retryInSeconds = (delayMs / 1_000).toInt(),
                 detail = detail,
                 errorCode = errorCode,
+                automatic = automaticConnection,
             ),
         )
         reconnectTask?.cancel(false)
@@ -506,6 +532,7 @@ class YubiBoardWebSocketClient(
                             retryInSeconds = remaining.toInt(),
                             detail = detail,
                             errorCode = errorCode,
+                            automatic = automaticConnection,
                         ),
                     )
                 }
@@ -551,12 +578,18 @@ class YubiBoardWebSocketClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             synchronized(lock) {
                 if (this@YubiBoardWebSocketClient.webSocket !== webSocket || manuallyStopped) return
-                publish(ConnectionSnapshot(ConnectionStatus.AWAITING_ACK))
+                publish(
+                    ConnectionSnapshot(
+                        ConnectionStatus.AWAITING_ACK,
+                        automatic = automaticConnection,
+                    ),
+                )
                 val encoded = ProtocolCodec.encode(
                         HelloMessage(
                             deviceId = deviceId,
                             clientVersion = clientVersion,
                             pairingToken = config.pairingToken,
+                            resumeToken = config.resumeToken,
                         ),
                     )
                 webSocket.send(encoded)

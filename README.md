@@ -161,7 +161,7 @@ docs/
 
 AndroidアプリのMVP実装、自動検証、Android実機デバッグ・チュートリアル全項目の実施が完了しています。Android実機とモックPC間ではUSB／LAN接続、手検出、位置合わせ、障害処理、自動再接続、10分連続動作を確認済みです。実PCアプリとの統合が次の対象です。
 
-信頼済み情報によるアプリ起動時の自動接続と、PCの`配置OK`を起点にする位置合わせは要件確定済み・未実装です。現行AndroidのAs-Builtとの差分は[`docs/android/android-current-spec.md`](./docs/android/android-current-spec.md)を参照してください。
+信頼済み情報によるアプリ起動時の自動接続と、PCの`配置OK`を起点にする位置合わせはAndroidとモックPCへ実装済みです。現行AndroidのAs-Builtは[`docs/android/android-current-spec.md`](./docs/android/android-current-spec.md)を参照してください。
 
 - [x] ディレクトリ構成の整理
 - [x] Androidプロジェクトの作成

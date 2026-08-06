@@ -56,6 +56,7 @@ fun ProductionScreen(
     state: ProductionUiState,
     savedHost: String,
     savedPort: Int,
+    hasTrustedPc: Boolean,
     cameraPermissionPermanentlyDenied: Boolean,
     previewContent: @Composable () -> Unit,
     onRequestCameraPermission: () -> Unit,
@@ -66,6 +67,7 @@ fun ProductionScreen(
     onDisconnect: () -> Unit,
     onRetryNow: () -> Unit,
     onChangeConnectionSettings: () -> Unit,
+    onForgetTrustedPc: () -> Unit,
     onOpenDebug: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -140,6 +142,9 @@ fun ProductionScreen(
     if (showHelp) {
         HelpDialog(
             canOpenDebug = BuildConfig.DEBUG,
+            hasTrustedPc = hasTrustedPc,
+            onChangeConnectionSettings = { showHelp = false; onChangeConnectionSettings() },
+            onForgetTrustedPc = { showHelp = false; onForgetTrustedPc() },
             onOpenDebug = { showHelp = false; onOpenDebug() },
             onDismiss = { showHelp = false },
         )
@@ -251,10 +256,16 @@ private fun ProductionGuidePanel(
                         modifier = Modifier.fillMaxWidth().height(52.dp).testTag("connect_button"),
                     ) { Text("接続する") }
                 }
-                ProductionStage.CONNECTING -> {
+                ProductionStage.CONNECTING, ProductionStage.AUTO_CONNECTING -> {
                     Text("接続先  $host:$port")
                     OutlinedButton(onClick = onCancelConnection, modifier = Modifier.fillMaxWidth()) {
                         Text("キャンセル")
+                    }
+                    if (state.stage() == ProductionStage.AUTO_CONNECTING) {
+                        TextButton(
+                            onClick = onChangeConnectionSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("接続先を変更") }
                     }
                 }
                 ProductionStage.RECONNECTING -> {
@@ -286,6 +297,8 @@ private fun ProductionGuidePanel(
 @Composable
 private fun CalibrationProgress(state: CalibrationUiState) {
     when (state) {
+        CalibrationUiState.PlacementWaiting ->
+            Text("PC画面全体が映る位置に固定し、PCで「配置OK」を押してください。")
         is CalibrationUiState.FindingMarkers -> Text("検出済み ${state.found}/4")
         is CalibrationUiState.Stabilizing -> {
             Text("安定度 ${state.current}/${state.required}")
@@ -311,9 +324,11 @@ private fun stageTitle(state: ProductionUiState): String = when (state.stage()) 
     ProductionStage.CAMERA_ERROR -> "カメラを起動できません"
     ProductionStage.CONNECT -> "PCに接続"
     ProductionStage.CONNECTING -> "PCに接続しています"
+    ProductionStage.AUTO_CONNECTING -> "前回のPCに接続しています"
     ProductionStage.CONNECTION_ERROR -> connectionErrorTitle(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "${state.connection.retryInSeconds ?: 0}秒後に再接続します"
     ProductionStage.CALIBRATION -> when (state.calibration) {
+        CalibrationUiState.PlacementWaiting -> "スマホを固定してください"
         is CalibrationUiState.FindingMarkers -> "4つのマーカーを映してください"
         is CalibrationUiState.Stabilizing -> "そのまま動かさないでください"
         CalibrationUiState.WaitingForPc, CalibrationUiState.Complete -> "PCで位置を確認しています"
@@ -334,6 +349,7 @@ private fun stageMessage(state: ProductionUiState): String = when (state.stage()
     ProductionStage.CAMERA_ERROR -> "ほかのアプリがカメラを使用していないか確認してください。"
     ProductionStage.CONNECT -> "接続情報はPCアプリに表示されています。"
     ProductionStage.CONNECTING -> "通常は5秒以内に応答します。"
+    ProductionStage.AUTO_CONNECTING -> "保存済みの信頼済み接続情報を使用しています。"
     ProductionStage.CONNECTION_ERROR -> connectionErrorMessage(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "PCとの接続が切れました。"
     ProductionStage.CALIBRATION -> "PC画面の4隅がすべて映るように端末を固定してください。"
@@ -371,7 +387,14 @@ private fun calibrationRetryMessage(reason: CalibrationRetryReason): String = wh
 }
 
 @Composable
-private fun HelpDialog(canOpenDebug: Boolean, onOpenDebug: () -> Unit, onDismiss: () -> Unit) {
+private fun HelpDialog(
+    canOpenDebug: Boolean,
+    hasTrustedPc: Boolean,
+    onChangeConnectionSettings: () -> Unit,
+    onForgetTrustedPc: () -> Unit,
+    onOpenDebug: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("設定・ヘルプ") },
@@ -384,6 +407,14 @@ private fun HelpDialog(canOpenDebug: Boolean, onOpenDebug: () -> Unit, onDismiss
                 Text("PC画面全体が映る位置へ端末を固定し、反射や逆光を避けてください。")
                 Text("プライバシー", fontWeight = FontWeight.Bold)
                 Text("カメラ映像は端末内で解析され、PCへは手とマーカーの座標だけを送信します。")
+                OutlinedButton(onClick = onChangeConnectionSettings, modifier = Modifier.fillMaxWidth()) {
+                    Text("接続先を変更")
+                }
+                if (hasTrustedPc) {
+                    OutlinedButton(onClick = onForgetTrustedPc, modifier = Modifier.fillMaxWidth()) {
+                        Text("このPCを忘れる")
+                    }
+                }
                 Text("アプリバージョン ${BuildConfig.VERSION_NAME}")
                 if (canOpenDebug) {
                     OutlinedButton(onClick = onOpenDebug, modifier = Modifier.fillMaxWidth()) {
@@ -407,6 +438,13 @@ fun productionStateLabSamples(): List<StateLabSample> {
         StateLabSample("接続", ProductionUiState(camera = CameraUiState.READY)),
         StateLabSample("接続中", ProductionUiState(CameraUiState.READY, ConnectionSnapshot(ConnectionStatus.CONNECTING))),
         StateLabSample(
+            "自動接続中",
+            ProductionUiState(
+                CameraUiState.READY,
+                ConnectionSnapshot(ConnectionStatus.CONNECTING, automatic = true),
+            ),
+        ),
+        StateLabSample(
             "コード不一致",
             ProductionUiState(
                 CameraUiState.READY,
@@ -420,11 +458,13 @@ fun productionStateLabSamples(): List<StateLabSample> {
                 ConnectionSnapshot(ConnectionStatus.RECONNECTING, retryInSeconds = 3),
             ),
         ),
+        StateLabSample("配置待ち", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.PlacementWaiting)),
+        StateLabSample("マーカー探索", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.FindingMarkers(0))),
         StateLabSample("マーカー2/4", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.FindingMarkers(2))),
         StateLabSample("安定3/5", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.Stabilizing(3, 5))),
         StateLabSample("PC確認中", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.WaitingForPc)),
         StateLabSample("再試行", base().copy(captureMode = CaptureMode.CALIBRATION, calibration = CalibrationUiState.RetryRequired(CalibrationRetryReason.INVALID_GEOMETRY))),
-        StateLabSample("操作可能", base().copy(tracking = TrackingUiState.READY_NO_HAND)),
+        StateLabSample("追跡開始", base().copy(tracking = TrackingUiState.READY_NO_HAND)),
         StateLabSample("取得中", base().copy(tracking = TrackingUiState.CANDIDATE)),
         StateLabSample("追跡中", base().copy(tracking = TrackingUiState.TRACKING)),
         StateLabSample("一時喪失", base().copy(tracking = TrackingUiState.TEMPORARILY_LOST)),
@@ -459,6 +499,7 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     state = selected.state,
                     savedHost = "127.0.0.1",
                     savedPort = 8080,
+                    hasTrustedPc = true,
                     cameraPermissionPermanentlyDenied = false,
                     previewContent = {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -473,6 +514,7 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     onDisconnect = { lastAction = "切断" },
                     onRetryNow = { lastAction = "今すぐ再接続" },
                     onChangeConnectionSettings = { lastAction = "接続設定変更" },
+                    onForgetTrustedPc = { lastAction = "このPCを忘れる" },
                     onOpenDebug = { lastAction = "デバッグへ戻る" },
                     modifier = Modifier.weight(1f),
                 )
