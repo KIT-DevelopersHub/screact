@@ -137,6 +137,9 @@ void OverlayModeController::SetTransparentBackground(bool enabled) {
   if (!set_attribute) return;  // 旧OS: 背景は不透明のまま（劣化動作）
   AccentPolicy policy = {};
   policy.state = enabled ? ACCENT_ENABLE_TRANSPARENTGRADIENT : ACCENT_DISABLED;
+  // flags=2 で gradient_color を明示色として使わせる。0 のままだと
+  // Windows のアクセント色が適用され、透明部分が薄い水色になる。
+  policy.flags = enabled ? 2 : 0;
   policy.gradient_color = 0;  // 完全透過
   WindowCompositionAttribData data = {};
   data.attrib = kWcaAccentPolicy;
