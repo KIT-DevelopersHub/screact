@@ -16,7 +16,9 @@ import 'overlay_canvas.dart';
 /// 共通の操作面＋オーバーレイのライブプレビュー。macOSではこれ自体がアプリの
 /// 出力（アプリ内描画）。Windowsでは同じ状態がネイティブのOS注入/透過窓を駆動する。
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  /// テスト用のポート差し替え（null なら --dart-define=YUBI_PORT / 既定 8765）。
+  final int? port;
+  const HomePage({super.key, this.port});
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -42,7 +44,11 @@ class _HomePageState extends State<HomePage> {
   bool _autoFlowFired = false;
 
   /// 検証用に --dart-define=YUBI_PORT=8766 等で差し替え可能（既定 8765）。
-  static const int _port = int.fromEnvironment('YUBI_PORT', defaultValue: 8765);
+  int get _port =>
+      widget.port ?? const int.fromEnvironment('YUBI_PORT', defaultValue: 8765);
+
+  /// スマホと接続済みか（hello 受領済み）。設置完了ボタン等の活性条件。
+  bool get _phoneConnected => _status.clientId != null;
 
   /// 検証用の自動フロー: 起動時にサーバ開始し、クライアント接続で
   /// 「スマホ設置完了」をウィンドウ内表示で自動実行する（既定 off）。
@@ -136,7 +142,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _startCalibrationDisplay({required bool intoOverlay}) async {
     final server = _server;
-    if (server == null) return;
+    if (server == null || !_phoneConnected) return; // 未接続時は開始しない
     server.requestMode('calibration');
     _flow.start(_engine.calibrationCount);
     if (intoOverlay && !_overlayOn) await _enterOverlay();
@@ -297,20 +303,15 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         FilledButton.icon(
-          onPressed:
-              running && !_flow.showingTarget ? _onPhonePlaced : null,
+          onPressed: running && _phoneConnected && !_flow.showingTarget
+              ? _onPhonePlaced
+              : null,
           icon: const Icon(Icons.smartphone),
           label: const Text('スマホ設置完了'),
         ),
         const SizedBox(height: 8),
         Text(
-          _flow.showingTarget
-              ? 'キャリブ画像を表示中。スマホのカメラで画面全体を映すと、'
-                  '四隅の検知が終わり次第自動で閉じます。'
-                  '中止は macOS: ✏ / ⌘⇧O、Windows: Ctrl+Shift+O。'
-              : 'スマホを設置してから押してください。画面の最前面に四隅判定用の'
-                  'マーカー画像を全画面表示し、スマホが四隅を検知して送ってくると'
-                  '自動で閉じて操作可能になります。',
+          _calibrationHelpText(running),
           style: const TextStyle(fontSize: 11, color: Colors.black54),
         ),
         _calibrationSettings(),
@@ -319,11 +320,15 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 6),
         Wrap(spacing: 8, children: [
           OutlinedButton(
-            onPressed: running ? () => _server!.requestMode('calibration') : null,
+            onPressed: running && _phoneConnected
+                ? () => _server!.requestMode('calibration')
+                : null,
             child: const Text('位置合わせ'),
           ),
           OutlinedButton(
-            onPressed: running ? () => _server!.requestMode('tracking') : null,
+            onPressed: running && _phoneConnected
+                ? () => _server!.requestMode('tracking')
+                : null,
             child: const Text('トラッキング'),
           ),
         ]),
@@ -365,11 +370,29 @@ class _HomePageState extends State<HomePage> {
 
   String _stateLabel(bool running) {
     if (!running) return '停止中';
+    if (!_phoneConnected) return 'スマホの接続待ち';
     if (_flow.showingTarget) return 'キャリブレーション中';
     if (_engine.isCalibrated && _status.mode == EngineMode.tracking) {
       return '操作可能（ピンチで描画）';
     }
     return '位置合わせ待ち';
+  }
+
+  String _calibrationHelpText(bool running) {
+    if (_flow.showingTarget) {
+      return 'キャリブ画像を表示中。スマホのカメラで画面全体を映すと、'
+          '四隅の検知が終わり次第自動で閉じます。'
+          '中止は macOS: ✏ / ⌘⇧O、Windows: Ctrl+Shift+O。';
+    }
+    if (!running) {
+      return 'サーバ開始後、スマホが接続されると押せるようになります。';
+    }
+    if (!_phoneConnected) {
+      return 'スマホ未接続です。スマホ側で「PCへ接続」を完了すると押せます。';
+    }
+    return 'スマホを設置してから押してください。画面の最前面に四隅判定用の'
+        'マーカー画像を全画面表示し、スマホが四隅を検知して送ってくると'
+        '自動で閉じて操作可能になります。';
   }
 
   /// キャリブレーションの調整値パネル。値はエンジンと共有する

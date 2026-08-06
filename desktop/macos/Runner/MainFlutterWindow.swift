@@ -60,8 +60,7 @@ final class OverlayModeController: NSObject {
     case "isAvailable":
       result(true)
     case "enterOverlay":
-      enterOverlay()
-      result(true)
+      result(enterOverlay())
     case "exitOverlay":
       exitOverlay(notifyFlutter: false)
       result(true)
@@ -72,8 +71,14 @@ final class OverlayModeController: NSObject {
 
   // MARK: - Overlay window state
 
-  func enterOverlay() {
-    guard let window, !isOverlay else { return }
+  @discardableResult
+  func enterOverlay() -> Bool {
+    guard let window else { return false }
+    guard !isOverlay else { return true }
+    // ネイティブフルスクリーン中の styleMask 変更は AppKit が NSException を
+    // 投げてクラッシュする（実クラッシュの根本原因）。ここで拒否して false を
+    // 返し、Flutter側はウィンドウ内表示へフォールバックする。
+    if window.styleMask.contains(.fullScreen) { return false }
     isOverlay = true
     savedFrame = window.frame
     savedStyleMask = window.styleMask
@@ -93,6 +98,7 @@ final class OverlayModeController: NSObject {
     }
     window.orderFrontRegardless()
     installStatusItem()
+    return true
   }
 
   func exitOverlay(notifyFlutter: Bool) {
@@ -117,8 +123,7 @@ final class OverlayModeController: NSObject {
   func toggleOverlay() {
     if isOverlay {
       exitOverlay(notifyFlutter: true)
-    } else {
-      enterOverlay()
+    } else if enterOverlay() {
       channel.invokeMethod("overlayEntered", arguments: nil)
     }
   }
