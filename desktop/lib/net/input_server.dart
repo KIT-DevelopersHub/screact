@@ -1,0 +1,208 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+
+import '../core/interaction_engine.dart';
+import '../protocol/messages.dart';
+
+/// 接続状態のスナップショット（デバッグ表示用）。
+class ServerStatus {
+  final bool listening;
+  final String? clientId;
+  final String? sessionId;
+  final EngineMode mode;
+  final int frames;
+  final int? lastFrameId;
+  final bool handDetected;
+  final String? lastError;
+  const ServerStatus({
+    this.listening = false,
+    this.clientId,
+    this.sessionId,
+    this.mode = EngineMode.calibration,
+    this.frames = 0,
+    this.lastFrameId,
+    this.handDetected = false,
+    this.lastError,
+  });
+}
+
+/// PC側のWebSocketサーバ。`ws://<PCのIP>:<port>/ws/v1/input` で待受け、
+/// Androidの hello/hand_frame/calibration_markers/heartbeat を捌く（protocol v1）。
+/// hand_frame は「常に最新の1枚だけ処理」= 未処理の古いフレームは新着で置換する。
+class InputServer {
+  final InteractionEngine engine;
+  final void Function(List<InteractionEvent>) onEvents;
+  final void Function(ServerStatus) onStatus;
+  final void Function(HandFrame)? onFrame;
+  final int port;
+
+  HttpServer? _http;
+  WebSocket? _socket;
+  String? _sessionId;
+  String? _clientId;
+  int _frames = 0;
+  int? _lastFrameId;
+  bool _handDetected = false;
+
+  // 単一スロット（最新フレームだけ保持）
+  HandFrame? _pending;
+  bool _processing = false;
+
+  InputServer({
+    required this.engine,
+    required this.onEvents,
+    required this.onStatus,
+    this.onFrame,
+    this.port = 8765,
+  });
+
+  Future<void> start() async {
+    _http = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    _emit(listening: true);
+    _http!.listen((req) async {
+      if (req.uri.path == '/ws/v1/input' &&
+          WebSocketTransformer.isUpgradeRequest(req)) {
+        final ws = await WebSocketTransformer.upgrade(req);
+        _attach(ws);
+      } else {
+        req.response.statusCode = HttpStatus.notFound;
+        await req.response.close();
+      }
+    });
+  }
+
+  void _attach(WebSocket ws) {
+    // 単一クライアント運用（single_user）。既存があれば置き換える。
+    _socket?.close();
+    _socket = ws;
+    _clientId = null;
+    _frames = 0;
+    ws.listen(
+      (data) => _onMessage(data),
+      onDone: _onClose,
+      onError: (_) => _onClose(),
+      cancelOnError: true,
+    );
+    _emit();
+  }
+
+  void _onMessage(dynamic data) {
+    Map<String, dynamic> j;
+    try {
+      j = (jsonDecode(data as String) as Map).cast<String, dynamic>();
+    } catch (_) {
+      _emit(error: 'invalid json');
+      return;
+    }
+    final type = j['messageType'];
+    switch (type) {
+      case 'hello':
+        _onHello(Hello.fromJson(j));
+        break;
+      case 'hand_frame':
+        _enqueueFrame(HandFrame.fromJson(j));
+        break;
+      case 'calibration_markers':
+        _onCalibration(CalibrationMarkers.fromJson(j));
+        break;
+      case 'heartbeat':
+        break; // 受信のみ（生存確認）
+      default:
+        _emit(error: 'unknown messageType: $type');
+    }
+  }
+
+  void _onHello(Hello hello) {
+    _clientId = hello.deviceId;
+    _sessionId = 'session-${_randHex(8)}';
+    final ack = HelloAck(
+      sessionId: _sessionId!,
+      surfaceId: 'primary-display',
+      widthPx: 1920,
+      heightPx: 1080,
+      calibrationRequired: !engine.isCalibrated,
+    );
+    _send(ack.toJson());
+    engine.mode =
+        engine.isCalibrated ? EngineMode.tracking : EngineMode.calibration;
+    _emit();
+  }
+
+  void _onCalibration(CalibrationMarkers markers) {
+    final ok = engine.calibrate(markers);
+    if (ok) {
+      _send(ControlMessage.setMode(_sessionId ?? '', 'tracking').toJson());
+    }
+    _emit(error: ok ? null : 'calibration failed (need 4 markers)');
+  }
+
+  void _enqueueFrame(HandFrame f) {
+    if (_sessionId == null) return; // ハンドシェイク前は無視
+    _pending = f; // 最新で置換
+    _drain();
+  }
+
+  Future<void> _drain() async {
+    if (_processing) return;
+    _processing = true;
+    while (_pending != null) {
+      final f = _pending!;
+      _pending = null;
+      _frames++;
+      _lastFrameId = f.frameId;
+      _handDetected = f.detected;
+      onFrame?.call(f);
+      final events = engine.onFrame(f);
+      if (events.isNotEmpty) onEvents(events);
+      _emit();
+      await Future<void>.delayed(Duration.zero); // 他イベントに譲る
+    }
+    _processing = false;
+  }
+
+  void requestMode(String mode) {
+    if (_sessionId == null) return;
+    engine.mode =
+        mode == 'tracking' ? EngineMode.tracking : EngineMode.calibration;
+    _send(ControlMessage.setMode(_sessionId!, mode).toJson());
+    _emit();
+  }
+
+  void _send(Map<String, dynamic> j) => _socket?.add(jsonEncode(j));
+
+  void _onClose() {
+    _socket = null;
+    _clientId = null;
+    onEvents(engine.onFrame(const HandFrame(
+        frameId: -1, capturedAtMonotonicMs: 0, detected: false)));
+    _emit();
+  }
+
+  Future<void> stop() async {
+    await _socket?.close();
+    await _http?.close(force: true);
+    _http = null;
+    _emit(listening: false);
+  }
+
+  void _emit({bool? listening, String? error}) {
+    onStatus(ServerStatus(
+      listening: listening ?? (_http != null),
+      clientId: _clientId,
+      sessionId: _sessionId,
+      mode: engine.mode,
+      frames: _frames,
+      lastFrameId: _lastFrameId,
+      handDetected: _handDetected,
+      lastError: error,
+    ));
+  }
+
+  static String _randHex(int n) {
+    final r = math.Random();
+    const hex = '0123456789abcdef';
+    return List.generate(n, (_) => hex[r.nextInt(16)]).join();
+  }
+}
