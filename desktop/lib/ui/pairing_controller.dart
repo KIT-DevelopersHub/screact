@@ -54,6 +54,10 @@ class PairingController extends ChangeNotifier {
   List<DiscoveredDevice> get devices => _discovery?.devices ?? const [];
   bool get active => _phase != PairingPhase.idle;
 
+  /// select のACKが得られず打ち切った（スマホに届いていない）。
+  /// waitingConnect 画面で権限/ネットワークの対処案内を出すために使う。
+  bool get selectDeliveryStalled => _discovery?.selectGaveUp ?? false;
+
   /// 発見を開始する（「スマホ設置完了」押下）。
   Future<void> start() async {
     if (_phase == PairingPhase.searching || _phase == PairingPhase.selecting) {

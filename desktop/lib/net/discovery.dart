@@ -200,6 +200,7 @@ class DesktopDiscovery extends ChangeNotifier {
   DiscoveredDevice? _selectTarget;
   int _selectAttempts = 0;
   bool _selectAcked = false;
+  bool _selectGaveUp = false;
   final Map<String, DiscoveredDevice> _devices = {};
 
   DesktopDiscovery({
@@ -222,6 +223,11 @@ class DesktopDiscovery extends ChangeNotifier {
 
   /// これまでに select を送信した回数（テスト/診断用）。
   int get selectAttempts => _selectAttempts;
+
+  /// select を最大回数送っても ACK が得られず打ち切ったか。
+  /// true なら select がスマホに届いていない（macOSの「ローカルネットワーク」
+  /// 権限拒否・Wi-Fiアイソレーション等）。UI が対処案内を出すためのフラグ。
+  bool get selectGaveUp => _selectGaveUp;
   List<DiscoveredDevice> get devices => _devices.values.toList()
     ..sort((a, b) => a.deviceName.compareTo(b.deviceName));
 
@@ -307,13 +313,20 @@ class DesktopDiscovery extends ChangeNotifier {
     if (_devices.length != before) notifyListeners();
   }
 
-  /// 選択した端末へ接続許可（select）をユニキャスト送信する。
+  /// 選択した端末へ接続許可（select）を送信する。
   /// 以後の offer 送信は止める（未選択端末は待機に戻る）。
   ///
   /// UDPの select は落ちうる（実機で「PCは認識・Androidは待ちのまま」と
   /// なった原因経路）ため、Android からの discovery_select_ack を受信する
   /// まで [selectResendInterval] 間隔で最大 [selectMaxAttempts] 回再送する。
   /// WS接続成立（hello受領）で呼び出し側が stop() すれば再送も止まる。
+  ///
+  /// 送信は「ユニキャスト＋offerと同じブロードキャスト」の併送。実機で
+  /// macOSの「ローカルネットワーク」権限が未許可だと LAN 宛てユニキャスト
+  /// だけがOSに落とされ（ブロードキャストは通る＝offerは届く非対称）、
+  /// select が永遠に届かない事象を確認したため。deviceId 照合により
+  /// ブロードキャストでも選択した1台しか反応しない（token は元々 offer で
+  /// 全端末に届いている情報なので露出は増えない）。
   void select(DiscoveredDevice device) {
     final s = _socket;
     if (s == null) return;
@@ -323,8 +336,10 @@ class DesktopDiscovery extends ChangeNotifier {
     _selectTarget = device;
     _selectAttempts = 0;
     _selectAcked = false;
+    _selectGaveUp = false;
     _log('接続許可(select)を送信: ${device.deviceName} '
-        '(${device.address.address}:${device.port}) — ACK受信まで再送します');
+        '(${device.address.address}:${device.port} + ブロードキャスト併送) '
+        '— ACK受信まで再送します');
     _sendSelect(device);
     _selectTimer = Timer.periodic(selectResendInterval, (_) {
       if (_selectAcked) {
@@ -335,8 +350,12 @@ class DesktopDiscovery extends ChangeNotifier {
       if (_selectAttempts >= selectMaxAttempts) {
         _selectTimer?.cancel();
         _selectTimer = null;
-        _log('selectのACKなし（$_selectAttempts回送信）— スマホ側に届いていない'
-            '可能性があります。Wi-Fiのアイソレーション設定を確認してください');
+        _selectGaveUp = true;
+        _log('selectのACKなし（$_selectAttempts回送信）— スマホ側に届いていま'
+            'せん。macOSの「システム設定 > プライバシーとセキュリティ > '
+            'ローカルネットワーク」でこのアプリを許可しているか、Wi-Fiの'
+            'アイソレーション設定を確認してください');
+        notifyListeners(); // UIに対処案内を出させる
         return;
       }
       _sendSelect(device);
@@ -350,16 +369,32 @@ class DesktopDiscovery extends ChangeNotifier {
       wsPort: wsPort,
       token: token,
     ).toJson()));
+    var sent = false;
+    // 1) 応答の送信元へユニキャスト（本来の宛先）。
     try {
       _socket?.send(bytes, device.address, device.port);
+      sent = true;
+    } catch (e) {
+      _log('select送信失敗(ユニキャスト): $e');
+    }
+    // 2) offerと同じブロードキャストにも併送（ユニキャストがOS/APに落とされる
+    //    環境への到達経路。deviceId照合で選択端末しか反応しない）。
+    for (final t in _targets) {
+      try {
+        _socket?.send(bytes, InternetAddress(t), discoveryPort);
+        sent = true;
+      } catch (e) {
+        _log('select送信失敗($t): $e');
+      }
+    }
+    if (sent) {
       _selectAttempts++;
       // 1回目と以後5回ごとにログ（再送のたびに流れると読みにくい）。
       if (_selectAttempts == 1 || _selectAttempts % 5 == 0) {
         _log('select送信 ($_selectAttempts回目) → '
-            '${device.address.address}:${device.port}');
+            '${device.address.address}:${device.port} と ${_targets.join(", ")}'
+            ':$discoveryPort');
       }
-    } catch (e) {
-      _log('select送信失敗: $e');
     }
   }
 

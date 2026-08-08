@@ -187,7 +187,9 @@ void main() {
         final sel = DiscoverySelect.tryParse(j);
         if (sel != null) {
           selectCount++;
-          if (selectCount >= ackAfter) {
+          // 併送(ユニキャスト+ブロードキャスト)で1試行=2受信になるため、
+          // ackAfter試行分(=2*ackAfter受信)を無視してからACKを返す。
+          if (selectCount > ackAfter * 2) {
             sock.send(
               utf8.encode(jsonEncode(
                   DiscoverySelectAck(deviceId: sel.deviceId).toJson())),
@@ -210,14 +212,77 @@ void main() {
       await waitUntil(() => discovery.devices.length == 1);
       discovery.select(discovery.devices.first);
       await waitUntil(() => discovery.selectAcked);
-      expect(discovery.selectAttempts, greaterThanOrEqualTo(ackAfter));
+      // 最初のackAfter試行分はACKされず再送している
+      expect(discovery.selectAttempts, greaterThan(ackAfter));
       // ACK 後は再送が止まる（回数が増えない）。
       final attemptsAtAck = discovery.selectAttempts;
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(discovery.selectAttempts, attemptsAtAck);
       expect(discovery.selectAttempts, lessThan(30));
+      expect(discovery.selectGaveUp, isFalse);
       discovery.stop();
       sock.close();
+    });
+
+    test('ユニキャストが届かなくても select はブロードキャスト併送で到達し ACK される', () async {
+      // 実機で確認した事象の再現: macOSのローカルネットワーク権限拒否等で
+      // 「応答の送信元へのユニキャスト」だけが落ちる環境でも、offerと同じ
+      // ブロードキャスト経路(127.0.0.1:discoveryPort)で select が届くこと。
+      final listenSock =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0); // B
+      final replySock =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0); // A
+      final selectsAtListen = <DiscoverySelect>[];
+      listenSock.listen((e) {
+        if (e != RawSocketEvent.read) return;
+        final dg = listenSock.receive();
+        if (dg == null) return;
+        final j = decodeDiscoveryDatagram(dg.data);
+        if (j == null) return;
+        if (DiscoveryOffer.tryParse(j) != null) {
+          // 別ソケットAから応答 → desktopはdevice.port=Aのポートを記録する
+          // （A閉鎖後に遅延配送されたofferが来ても無視する）
+          try {
+            replySock.send(
+              utf8.encode(jsonEncode(const DiscoveryResponse(
+                      deviceId: 'dev-bc', deviceName: 'name-bc', model: 'm')
+                  .toJson())),
+              dg.address,
+              dg.port,
+            );
+          } catch (_) {}
+        }
+        final sel = DiscoverySelect.tryParse(j);
+        if (sel != null && sel.deviceId == 'dev-bc') {
+          selectsAtListen.add(sel);
+          listenSock.send(
+            utf8.encode(jsonEncode(
+                const DiscoverySelectAck(deviceId: 'dev-bc').toJson())),
+            dg.address,
+            dg.port,
+          );
+        }
+      });
+      final discovery = DesktopDiscovery(
+        token: '666666',
+        wsPort: 8765,
+        discoveryPort: listenSock.port,
+        broadcastAddresses: ['127.0.0.1'],
+        offerInterval: const Duration(milliseconds: 80),
+        selectResendInterval: const Duration(milliseconds: 50),
+      );
+      await discovery.start();
+      await waitUntil(() => discovery.devices.length == 1);
+      final device = discovery.devices.first;
+      expect(device.port, replySock.port); // ユニキャスト宛先はAのポート
+      replySock.close(); // ユニキャスト経路を殺す（届かない環境の再現）
+      discovery.select(device);
+      // ブロードキャスト経路(listenSock)にselectが届き、ACKで再送が止まる
+      await waitUntil(() => discovery.selectAcked);
+      expect(selectsAtListen, isNotEmpty);
+      expect(discovery.selectGaveUp, isFalse);
+      discovery.stop();
+      listenSock.close();
     });
 
     test('ACK が無ければ最大回数まで再送して打ち切る', () async {
@@ -236,14 +301,15 @@ void main() {
       discovery.select(discovery.devices.first);
       // 打ち切り（最大4回）まで待つ。
       await waitUntil(() => discovery.selectAttempts >= 4);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await waitUntil(() => discovery.selectGaveUp);
       expect(discovery.selectAttempts, 4);
       expect(discovery.selectAcked, isFalse);
+      // 併送のため1試行=2受信（ユニキャスト+ブロードキャスト・宛先は同一）
       final selects = received
           .map(DiscoverySelect.tryParse)
           .whereType<DiscoverySelect>()
           .length;
-      expect(selects, 4);
+      expect(selects, greaterThanOrEqualTo(4));
       discovery.stop();
       responder.close();
     });

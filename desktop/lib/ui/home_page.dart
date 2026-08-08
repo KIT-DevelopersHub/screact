@@ -508,6 +508,7 @@ class _HomePageState extends State<HomePage> {
   /// 選択済み: WebSocket 接続待ち。
   Widget _waitingConnectBody() {
     final name = _pairing.selected?.deviceName ?? 'スマホ';
+    final cs = Theme.of(context).colorScheme;
     return _heroColumn([
       const SizedBox(
           width: 52, height: 52, child: CircularProgressIndicator(strokeWidth: 3)),
@@ -516,6 +517,31 @@ class _HomePageState extends State<HomePage> {
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),
       _bigCaption('接続でき次第、画面認識（位置合わせ）へ自動で進みます。'),
+      // select が届いていない（ACK不達で打ち切り）: 実機で確認済みの
+      // macOSローカルネットワーク権限拒否への対処を案内する。
+      if (_pairing.selectDeliveryStalled) ...[
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.errorContainer.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: cs.error.withValues(alpha: 0.4)),
+          ),
+          child: Row(children: [
+            Icon(Icons.warning_amber_rounded, color: cs.error, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'スマホへの接続指示が届いていません。\n'
+                'システム設定 > プライバシーとセキュリティ > ローカルネットワーク'
+                ' で「Screact」を許可してから、もう一度お試しください。',
+                style: TextStyle(fontSize: 12, height: 1.6, color: cs.onSurface),
+              ),
+            ),
+          ]),
+        ),
+      ],
       const SizedBox(height: 22),
       TextButton(onPressed: _cancelAutoPairing, child: const Text('キャンセル')),
     ]);
