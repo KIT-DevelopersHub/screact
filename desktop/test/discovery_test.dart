@@ -82,6 +82,33 @@ void main() {
       expect(subnetBroadcastOf(null), isNull);
       expect(subnetBroadcastOf('bad'), isNull);
     });
+
+    test('ln_probe（権限トリガ）は既存パーサに無視され例外も出さない', () async {
+      // 受け側: probe が届いても発見メッセージとしては解釈されない
+      final sock = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final parsed = <Object?>[];
+      sock.listen((e) {
+        if (e != RawSocketEvent.read) return;
+        final dg = sock.receive();
+        if (dg == null) return;
+        final j = decodeDiscoveryDatagram(dg.data);
+        if (j == null) return;
+        parsed.add(DiscoveryOffer.tryParse(j) ??
+            DiscoveryResponse.tryParse(j) ??
+            DiscoverySelect.tryParse(j) ??
+            DiscoverySelectAck.tryParse(j));
+      });
+      final logs = <String>[];
+      await triggerLocalNetworkPrompt(
+        port: sock.port,
+        targets: ['127.0.0.1'],
+        onLog: logs.add,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(parsed.whereType<Object>(), isEmpty); // 全パーサでnull＝無視
+      expect(logs, isNotEmpty);
+      sock.close();
+    });
   });
 
   group('DesktopDiscovery（loopback実ソケット往復）', () {

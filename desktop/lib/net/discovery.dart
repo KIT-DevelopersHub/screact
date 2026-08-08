@@ -148,6 +148,47 @@ Map<String, dynamic>? decodeDiscoveryDatagram(List<int> data) {
   }
 }
 
+/// macOSの「ローカルネットワーク」権限プロンプトを能動的に発火させる。
+///
+/// macOSはアプリが実際にLAN宛て送信を行った時に初めて権限確認を出し、
+/// システム設定 > プライバシーとセキュリティ > ローカルネットワーク の
+/// 一覧にアプリを登録する。ペアリング開始まで待つとプロンプトが接続失敗の
+/// 後に出て分かりにくいため、起動直後に無害な1パケットを送って先に
+/// 確認を促す（送信はベストエフォート・失敗してもアプリは継続）。
+///
+/// パケットは `messageType: "ln_probe"` の Screact JSON。Android/Desktop の
+/// 既存パーサはいずれも未知の messageType を無視するため実害はない。
+Future<void> triggerLocalNetworkPrompt({
+  String? ip,
+  int port = kDiscoveryPort,
+  List<String>? targets,
+  void Function(String)? onLog,
+}) async {
+  await runZonedGuarded(() async {
+    final s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+    s.broadcastEnabled = true;
+    final payload = utf8.encode(jsonEncode({
+      'app': kDiscoveryApp,
+      'schemaVersion': kDiscoverySchemaVersion,
+      'messageType': 'ln_probe',
+    }));
+    final subnet = subnetBroadcastOf(ip);
+    final dests = targets ?? ['255.255.255.255', if (subnet != null) subnet];
+    for (final t in dests) {
+      try {
+        s.send(payload, InternetAddress(t), port);
+      } catch (_) {}
+    }
+    onLog?.call('[権限] ローカルネットワークへの送信を試行しました'
+        '（初回はmacOSの許可プロンプトが表示されます）');
+    // 送信済みデータグラムはclose後もカーネルから送出される。
+    // widgetテストでタイマーが残らないよう即時closeする。
+    s.close();
+  }, (e, _) {
+    onLog?.call('[権限] ローカルネットワーク送信トリガに失敗（継続）: $e');
+  });
+}
+
 /// サブネットのブロードキャストアドレス（/24 前提の簡易版）。
 /// 255.255.255.255 が届かないAP向けの補助として併送する。
 String? subnetBroadcastOf(String? ip) {

@@ -28,5 +28,14 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- ローカルネットワーク権限: この文言が macOS の許可プロンプトに表示され、
+	     システム設定 > プライバシーとセキュリティ > ローカルネットワーク に
+	     アプリが一覧登録されるために必要。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>同じWi-Fi上のスマートフォン（Screactアプリ）を自動検出して接続するために、ローカルネットワークへのアクセスを使用します。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_screact._udp</string>
+	</array>
 </dict>
 </plist>

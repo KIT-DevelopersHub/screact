@@ -118,7 +118,11 @@ class _HomePageState extends State<HomePage> {
     _pairing.addListener(() {
       if (mounted) setState(() {});
     });
-    _refreshWifiIp();
+    _refreshWifiIp().then((_) {
+      // 起動直後にローカルネットワーク権限の確認を能動的に発火させる
+      // （macOSはLAN送信を試みた時に初めてプロンプト表示＆設定一覧に登録する）。
+      triggerLocalNetworkPrompt(ip: _wifiIp, onLog: _connLog.add);
+    });
     // 検証用自動フロー: 起動時に「スマホ設置完了」を自動実行する。
     if (_autoFlow) scheduleMicrotask(_startAutoPairing);
   }
