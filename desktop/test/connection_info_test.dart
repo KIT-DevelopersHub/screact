@@ -28,6 +28,15 @@ void main() {
       expect(ip, '10.0.1.1');
     });
 
+    test('Windowsでは仮想EthernetよりWi-Fiを優先する', () {
+      final ip = pickWifiIp(const [
+        InterfaceAddrs('イーサネット 7', ['192.168.204.1']),
+        InterfaceAddrs('イーサネット 10', ['192.168.56.1']),
+        InterfaceAddrs('Wi-Fi', ['172.20.10.3']),
+      ]);
+      expect(ip, '172.20.10.3');
+    });
+
     test('en 系が無ければ仮想IF以外を選ぶ', () {
       final ip = pickWifiIp(const [
         InterfaceAddrs('utun0', ['100.64.0.1']),
@@ -82,21 +91,26 @@ void main() {
     }
 
     Future<(WebSocket, Stream<Map<String, dynamic>>)> connect(
-        InputServer server) async {
+      InputServer server,
+    ) async {
       final ws = await WebSocket.connect(
-          'ws://localhost:${server.boundPort}/ws/v1/input');
-      final msgs = ws
-          .map((d) => (jsonDecode(d as String) as Map).cast<String, dynamic>())
-          .asBroadcastStream();
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
+      final msgs =
+          ws
+              .map(
+                (d) => (jsonDecode(d as String) as Map).cast<String, dynamic>(),
+              )
+              .asBroadcastStream();
       return (ws, msgs);
     }
 
     Map<String, dynamic> hello(String? token) => {
-          'schemaVersion': 1,
-          'messageType': 'hello',
-          'deviceId': 'pairing-test',
-          if (token != null) 'pairingToken': token,
-        };
+      'schemaVersion': 1,
+      'messageType': 'hello',
+      'deviceId': 'pairing-test',
+      if (token != null) 'pairingToken': token,
+    };
 
     test('一致するコードなら hello_ack が返る', () async {
       final server = await startServer(code: '123456');
@@ -111,7 +125,9 @@ void main() {
     test('不一致は hello_error(pairing_code_mismatch) で拒否・切断される', () async {
       String? lastError;
       final server = await startServer(
-          code: '123456', onStatus: (st) => lastError = st.lastError ?? lastError);
+        code: '123456',
+        onStatus: (st) => lastError = st.lastError ?? lastError,
+      );
       final (ws, msgs) = await connect(server);
       final events = <Map<String, dynamic>>[];
       final done = Completer<void>();
@@ -149,7 +165,8 @@ void main() {
       if (lanIp == null) return; // ネットワークが無い環境ではスキップ
       final server = await startServer(code: '123456');
       final ws = await WebSocket.connect(
-          'ws://$lanIp:${server.boundPort}/ws/v1/input');
+        'ws://$lanIp:${server.boundPort}/ws/v1/input',
+      );
       addTearDown(ws.close);
       final ack = ws
           .map((d) => (jsonDecode(d as String) as Map).cast<String, dynamic>())
@@ -158,8 +175,7 @@ void main() {
       await ack.timeout(const Duration(seconds: 5));
     });
 
-    test('接続ログに段階（listen→request→upgrade→hello→hello_error）が残る',
-        () async {
+    test('接続ログに段階（listen→request→upgrade→hello→hello_error）が残る', () async {
       final logs = <String>[];
       final server = InputServer(
         engine: InteractionEngine(),
@@ -173,7 +189,8 @@ void main() {
       addTearDown(server.stop);
 
       final ws = await WebSocket.connect(
-          'ws://localhost:${server.boundPort}/ws/v1/input');
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
       final done = Completer<void>();
       ws.listen((_) {}, onDone: done.complete);
       ws.add(jsonEncode(hello('999999')));
@@ -190,22 +207,23 @@ void main() {
       expect(stage('hello_error'), contains('コード不一致'));
     });
 
-    test('WS応答に Sec-WebSocket-Extensions を含めない（OkHttp互換・1010切断の回帰）',
-        () async {
+    test('WS応答に Sec-WebSocket-Extensions を含めない（OkHttp互換・1010切断の回帰）', () async {
       // AndroidのOkHttpは permessage-deflate; client_max_window_bits を含む
       // 応答を拒否して closeCode=1010 で切断する（実機で発生）。
       // 生ソケットで圧縮拡張を提示し、応答ヘッダに拡張が無いことを確認する。
       final server = await startServer(code: '123456');
       final socket = await Socket.connect('localhost', server.boundPort!);
       addTearDown(socket.destroy);
-      socket.write('GET /ws/v1/input HTTP/1.1\r\n'
-          'Host: localhost\r\n'
-          'Upgrade: websocket\r\n'
-          'Connection: Upgrade\r\n'
-          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
-          'Sec-WebSocket-Version: 13\r\n'
-          'Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n'
-          '\r\n');
+      socket.write(
+        'GET /ws/v1/input HTTP/1.1\r\n'
+        'Host: localhost\r\n'
+        'Upgrade: websocket\r\n'
+        'Connection: Upgrade\r\n'
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+        'Sec-WebSocket-Version: 13\r\n'
+        'Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n'
+        '\r\n',
+      );
       final buf = StringBuffer();
       await for (final chunk in socket) {
         buf.write(String.fromCharCodes(chunk));
@@ -214,8 +232,11 @@ void main() {
       final headers = buf.toString().toLowerCase();
       expect(headers, contains('101'));
       expect(headers, contains('upgrade'));
-      expect(headers, isNot(contains('sec-websocket-extensions')),
-          reason: '拡張応答があるとOkHttpが1010で切断する');
+      expect(
+        headers,
+        isNot(contains('sec-websocket-extensions')),
+        reason: '拡張応答があるとOkHttpが1010で切断する',
+      );
     });
 
     test('稼働中に enforcePairing を切り替えられる', () async {

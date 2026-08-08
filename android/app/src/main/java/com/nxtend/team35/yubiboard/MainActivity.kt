@@ -288,6 +288,7 @@ class MainActivity : ComponentActivity() {
                         state = productionState,
                         savedHost = viewModel.savedHost,
                         savedPort = viewModel.savedPort,
+                        hasTrustedPc = viewModel.hasTrustedPc,
                         cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
                         previewContent = {
                             Box(Modifier.fillMaxSize()) {
@@ -307,6 +308,7 @@ class MainActivity : ComponentActivity() {
                         onDisconnect = viewModel::disconnect,
                         onRetryNow = viewModel::retryNow,
                         onChangeConnectionSettings = viewModel::changeConnectionSettings,
+                        onForgetTrustedPc = viewModel::forgetTrustedPc,
                         onOpenDebug = { viewModel.setExperienceMode(ExperienceMode.DEBUG) },
                     )
                 }

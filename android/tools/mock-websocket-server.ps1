@@ -11,7 +11,8 @@ param(
     [ValidateSet(
         'happy', 'production-happy', 'calibration-retry', 'pairing-rejected',
         'unsupported-version', 'server-busy', 'mode-switch', 'remote-disconnect',
-        'ack-timeout', 'invalid-json', 'wrong-session', 'schema-mismatch', 'drop', 'slow-reader'
+        'ack-timeout', 'invalid-json', 'wrong-session', 'schema-mismatch', 'drop', 'slow-reader',
+        'resume-token-invalid'
     )]
     [string]$Scenario = 'happy',
 
@@ -22,6 +23,12 @@ param(
     [int]$ReadDelayMs = 0,
 
     [string]$OutputDirectory = '',
+
+    [string]$TrustStorePath = '',
+
+    [switch]$ResetTrustStore,
+
+    [switch]$AutoPlacementOk,
 
     [switch]$RenderVideo,
 
@@ -43,6 +50,23 @@ $runStartedAt = [DateTime]::UtcNow
 function Test-RunExpired {
     return $DurationSeconds -gt 0 -and
         ([DateTime]::UtcNow - $runStartedAt).TotalSeconds -ge $DurationSeconds
+}
+
+function New-ResumeToken {
+    $bytes = [byte[]]::new(32)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Save-TrustedDevices {
+    $script:trustedDevices | ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath $TrustStorePath -Encoding utf8
+}
+
+function Test-MessageProperty {
+    param([object]$Message, [string]$Name)
+    $property = $Message.PSObject.Properties[$Name]
+    return $null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)
 }
 
 function Read-ExactBytes {
@@ -247,7 +271,13 @@ function Test-ClientMessage {
         'hello' {
             if (-not $Message.deviceId) { $errors.Add('hello.deviceId is required') }
             if ($Message.coordinateSpace -ne 'normalized_camera') { $errors.Add('hello.coordinateSpace is invalid') }
-            if ($Message.pairingToken -notmatch '^[0-9]{6}$') { $errors.Add('hello.pairingToken must be six digits') }
+            $hasPairing = Test-MessageProperty -Message $Message -Name 'pairingToken'
+            $hasResume = Test-MessageProperty -Message $Message -Name 'resumeToken'
+            if ($hasPairing -eq $hasResume) {
+                $errors.Add('hello must contain exactly one of pairingToken or resumeToken')
+            } elseif ($hasPairing -and $Message.pairingToken -notmatch '^[0-9]{6}$') {
+                $errors.Add('hello.pairingToken must be six digits')
+            }
         }
         'hand_frame' {
             if ($Message.sessionId -ne $ActiveSession) { $errors.Add('hand_frame.sessionId does not match') }
@@ -307,6 +337,18 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+if ([string]::IsNullOrWhiteSpace($TrustStorePath)) {
+    $TrustStorePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'debug-results\mock-trusted-devices.json'
+}
+$TrustStorePath = [System.IO.Path]::GetFullPath($TrustStorePath)
+if ($ResetTrustStore -and (Test-Path -LiteralPath $TrustStorePath)) {
+    Remove-Item -LiteralPath $TrustStorePath -Force
+}
+$script:trustedDevices = @{}
+if (Test-Path -LiteralPath $TrustStorePath) {
+    $loadedTrust = Get-Content -Raw -LiteralPath $TrustStorePath | ConvertFrom-Json -AsHashtable
+    if ($null -ne $loadedTrust) { $script:trustedDevices = $loadedTrust }
+}
 $script:eventLog = Join-Path $OutputDirectory 'events.jsonl'
 $script:handFrameLog = Join-Path $OutputDirectory 'hand-frames.jsonl'
 $summaryFile = Join-Path $OutputDirectory 'connections.csv'
@@ -318,9 +360,15 @@ $calibrationComplete = $false
 Write-Host "YubiBoard mock WebSocket server: 0.0.0.0:$Port/ws/v1/input"
 Write-Host "Pairing token: $PairingToken / initial mode: $InitialMode / scenario: $Scenario"
 Write-Host "Results: $OutputDirectory"
+Write-Host "Debug trust store: $TrustStorePath"
 Write-Host "Hand coordinates: $script:handFrameLog"
 Write-Host 'Stop with Ctrl+C.'
-Write-DebugEvent -Name 'server_started' -Data @{ port = $Port; scenario = $Scenario; initialMode = $InitialMode }
+Write-DebugEvent -Name 'server_started' -Data @{
+    port = $Port
+    scenario = $Scenario
+    initialMode = $InitialMode
+    trustedDeviceCount = $script:trustedDevices.Count
+}
 
 try {
     while (-not (Test-RunExpired)) {
@@ -388,10 +436,30 @@ try {
                 Write-DebugEvent -Name 'message_received' -Data @{ messageType = $message.messageType; bytes = $frame.Payload.Length; frameId = $message.frameId }
                 switch ($message.messageType) {
                     'hello' {
-                        if ($message.pairingToken -ne $PairingToken -or $Scenario -eq 'pairing-rejected') {
-                            Write-Warning "Rejected pairing token from $remote"
+                        $hasPairing = Test-MessageProperty -Message $message -Name 'pairingToken'
+                        $hasResume = Test-MessageProperty -Message $message -Name 'resumeToken'
+                        $issuedResumeToken = $null
+                        if ($hasPairing -eq $hasResume) {
                             Send-HelloError -Stream $stream -Code 'pairing_code_mismatch' -Retryable $false
                             break
+                        }
+                        if ($hasPairing) {
+                            if ($message.pairingToken -ne $PairingToken -or $Scenario -eq 'pairing-rejected') {
+                                Write-Warning "Rejected pairing token from $remote"
+                                Send-HelloError -Stream $stream -Code 'pairing_code_mismatch' -Retryable $false
+                                break
+                            }
+                            $issuedResumeToken = New-ResumeToken
+                        } else {
+                            $savedResumeToken = [string]$script:trustedDevices[[string]$message.deviceId]
+                            if ($Scenario -eq 'resume-token-invalid' -or
+                                [string]::IsNullOrWhiteSpace($savedResumeToken) -or
+                                $message.resumeToken -cne $savedResumeToken) {
+                                Write-Warning "Rejected trusted connection from $remote"
+                                Send-HelloError -Stream $stream -Code 'resume_token_invalid' -Retryable $false
+                                break
+                            }
+                            Write-DebugEvent -Name 'trusted_device_resumed' -Data @{ deviceId = $message.deviceId }
                         }
                         if ($Scenario -eq 'unsupported-version') {
                             Send-HelloError -Stream $stream -Code 'unsupported_version' -Retryable $false
@@ -405,20 +473,43 @@ try {
                             Write-Host 'Scenario ack-timeout: hello_ack suppressed'
                             continue
                         }
+                        if ($null -ne $issuedResumeToken) {
+                            $script:trustedDevices[[string]$message.deviceId] = $issuedResumeToken
+                            Save-TrustedDevices
+                            Write-DebugEvent -Name 'trusted_device_issued' -Data @{ deviceId = $message.deviceId }
+                        }
                         $ackSchemaVersion = if ($Scenario -eq 'schema-mismatch') { 99 } else { 1 }
+                        $calibrationRequired = -not $calibrationComplete -and (
+                            $InitialMode -eq 'calibration' -or
+                            $Scenario -in @('production-happy', 'calibration-retry')
+                        )
                         $ack = [ordered]@{
                             schemaVersion = $ackSchemaVersion
                             messageType = 'hello_ack'
                             sessionId = $sessionId
                             surface = [ordered]@{ surfaceId = 'mock-display'; widthPx = 1920; heightPx = 1080 }
-                            calibrationRequired = -not $calibrationComplete -and (
-                                $InitialMode -eq 'calibration' -or
-                                $Scenario -in @('production-happy', 'calibration-retry')
-                            )
-                        } | ConvertTo-Json -Compress
-                        Send-WebSocketText -Stream $stream -Text $ack
+                            calibrationRequired = $calibrationRequired
+                        }
+                        if ($null -ne $issuedResumeToken) { $ack.resumeToken = $issuedResumeToken }
+                        Send-WebSocketText -Stream $stream -Text ($ack | ConvertTo-Json -Compress)
                         Write-Host "Handshake accepted: $sessionId"
-                        Write-DebugEvent -Name 'hello_ack_sent' -Data @{ sessionId = $sessionId; schemaVersion = $ackSchemaVersion }
+                        Write-DebugEvent -Name 'hello_ack_sent' -Data @{
+                            sessionId = $sessionId
+                            schemaVersion = $ackSchemaVersion
+                            calibrationRequired = $calibrationRequired
+                            resumeTokenIssued = $null -ne $issuedResumeToken
+                        }
+                        if ($calibrationRequired) {
+                            Write-Host 'Androidへスマホ固定を案内しました。固定後にPC側の配置OKを実行します。'
+                            if ($AutoPlacementOk) {
+                                Start-Sleep -Milliseconds 500
+                                Write-Host '配置OK（自動）: ArUcoターゲットを全画面表示してください。'
+                            } else {
+                                Read-Host 'スマホを固定したらEnterを押してください（PCの配置OK）'
+                                Write-Host '配置OK: ArUcoターゲットを全画面表示してください。'
+                            }
+                            Write-DebugEvent -Name 'placement_ok' -Data @{ automatic = [bool]$AutoPlacementOk }
+                        }
                         if ($Scenario -eq 'invalid-json') {
                             Send-WebSocketText -Stream $stream -Text '{not-valid-json'
                         } elseif ($Scenario -eq 'wrong-session') {

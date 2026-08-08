@@ -12,7 +12,8 @@ data class HelloMessage(
     val deviceId: String,
     val client: String = "yubiboard-android",
     val clientVersion: String,
-    val pairingToken: String,
+    val pairingToken: String? = null,
+    val resumeToken: String? = null,
     val interactionProfile: String = "single_user_single_active_hand",
     val coordinateSpace: String = "normalized_camera",
     val capabilities: List<String> = listOf(
@@ -20,8 +21,21 @@ data class HelloMessage(
         "hand_landmarks_21",
         "calibration_status",
         "hello_error",
+        "trusted_reconnect",
     ),
-)
+) {
+    init {
+        require((pairingToken != null) xor (resumeToken != null)) {
+            "Exactly one of pairingToken or resumeToken is required"
+        }
+        require(pairingToken == null || pairingToken.matches(Regex("^[0-9]{6}$"))) {
+            "pairingToken must be six digits"
+        }
+        require(resumeToken == null || resumeToken.isNotBlank()) {
+            "resumeToken must not be blank"
+        }
+    }
+}
 
 @Serializable
 data class SourceInfo(
@@ -94,6 +108,7 @@ data class HelloAckMessage(
     val sessionId: String,
     val surface: SurfaceInfo,
     val calibrationRequired: Boolean,
+    val resumeToken: String? = null,
 ) : ServerMessage
 
 @Serializable
