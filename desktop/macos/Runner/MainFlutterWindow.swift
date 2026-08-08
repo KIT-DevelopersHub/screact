@@ -46,6 +46,11 @@ final class OverlayModeController: NSObject {
   private var savedStyleMask: NSWindow.StyleMask = []
   private var savedLevel: NSWindow.Level = .normal
   private var savedCollectionBehavior: NSWindow.CollectionBehavior = []
+  private var savedIsOpaque = true
+  private var savedBackgroundColor: NSColor?
+  private var savedHasShadow = true
+  private var savedIgnoresMouseEvents = false
+  private var savedFlutterBackgroundColor: NSColor?
   private var statusItem: NSStatusItem?
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandlerRef: EventHandlerRef?
@@ -98,6 +103,11 @@ final class OverlayModeController: NSObject {
     savedStyleMask = window.styleMask
     savedLevel = window.level
     savedCollectionBehavior = window.collectionBehavior
+    savedIsOpaque = window.isOpaque
+    savedBackgroundColor = window.backgroundColor
+    savedHasShadow = window.hasShadow
+    savedIgnoresMouseEvents = window.ignoresMouseEvents
+    savedFlutterBackgroundColor = flutterViewController?.backgroundColor
 
     window.styleMask = [.borderless]
     window.isOpaque = false
@@ -128,13 +138,13 @@ final class OverlayModeController: NSObject {
     removeStatusItem()
 
     window.styleMask = savedStyleMask
-    window.isOpaque = true
-    window.backgroundColor = .windowBackgroundColor
-    window.hasShadow = true
+    window.isOpaque = savedIsOpaque
+    window.backgroundColor = savedBackgroundColor
+    window.hasShadow = savedHasShadow
     window.level = savedLevel
-    window.ignoresMouseEvents = false
+    window.ignoresMouseEvents = savedIgnoresMouseEvents
     window.collectionBehavior = savedCollectionBehavior
-    flutterViewController?.backgroundColor = .windowBackgroundColor
+    flutterViewController?.backgroundColor = savedFlutterBackgroundColor
     if let f = savedFrame { window.setFrame(f, display: true) }
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)

@@ -6,6 +6,7 @@ import 'package:thehack_overlay/core/interaction_engine.dart';
 import 'package:thehack_overlay/main.dart';
 import 'package:thehack_overlay/platform/desktop_bridge.dart';
 import 'package:thehack_overlay/ui/home_page.dart';
+import 'package:thehack_overlay/ui/overlay_canvas.dart';
 
 const _menuKey = ValueKey('desktop-header-menu');
 
@@ -86,6 +87,12 @@ void main() {
     await navigateFromDrawer(tester, 'nav-workspace');
     expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('overlay-enter')), findsOneWidget);
+    expect(
+      find.byType(OverlayCanvas),
+      findsNothing,
+      reason: 'アプリ内workspaceには描画キャンバスを置かない',
+    );
+    expect(find.text('描画プレビュー'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('desktop-header-settings')));
     await tester.pumpAndSettle();
@@ -159,6 +166,11 @@ void main() {
           find.byKey(const ValueKey('calibration-start')),
           viewport,
         );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('overlay-exit-hint')),
+          viewport,
+        );
         expect(
           tester
               .getRect(find.byKey(const ValueKey('calibration-character')))
@@ -181,6 +193,45 @@ void main() {
           find.byKey(const ValueKey('overlay-enter')),
           viewport,
         );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('overlay-status-panel')),
+          viewport,
+        );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('overlay-clear')),
+          viewport,
+        );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('overlay-exit-hint')),
+          viewport,
+        );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('workspace-character')),
+          viewport,
+        );
+        final workspaceCharacter = tester.getRect(
+          find.byKey(const ValueKey('workspace-character')),
+        );
+        expect(
+          workspaceCharacter.overlaps(
+            tester.getRect(find.byKey(const ValueKey('overlay-enter'))),
+          ),
+          isFalse,
+          reason: 'オーバーレイ画面のキャラクターが再表示ボタンに重ならない',
+        );
+        expect(
+          workspaceCharacter.overlaps(
+            tester.getRect(find.byKey(const ValueKey('overlay-clear'))),
+          ),
+          isFalse,
+          reason: 'オーバーレイ画面のキャラクターが消去ボタンに重ならない',
+        );
+        expect(find.byType(OverlayCanvas), findsNothing);
+        expect(find.text('描画プレビュー'), findsNothing);
 
         await navigateFromDrawer(tester, 'nav-settings');
         expect(tester.takeException(), isNull);

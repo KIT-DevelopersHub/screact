@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -9,6 +10,7 @@ import 'package:thehack_overlay/core/calibration_config.dart';
 import 'package:thehack_overlay/core/homography.dart';
 import 'package:thehack_overlay/net/discovery.dart';
 import 'package:thehack_overlay/ui/home_page.dart';
+import 'package:thehack_overlay/ui/overlay_canvas.dart';
 import 'package:thehack_overlay/ui/pairing_controller.dart';
 
 Map<String, dynamic> calibrationMarkersMessage() {
@@ -46,7 +48,10 @@ void main() {
   final messenger = binding.defaultBinaryMessenger;
   const codec = StandardMethodCodec();
 
-  List<String> mockNative({required bool enterSucceeds}) {
+  List<String> mockNative({
+    required bool enterSucceeds,
+    Completer<bool>? enterCompleter,
+  }) {
     final calls = <String>[];
     messenger.setMockMessageHandler('yubiboard/overlay_window', (
       message,
@@ -57,7 +62,11 @@ void main() {
         case 'isAvailable':
           return codec.encodeSuccessEnvelope(true);
         case 'enterOverlay':
-          return codec.encodeSuccessEnvelope(enterSucceeds);
+          final success =
+              enterCompleter == null
+                  ? enterSucceeds
+                  : await enterCompleter.future;
+          return codec.encodeSuccessEnvelope(success);
         case 'exitOverlay':
           return codec.encodeSuccessEnvelope(null);
       }
@@ -367,8 +376,114 @@ void main() {
     await settle(tester, const Duration(milliseconds: 100));
   });
 
-  testWidgets('スマホ切断時は描画オーバーレイを閉じて再検索画面へ戻る', (tester) async {
+  testWidgets('校正完了で透明オーバーレイへ自動移行し、切断と既校正再接続を処理する', (tester) async {
     final nativeCalls = mockNative(enterSucceeds: true);
+    int callCount(String method) =>
+        nativeCalls.where((call) => call == method).length;
+    final port = 20000 + Random().nextInt(20000);
+    await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
+    await tester.pump();
+
+    await tester.tap(productionButton('server-toggle'));
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('pairing-code')).evaluate().isNotEmpty,
+    );
+    final code =
+        tester
+            .widget<SelectableText>(find.byKey(const ValueKey('pairing-code')))
+            .data!;
+    final firstSocket = await WebSocket.connect(
+      'ws://localhost:$port/ws/v1/input',
+    );
+    addTearDown(firstSocket.close);
+    firstSocket.listen((_) {});
+    firstSocket.add(
+      jsonEncode({
+        'schemaVersion': 1,
+        'messageType': 'hello',
+        'deviceId': 'overlay-disconnect-phone',
+        'pairingToken': code,
+      }),
+    );
+    await waitFor(
+      tester,
+      () =>
+          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
+    );
+
+    await tester.tap(productionButton('calibration-start'));
+    await waitFor(
+      tester,
+      () =>
+          nativeCalls.contains('enterOverlay') &&
+          find
+              .byKey(const ValueKey('calibration-target-image'))
+              .evaluate()
+              .isNotEmpty,
+    );
+    firstSocket.add(jsonEncode(calibrationMarkersMessage()));
+    await waitFor(
+      tester,
+      () => find.byType(OverlayCanvas).evaluate().isNotEmpty,
+    );
+    expect(callCount('enterOverlay'), 1);
+    expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
+    expect(find.text('描画プレビュー'), findsNothing);
+
+    await firstSocket.close();
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty,
+    );
+    expect(find.byType(OverlayCanvas), findsNothing);
+    expect(callCount('exitOverlay'), greaterThanOrEqualTo(1));
+    expect(find.byKey(const ValueKey('server-toggle')), findsOneWidget);
+
+    final secondSocket = await WebSocket.connect(
+      'ws://localhost:$port/ws/v1/input',
+    );
+    addTearDown(secondSocket.close);
+    secondSocket.listen((_) {});
+    secondSocket.add(
+      jsonEncode({
+        'schemaVersion': 1,
+        'messageType': 'hello',
+        'deviceId': 'overlay-reconnect-phone',
+        'pairingToken': code,
+      }),
+    );
+    await waitFor(
+      tester,
+      () =>
+          callCount('enterOverlay') >= 2 &&
+          find.byType(OverlayCanvas).evaluate().isNotEmpty,
+    );
+    expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
+
+    await secondSocket.close();
+    await waitFor(
+      tester,
+      () =>
+          find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty &&
+          callCount('exitOverlay') >= 2,
+    );
+    expect(find.byType(OverlayCanvas), findsNothing);
+
+    await tester.tap(productionButton('server-stop'));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester, const Duration(milliseconds: 100));
+  });
+
+  testWidgets('enter応答待ちにスマホが切断されても遅延成功をexitして接続画面へ戻る', (tester) async {
+    final enterCompleter = Completer<bool>();
+    final nativeCalls = mockNative(
+      enterSucceeds: true,
+      enterCompleter: enterCompleter,
+    );
+    int callCount(String method) =>
+        nativeCalls.where((call) => call == method).length;
     final port = 20000 + Random().nextInt(20000);
     await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
     await tester.pump();
@@ -383,12 +498,13 @@ void main() {
             .widget<SelectableText>(find.byKey(const ValueKey('pairing-code')))
             .data!;
     final socket = await WebSocket.connect('ws://localhost:$port/ws/v1/input');
+    addTearDown(socket.close);
     socket.listen((_) {});
     socket.add(
       jsonEncode({
         'schemaVersion': 1,
         'messageType': 'hello',
-        'deviceId': 'overlay-disconnect-phone',
+        'deviceId': 'overlay-enter-race-phone',
         'pairingToken': code,
       }),
     );
@@ -398,26 +514,20 @@ void main() {
           find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
     );
 
-    await navigateFromDrawer(tester, 'nav-workspace');
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const ValueKey('overlay-enter')),
-        matching: find.byType(FilledButton),
-      ),
-    );
-    await waitFor(
-      tester,
-      () => find.byKey(const ValueKey('workspace-page')).evaluate().isEmpty,
-    );
-    expect(nativeCalls, contains('enterOverlay'));
-
+    await tester.tap(productionButton('calibration-start'));
+    await waitFor(tester, () => nativeCalls.contains('enterOverlay'));
     await socket.close();
     await waitFor(
       tester,
-      () => find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty,
+      () =>
+          find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty &&
+          callCount('exitOverlay') >= 1,
     );
-    expect(nativeCalls, contains('exitOverlay'));
-    expect(find.byKey(const ValueKey('server-toggle')), findsOneWidget);
+
+    enterCompleter.complete(true);
+    await waitFor(tester, () => callCount('exitOverlay') >= 2);
+    expect(find.byKey(const ValueKey('connection-page')), findsOneWidget);
+    expect(find.byType(OverlayCanvas), findsNothing);
 
     await tester.tap(productionButton('server-stop'));
     await settle(tester);

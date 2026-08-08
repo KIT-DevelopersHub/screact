@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,7 +13,7 @@ void main() {
   const codec = StandardMethodCodec();
 
   /// ネイティブ(Swift)側の応答をモックする。呼ばれたメソッド名を記録する。
-  List<String> mockNative({bool available = true}) {
+  List<String> mockNative({bool available = true, Future<bool>? enterResult}) {
     final calls = <String>[];
     messenger.setMockMethodCallHandler(OverlayWindowController.channel, (
       call,
@@ -22,7 +24,7 @@ void main() {
         case 'isAvailable':
           return true;
         case 'enterOverlay':
-          return true;
+          return enterResult ?? true;
         case 'exitOverlay':
           return null;
       }
@@ -90,42 +92,79 @@ void main() {
       expect(exited, 1);
       expect(entered, 1);
     });
+
+    test('enter応答待ちのexitは遅れて成功したオーバーレイも閉じる', () async {
+      final enterResult = Completer<bool>();
+      final calls = mockNative(enterResult: enterResult.future);
+      final controller = OverlayWindowController();
+      expect(await controller.probe(), isTrue);
+
+      final entering = controller.enter();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, contains('enterOverlay'));
+      await controller.exit();
+      final exitsBeforeCompletion =
+          calls.where((method) => method == 'exitOverlay').length;
+
+      enterResult.complete(true);
+      await entering;
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        calls.where((method) => method == 'exitOverlay').length,
+        greaterThan(exitsBeforeCompletion),
+        reason: '遅れたenter成功後にもexitを再送して透明窓を残さない',
+      );
+      controller.dispose();
+    });
+
+    test('enter応答待ちのdisposeは遅れて成功したオーバーレイを閉じる', () async {
+      final enterResult = Completer<bool>();
+      final calls = mockNative(enterResult: enterResult.future);
+      final controller = OverlayWindowController();
+      expect(await controller.probe(), isTrue);
+
+      final entering = controller.enter();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, contains('enterOverlay'));
+      controller.dispose();
+      enterResult.complete(true);
+      await entering;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        calls.last,
+        'exitOverlay',
+        reason: 'dispose後にenterが成功してもネイティブ窓を必ず復帰する',
+      );
+    });
   });
 
   group('HomePage オーバーレイモード', () {
-    testWidgets('突入通知で操作画面が消え、解除通知でワークスペースへ戻る', (tester) async {
-      mockNative();
-      await tester.pumpWidget(const YubiBoardApp());
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
-      await navigateToWorkspace(tester);
-      expect(find.byKey(const ValueKey('overlay-enter')), findsOneWidget);
-
-      await pushNativeCall('overlayEntered');
-      await tester.pump();
-      expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
-      expect(find.byKey(const ValueKey('connection-page')), findsNothing);
-
-      await pushNativeCall('overlayExited');
-      await tester.pump();
-      expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-    });
-
-    testWidgets('ワークスペースのボタンでenterOverlayがネイティブへ飛ぶ', (tester) async {
+    testWidgets('未接続では再表示操作を無効化しnative突入通知も閉じる', (tester) async {
       final calls = mockNative();
       await tester.pumpWidget(const YubiBoardApp());
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
       await navigateToWorkspace(tester);
+      final button = overlayButton();
+      expect(button, findsOneWidget);
+      expect(tester.widget<FilledButton>(button).onPressed, isNull);
 
-      expect(overlayButton(), findsOneWidget);
-      await tester.tap(overlayButton());
+      await pushNativeCall('overlayEntered');
       await tester.pump();
-      expect(calls, contains('enterOverlay'));
-      expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
+      expect(calls, contains('exitOverlay'));
+      expect(calls, isNot(contains('enterOverlay')));
+
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('desktop-header-menu')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ListTile>(find.byKey(const ValueKey('nav-overlay-enter')))
+            .enabled,
+        isFalse,
+      );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

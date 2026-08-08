@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// ネイティブの「オーバーレイ窓」（透過・最前面・クリック透過）との境界。
@@ -20,6 +22,7 @@ class OverlayWindowController {
 
   bool _available = false;
   bool _disposed = false;
+  int _operationEpoch = 0;
   bool get isAvailable => _available;
 
   OverlayWindowController({this.onExited, this.onEntered}) {
@@ -31,8 +34,11 @@ class OverlayWindowController {
     if (_disposed) return;
     switch (call.method) {
       case 'overlayExited':
+        ++_operationEpoch;
         onExited?.call();
       case 'overlayEntered':
+        _available = true;
+        ++_operationEpoch;
         onEntered?.call();
     }
   }
@@ -40,32 +46,47 @@ class OverlayWindowController {
   /// ネイティブ実装の有無を調べる（無ければ以後の enter/exit は no-op）。
   Future<bool> probe() async {
     if (_disposed) return false;
+    final epoch = _operationEpoch;
+    var available = false;
     try {
-      _available = await channel.invokeMethod<bool>('isAvailable') ?? false;
+      available = await channel.invokeMethod<bool>('isAvailable') ?? false;
     } on MissingPluginException {
-      _available = false;
+      available = false;
     } on PlatformException {
-      _available = false;
+      available = false;
     }
+    if (_disposed || epoch != _operationEpoch) return false;
+    _available = available;
     return _available;
   }
 
   /// オーバーレイモードへ（透過・最前面・クリック透過・全画面）。
   Future<bool> enter() async {
     if (_disposed || !_available) return false;
+    final epoch = ++_operationEpoch;
+    var entered = false;
     try {
-      return await channel.invokeMethod<bool>('enterOverlay') ?? false;
+      entered = await channel.invokeMethod<bool>('enterOverlay') ?? false;
     } on MissingPluginException {
       _available = false;
-      return false;
     } on PlatformException {
+      entered = false;
+    }
+    if (_disposed || epoch != _operationEpoch) {
+      if (entered) await _invokeNativeExit();
       return false;
     }
+    return entered;
   }
 
   /// 通常ウィンドウへ戻す。
   Future<void> exit() async {
-    if (_disposed || !_available) return;
+    ++_operationEpoch;
+    if (!_available) return;
+    await _invokeNativeExit();
+  }
+
+  Future<void> _invokeNativeExit() async {
     try {
       await channel.invokeMethod('exitOverlay');
     } on MissingPluginException {
@@ -78,6 +99,8 @@ class OverlayWindowController {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    ++_operationEpoch;
+    if (_available) unawaited(_invokeNativeExit());
     if (identical(_activeController, this)) {
       _activeController = null;
       channel.setMethodCallHandler(null);

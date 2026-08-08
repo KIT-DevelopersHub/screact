@@ -22,6 +22,7 @@ class OverlayModeController {
   ~OverlayModeController();
 
   bool is_overlay() const { return is_overlay_; }
+  bool is_available() const { return hot_key_registered_; }
   void EnterOverlay();
   void ExitOverlay(bool notify_flutter);
   void ToggleOverlay();
@@ -38,6 +39,7 @@ class OverlayModeController {
   HWND window_ = nullptr;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   bool is_overlay_ = false;
+  bool hot_key_registered_ = false;
   LONG saved_style_ = 0;
   LONG saved_ex_style_ = 0;
   WINDOWPLACEMENT saved_placement_ = {sizeof(WINDOWPLACEMENT)};

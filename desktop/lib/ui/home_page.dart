@@ -20,9 +20,7 @@ import 'production_design.dart';
 
 enum DesktopSection { connection, calibration, workspace, settings }
 
-enum WorkspaceTool { pointer, hand, pen, overlay, eraser }
-
-/// PC側の接続・位置合わせ・描画・設定を、本番向けの4画面にまとめた操作面。
+/// PC側の接続・位置合わせ・オーバーレイ・設定を、本番向けの4画面にまとめた操作面。
 /// 通信・位置合わせ・透明オーバーレイの既存処理はそのまま共有する。
 class HomePage extends StatefulWidget {
   /// テスト用のポート差し替え。nullならYUBI_PORT、未指定時は8765。
@@ -72,7 +70,6 @@ class _HomePageState extends State<HomePage> {
   InputServer? _stoppingServerInstance;
   ServerStatus _status = const ServerStatus();
   DesktopSection _section = DesktopSection.connection;
-  WorkspaceTool _workspaceTool = WorkspaceTool.pen;
 
   String? _wifiIp;
   String? _pairingCode;
@@ -81,12 +78,13 @@ class _HomePageState extends State<HomePage> {
   bool _enforcePairing = true;
   bool _startingServer = false;
   bool _overlayOn = false;
-  bool _overlayAvailable = false;
+  bool _enteringOverlay = false;
+  String? _overlayError;
+  int _overlayAttempt = 0;
   bool? _accessibilityTrusted;
   bool _checkingAccessibility = false;
   bool _autoFlowFired = false;
   bool _disposed = false;
-  double _workspaceZoom = 1;
   late double _draftSensitivity;
   late bool _draftSmoothing;
   late double _draftMarkerInsetX;
@@ -99,6 +97,18 @@ class _HomePageState extends State<HomePage> {
 
   bool get _running => _server != null;
   bool get _phoneConnected => _status.clientId != null;
+  bool get _overlayPlatformSupported => Platform.isMacOS || Platform.isWindows;
+  bool get _overlayReady =>
+      _overlayPlatformSupported &&
+      _running &&
+      _phoneConnected &&
+      _engine.isCalibrated &&
+      !_flow.showingTarget &&
+      !_enteringOverlay;
+  String get _overlayExitHint =>
+      Platform.isWindows
+          ? '解除するには Ctrl+Shift+O を使ってください'
+          : '解除するには、メニューバーの ✏ または ⌘⇧O を使ってください';
   int get _port => _configuredPort;
   int get _displayPort => _server?.boundPort ?? _configuredPort;
   String get _displayIp => _wifiIp ?? '(IP取得不可)';
@@ -123,12 +133,23 @@ class _HomePageState extends State<HomePage> {
       onExited: _handleOverlayExited,
       onEntered: () {
         if (_disposed || !mounted) return;
-        setState(() => _overlayOn = true);
+        // ネイティブのホットキー突入は、進行中のprobe/enterより優先する。
+        // これで古い非同期応答がDart側だけを通常画面へ戻す競合を防ぐ。
+        _overlayAttempt++;
+        if (!_running ||
+            !_phoneConnected ||
+            (!_engine.isCalibrated && !_flow.showingTarget)) {
+          setState(() => _enteringOverlay = false);
+          unawaited(_overlayWin.exit());
+          return;
+        }
+        setState(() {
+          _overlayOn = true;
+          _enteringOverlay = false;
+          _overlayError = null;
+        });
       },
     );
-    _overlayWin.probe().then((ok) {
-      if (!_disposed && mounted) setState(() => _overlayAvailable = ok);
-    });
     _flow.addListener(_handleFlowChanged);
     _connLog.addListener(_handleLogChanged);
     _connLog.init();
@@ -140,6 +161,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _disposed = true;
+    _overlayAttempt++;
     _pairing.removeListener(_handlePairingChanged);
     _pairing.dispose();
     _flow.removeListener(_handleFlowChanged);
@@ -156,7 +178,6 @@ class _HomePageState extends State<HomePage> {
     }
     _ipController.dispose();
     _portController.dispose();
-    if (_overlayOn) unawaited(_overlayWin.exit());
     _overlayWin.dispose();
     _flow.dispose();
     super.dispose();
@@ -198,11 +219,19 @@ class _HomePageState extends State<HomePage> {
 
   void _handleOverlayExited() {
     if (_disposed || !mounted) return;
+    _overlayAttempt++;
     if (_flow.showingTarget) {
       _cancelCalibration(overlayAlreadyExited: true);
       return;
     }
-    setState(() => _overlayOn = false);
+    setState(() {
+      _overlayOn = false;
+      _enteringOverlay = false;
+      _section =
+          _phoneConnected
+              ? DesktopSection.workspace
+              : DesktopSection.connection;
+    });
   }
 
   Future<void> _refreshWifiIp() async {
@@ -238,30 +267,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _applyEvents(List<InteractionEvent> events) {
-    final drawsInk =
-        _workspaceTool == WorkspaceTool.pen ||
-        _workspaceTool == WorkspaceTool.overlay;
     for (final event in events) {
-      _overlay.apply(drawsInk ? event : _pointerOnlyEvent(event));
-      if (!drawsInk ||
-          event.kind == InteractionKind.pointerMove ||
-          event.kind == InteractionKind.scroll ||
-          event.kind == InteractionKind.release) {
-        _bridge.applyEvent(event);
-      }
+      // 標準出力は透明オーバーレイ。draw* はOverlayCanvasへ、pointer/press/
+      // scrollは同時にOS入力へ渡す（DesktopBridge側がdraw*だけ除外する）。
+      _overlay.apply(event);
+      _bridge.applyEvent(event);
     }
-  }
-
-  InteractionEvent _pointerOnlyEvent(InteractionEvent event) {
-    return switch (event.kind) {
-      InteractionKind.pressDown ||
-      InteractionKind.pressMove ||
-      InteractionKind.pressUp => InteractionEvent(
-        InteractionKind.pointerMove,
-        event.screen,
-      ),
-      _ => event,
-    };
   }
 
   /// WebSocket待受の成功後だけUDP offerを広告する。
@@ -332,11 +343,16 @@ class _HomePageState extends State<HomePage> {
     _pairing.cancel();
     final server = _server;
     if (server == null) return;
+    _overlayAttempt++;
+    unawaited(_overlayWin.exit());
     _stoppingServerInstance = server;
     setState(() {
       _server = null;
       _pairingCode = null;
       _status = const ServerStatus();
+      _overlayOn = false;
+      _enteringOverlay = false;
+      _overlayError = null;
       _section = DesktopSection.connection;
     });
     await _shutdownServer(server);
@@ -378,11 +394,19 @@ class _HomePageState extends State<HomePage> {
       // helloの認証完了を接続確定とし、UDP広告はここで終了する。
       // 位置合わせtargetは画面のボタンが押されるまで開始しない。
       _pairing.onConnected();
+      // 既存の位置合わせを再利用できる場合は、白いアプリ内キャンバスを
+      // 経由せず標準の透明オーバーレイへ直接入る。
+      if (_engine.isCalibrated && _overlayPlatformSupported) {
+        unawaited(_enterOverlay());
+      }
     }
     _flow.onEngineEpoch(_engine.calibrationCount);
     if (wasCalibrating && !_flow.showingTarget && _engine.isCalibrated) {
       _server?.acceptCalibrationMessages = false;
       setState(() => _section = DesktopSection.workspace);
+      if (!_overlayOn && _overlayPlatformSupported) {
+        unawaited(_enterOverlay());
+      }
     } else if (wasConnected && status.clientId == null) {
       // 実機側から切断された時も、全画面の位置合わせ／描画オーバーレイを
       // 必ず閉じる。これを行わないと透明な操作窓だけが残り、再検索ボタンへ
@@ -390,17 +414,21 @@ class _HomePageState extends State<HomePage> {
       if (_flow.showingTarget) {
         _cancelCalibration(sectionOverride: DesktopSection.connection);
       } else {
-        final shouldExitOverlay = _overlayOn;
+        _overlayAttempt++;
         setState(() {
           _overlayOn = false;
+          _enteringOverlay = false;
+          _overlayError = null;
           _section = DesktopSection.connection;
         });
-        if (shouldExitOverlay) unawaited(_overlayWin.exit());
+        // enterOverlayの応答待ちも無効化するため、表示中かどうかに関係なく
+        // exitを送る。遅れてenterが成功してもController側が再度閉じる。
+        unawaited(_overlayWin.exit());
       }
     }
     if (_autoFlow && !_autoFlowFired && status.clientId != null) {
       _autoFlowFired = true;
-      _startCalibrationDisplay(intoOverlay: false);
+      _startCalibrationDisplay(intoOverlay: _overlayPlatformSupported);
     }
   }
 
@@ -419,14 +447,64 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _onPhonePlaced() =>
-      _startCalibrationDisplay(intoOverlay: _overlayAvailable);
+      _startCalibrationDisplay(intoOverlay: _overlayPlatformSupported);
 
   Future<void> _enterOverlay() async {
-    if (!_flow.showingTarget) {
-      setState(() => _section = DesktopSection.workspace);
+    if (_disposed || !mounted || _enteringOverlay) return;
+    if (!_running || !_phoneConnected) {
+      setState(() => _overlayError = 'スマホ接続後にオーバーレイを表示できます。');
+      return;
     }
-    final ok = await _overlayWin.enter();
-    if (ok && !_disposed && mounted) setState(() => _overlayOn = true);
+    if (!_engine.isCalibrated && !_flow.showingTarget) {
+      setState(() {
+        _section = DesktopSection.calibration;
+        _overlayError = '先に位置合わせを完了してください。';
+      });
+      return;
+    }
+    if (!_overlayPlatformSupported) {
+      setState(() => _overlayError = 'この環境では透明オーバーレイを利用できません。');
+      return;
+    }
+
+    final attempt = ++_overlayAttempt;
+    if (!_flow.showingTarget) {
+      setState(() {
+        _section = DesktopSection.workspace;
+        _enteringOverlay = true;
+        _overlayError = null;
+      });
+    } else {
+      setState(() {
+        _enteringOverlay = true;
+        _overlayError = null;
+      });
+    }
+    final available = await _overlayWin.probe();
+    final ok = available && await _overlayWin.enter();
+    if (_disposed || !mounted || attempt != _overlayAttempt) {
+      if (ok) await _overlayWin.exit();
+      return;
+    }
+    if (!_running || !_phoneConnected) {
+      if (ok) await _overlayWin.exit();
+      setState(() {
+        _enteringOverlay = false;
+        _overlayOn = false;
+        _section = DesktopSection.connection;
+      });
+      return;
+    }
+    setState(() {
+      _enteringOverlay = false;
+      _overlayOn = ok;
+      _overlayError =
+          ok
+              ? null
+              : available
+              ? 'オーバーレイを表示できませんでした。macOSのフルスクリーンを解除して再試行してください。'
+              : 'ネイティブ版で起動してください。Web版ではオーバーレイを利用できません。';
+    });
   }
 
   void _cancelCalibration({
@@ -436,10 +514,13 @@ class _HomePageState extends State<HomePage> {
     if (_disposed || !mounted) return;
     final wasShowing = _flow.showingTarget;
     final restoreTracking = _calibrationHadTracking && _engine.isCalibrated;
-    final shouldExitOverlay = _overlayOn && !overlayAlreadyExited;
+    _overlayAttempt++;
+    final shouldExitOverlay =
+        (_overlayOn || _enteringOverlay) && !overlayAlreadyExited;
     _server?.acceptCalibrationMessages = false;
     setState(() {
       _overlayOn = false;
+      _enteringOverlay = false;
       _section =
           sectionOverride ??
           (restoreTracking
@@ -771,6 +852,21 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         Positioned(
+          top: 680,
+          left: 250,
+          width: 1100,
+          child: Text(
+            '位置合わせ完了後は自動でオーバーレイ表示します。$_overlayExitHint',
+            key: const ValueKey('overlay-exit-hint'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: ProductionDesign.textColor,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Positioned(
           top: 720,
           left: 590,
           child: ProductionButton(
@@ -870,188 +966,150 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _workspaceScreen() {
+    final title = switch ((_running, _phoneConnected, _engine.isCalibrated)) {
+      (false, _, _) => 'PC接続を開始してください',
+      (true, false, _) => 'スマホの接続を待っています',
+      (true, true, false) => '位置合わせが必要です',
+      _ when _enteringOverlay => 'オーバーレイを準備しています',
+      _ => 'オーバーレイは解除されています',
+    };
+    final description = switch ((
+      _running,
+      _phoneConnected,
+      _engine.isCalibrated,
+    )) {
+      (false, _, _) => '接続画面で「始める」を押すと、自動検出を開始します。',
+      (true, false, _) => '接続後、位置合わせ済みならスライド上へ自動表示します。',
+      (true, true, false) => '位置合わせを完了すると、スライド上へ自動表示します。',
+      _ when _enteringOverlay => '透明な操作画面へ切り替えています…',
+      _ => '下のボタンから、透明な操作画面をもう一度表示できます。',
+    };
     return _designCanvas(
       key: const ValueKey('workspace-page'),
       children: [
-        Positioned(
-          left: 78,
-          top: 24,
-          width: 1444,
-          height: 820,
-          child: Container(
-            clipBehavior: Clip.hardEdge,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: const Color(0xFFBDBDBD)),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x22000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
-                ),
-              ],
-            ),
-            child: AnimatedScale(
-              scale: _workspaceZoom,
-              duration: const Duration(milliseconds: 180),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  const ColoredBox(color: Colors.white),
-                  OverlayCanvas(model: _overlay),
-                  const Positioned(
-                    top: 24,
-                    left: 0,
-                    right: 0,
-                    child: Text(
-                      '描画プレビュー',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Color(0xFFB5B5B5),
-                        fontSize: 28,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+        const Positioned(
+          top: 62,
+          left: 0,
+          right: 0,
+          child: Text(
+            'オーバーレイ操作',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: ProductionDesign.textColor,
+              fontSize: 58,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ),
-        Positioned(left: 22, top: 265, child: _workspaceToolbar()),
-        Positioned(right: 22, bottom: 40, child: _zoomToolbar()),
         Positioned(
-          bottom: 35,
-          left: 590,
-          child: ProductionButton(
-            key: const ValueKey('overlay-enter'),
-            width: 420,
-            height: 66,
-            label: 'スライド上に表示',
-            icon: Icons.layers_outlined,
-            onPressed: _overlayAvailable ? _enterOverlay : null,
-            textStyle: const TextStyle(
-              fontSize: 28,
+          left: 280,
+          top: 180,
+          width: 1040,
+          child: ProductionPanel(
+            key: const ValueKey('overlay-status-panel'),
+            padding: const EdgeInsets.fromLTRB(54, 42, 54, 38),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.layers_outlined,
+                  size: 78,
+                  color: ProductionDesign.textColor,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  title,
+                  key: const ValueKey('overlay-status-title'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: ProductionDesign.textColor,
+                    fontSize: 36,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  description,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF686666),
+                    fontSize: 23,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (_overlayError != null) ...[
+                  const SizedBox(height: 15),
+                  Text(
+                    _overlayError!,
+                    key: const ValueKey('overlay-error'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF9B3E3A),
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 30),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ProductionButton(
+                      key: const ValueKey('overlay-enter'),
+                      width: 420,
+                      height: 72,
+                      label: _enteringOverlay ? '表示しています…' : 'オーバーレイを再表示',
+                      icon: Icons.layers_outlined,
+                      onPressed: _overlayReady ? _enterOverlay : null,
+                      textStyle: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    ProductionButton(
+                      key: const ValueKey('overlay-clear'),
+                      width: 300,
+                      height: 72,
+                      label: 'インクを消去',
+                      icon: Icons.cleaning_services_outlined,
+                      outlined: true,
+                      onPressed: _overlay.clear,
+                      textStyle: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 96,
+          child: Text(
+            _overlayExitHint,
+            key: const ValueKey('overlay-exit-hint'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: ProductionDesign.textColor,
+              fontSize: 22,
               fontWeight: FontWeight.w800,
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _workspaceToolbar() {
-    return Container(
-      width: 94,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFFBFC),
-        border: Border.all(color: const Color(0xFF575454), width: 1.5),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _toolButton(WorkspaceTool.pointer, Icons.near_me_outlined, 'ポインター'),
-          _toolButton(WorkspaceTool.hand, Icons.pan_tool_alt_outlined, '手操作'),
-          _toolButton(WorkspaceTool.pen, Icons.edit_outlined, 'ペン'),
-          _toolButton(
-            WorkspaceTool.overlay,
-            Icons.crop_square_rounded,
-            'オーバーレイ',
+        const Positioned(
+          right: 36,
+          bottom: 16,
+          child: CharacterMascot(
+            key: ValueKey('workspace-character'),
+            size: 210,
+            semanticLabel: 'YubiBoardキャラクター',
           ),
-          _toolButton(
-            WorkspaceTool.eraser,
-            Icons.auto_fix_off_rounded,
-            'すべて消去',
-          ),
-          IconButton(
-            tooltip: 'その他',
-            iconSize: 37,
-            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-            icon: const Icon(Icons.more_vert_rounded),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _toolButton(WorkspaceTool tool, IconData icon, String tooltip) {
-    final selected = _workspaceTool == tool;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: IconButton(
-        key: ValueKey('workspace-tool-${tool.name}'),
-        tooltip: tooltip,
-        iconSize: 37,
-        style: IconButton.styleFrom(
-          backgroundColor:
-              selected ? const Color(0xFFD5D9F0) : Colors.transparent,
-          foregroundColor: Colors.black87,
         ),
-        onPressed: () {
-          if (tool == WorkspaceTool.eraser) {
-            _overlay.clear();
-            return;
-          }
-          setState(() => _workspaceTool = tool);
-          if (tool == WorkspaceTool.overlay && _overlayAvailable) {
-            _enterOverlay();
-          }
-          if ((tool == WorkspaceTool.pointer ||
-                  tool == WorkspaceTool.hand ||
-                  tool == WorkspaceTool.pen) &&
-              _phoneConnected) {
-            _server?.requestMode('tracking');
-          }
-        },
-        icon: Icon(icon),
-      ),
-    );
-  }
-
-  Widget _zoomToolbar() {
-    return Container(
-      width: 94,
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFFBFC),
-        border: Border.all(color: const Color(0xFF575454), width: 1.5),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton.filled(
-            key: const ValueKey('workspace-zoom-in'),
-            tooltip: '拡大',
-            onPressed:
-                _workspaceZoom >= 1.5
-                    ? null
-                    : () => setState(() => _workspaceZoom += 0.1),
-            iconSize: 36,
-            icon: const Icon(Icons.add),
-          ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: Text(
-              '${(_workspaceZoom * 100).round()}%',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-            ),
-          ),
-          const Divider(height: 1),
-          IconButton.filled(
-            key: const ValueKey('workspace-zoom-out'),
-            tooltip: '縮小',
-            onPressed:
-                _workspaceZoom <= 0.7
-                    ? null
-                    : () => setState(() => _workspaceZoom -= 0.1),
-            iconSize: 36,
-            icon: const Icon(Icons.remove),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -1417,8 +1475,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 _drawerItem(
                   key: const ValueKey('nav-workspace'),
-                  icon: Icons.draw_outlined,
-                  label: '操作画面',
+                  icon: Icons.layers_outlined,
+                  label: 'オーバーレイ',
                   section: DesktopSection.workspace,
                 ),
                 _drawerItem(
@@ -1442,14 +1500,14 @@ class _HomePageState extends State<HomePage> {
                 ),
                 ListTile(
                   key: const ValueKey('nav-overlay-enter'),
-                  enabled: _overlayAvailable,
+                  enabled: _overlayReady,
                   leading: const Icon(Icons.layers_outlined),
                   title: const Text(
-                    'オーバーレイ表示',
+                    'オーバーレイを再表示',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                   onTap:
-                      _overlayAvailable
+                      _overlayReady
                           ? () {
                             _scaffoldKey.currentState?.closeDrawer();
                             _enterOverlay();
@@ -1580,7 +1638,8 @@ class _HomePageState extends State<HomePage> {
                                       ? () {
                                         Navigator.of(dialogContext).pop();
                                         _startCalibrationDisplay(
-                                          intoOverlay: _overlayAvailable,
+                                          intoOverlay:
+                                              _overlayPlatformSupported,
                                         );
                                       }
                                       : null,
@@ -1595,7 +1654,7 @@ class _HomePageState extends State<HomePage> {
                             ),
                             OutlinedButton.icon(
                               onPressed:
-                                  _overlayAvailable
+                                  _overlayReady
                                       ? () {
                                         Navigator.of(dialogContext).pop();
                                         _enterOverlay();
