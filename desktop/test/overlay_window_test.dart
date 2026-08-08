@@ -1,5 +1,5 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:thehack_overlay/main.dart';
 import 'package:thehack_overlay/platform/overlay_window.dart';
@@ -13,7 +13,9 @@ void main() {
   /// ネイティブ(Swift)側の応答をモックする。呼ばれたメソッド名を記録する。
   List<String> mockNative({bool available = true}) {
     final calls = <String>[];
-    messenger.setMockMethodCallHandler(OverlayWindowController.channel, (call) async {
+    messenger.setMockMethodCallHandler(OverlayWindowController.channel, (
+      call,
+    ) async {
       calls.add(call.method);
       if (!available) throw MissingPluginException();
       switch (call.method) {
@@ -38,6 +40,19 @@ void main() {
     );
   }
 
+  Future<void> navigateToWorkspace(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('desktop-header-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('nav-workspace')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
+  }
+
+  Finder overlayButton() => find.descendant(
+    of: find.byKey(const ValueKey('overlay-enter')),
+    matching: find.byType(FilledButton),
+  );
+
   tearDown(() {
     messenger.setMockMethodCallHandler(OverlayWindowController.channel, null);
   });
@@ -45,21 +60,20 @@ void main() {
   group('OverlayWindowController', () {
     test('probe→enter→exit がネイティブへ委譲される', () async {
       final calls = mockNative();
-      final c = OverlayWindowController();
-      expect(await c.probe(), isTrue);
-      expect(await c.enter(), isTrue);
-      await c.exit();
+      final controller = OverlayWindowController();
+      expect(await controller.probe(), isTrue);
+      expect(await controller.enter(), isTrue);
+      await controller.exit();
       expect(calls, ['isAvailable', 'enterOverlay', 'exitOverlay']);
     });
 
     test('ネイティブ未接続なら enter/exit は no-op（劣化動作）', () async {
       final calls = mockNative(available: false);
-      final c = OverlayWindowController();
-      expect(await c.probe(), isFalse);
-      expect(c.isAvailable, isFalse);
-      expect(await c.enter(), isFalse);
-      await c.exit();
-      // probe の isAvailable だけが飛び、enter/exit はチャネルに乗らない
+      final controller = OverlayWindowController();
+      expect(await controller.probe(), isFalse);
+      expect(controller.isAvailable, isFalse);
+      expect(await controller.enter(), isFalse);
+      await controller.exit();
       expect(calls, ['isAvailable']);
     });
 
@@ -79,40 +93,40 @@ void main() {
   });
 
   group('HomePage オーバーレイモード', () {
-    testWidgets('突入で操作パネルが消え、解除で戻る', (tester) async {
+    testWidgets('突入通知で操作画面が消え、解除通知でワークスペースへ戻る', (tester) async {
       mockNative();
       await tester.pumpWidget(const YubiBoardApp());
-      await tester.pump();
-      // パネルが長くなったためリスト内までスクロールして確認する。
-      await tester.scrollUntilVisible(
-          find.text('オーバーレイ表示'), 80,
-          scrollable: find.byType(Scrollable).first);
-      expect(find.text('オーバーレイ表示'), findsOneWidget);
+      await tester.pumpAndSettle();
+      await navigateToWorkspace(tester);
+      expect(find.byKey(const ValueKey('overlay-enter')), findsOneWidget);
 
-      // ホットキー相当: ネイティブから overlayEntered
       await pushNativeCall('overlayEntered');
       await tester.pump();
-      expect(find.text('接続'), findsNothing);
-      expect(find.text('オーバーレイ表示'), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
+      expect(find.byKey(const ValueKey('connection-page')), findsNothing);
 
-      // メニューバー相当: ネイティブから overlayExited
       await pushNativeCall('overlayExited');
       await tester.pump();
-      expect(find.text('接続'), findsOneWidget);
+      expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     });
 
-    testWidgets('ボタン押下で enterOverlay がネイティブへ飛ぶ', (tester) async {
+    testWidgets('ワークスペースのボタンでenterOverlayがネイティブへ飛ぶ', (tester) async {
       final calls = mockNative();
       await tester.pumpWidget(const YubiBoardApp());
-      await tester.pump();
-      await tester.scrollUntilVisible(
-          find.text('オーバーレイ表示'), 80,
-          scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('オーバーレイ表示'));
+      await tester.pumpAndSettle();
+      await navigateToWorkspace(tester);
+
+      expect(overlayButton(), findsOneWidget);
+      await tester.tap(overlayButton());
       await tester.pump();
       expect(calls, contains('enterOverlay'));
-      // オーバーレイモードに切り替わり、パネルは消えている
-      expect(find.text('接続'), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-page')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     });
   });
 }

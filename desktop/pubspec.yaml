@@ -60,6 +60,8 @@ flutter:
   # 画面位置合わせ用のArUcoターゲット（android/tools と同一の画像）。
   assets:
     - assets/calibration-target-1920x1080.png
+    - assets/production_watercolor_background.png
+    - assets/production_character.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

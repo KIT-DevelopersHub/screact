@@ -17,7 +17,16 @@ class YubiBoardApp extends StatelessWidget {
       title: 'YubiBoard Desktop',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF2B6CB0),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF5A4696),
+          brightness: Brightness.light,
+          surface: Colors.white,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF3FBF9),
+        textTheme: ThemeData.light().textTheme.apply(
+          bodyColor: const Color(0xFF3F3F3F),
+          displayColor: const Color(0xFF3F3F3F),
+        ),
         useMaterial3: true,
       ),
       home: const HomePage(),
