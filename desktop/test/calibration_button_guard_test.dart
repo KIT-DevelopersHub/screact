@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:thehack_overlay/core/calibration_config.dart';
 import 'package:thehack_overlay/core/homography.dart';
+import 'package:thehack_overlay/net/discovery.dart';
 import 'package:thehack_overlay/ui/home_page.dart';
+import 'package:thehack_overlay/ui/pairing_controller.dart';
 
 Map<String, dynamic> calibrationMarkersMessage() {
   const insetX = CalibrationConfig.targetMarkerInsetX;
@@ -44,11 +46,13 @@ void main() {
   final messenger = binding.defaultBinaryMessenger;
   const codec = StandardMethodCodec();
 
-  void mockNative({required bool enterSucceeds}) {
+  List<String> mockNative({required bool enterSucceeds}) {
+    final calls = <String>[];
     messenger.setMockMessageHandler('yubiboard/overlay_window', (
       message,
     ) async {
       final call = codec.decodeMethodCall(message);
+      calls.add(call.method);
       switch (call.method) {
         case 'isAvailable':
           return codec.encodeSuccessEnvelope(true);
@@ -62,6 +66,7 @@ void main() {
     addTearDown(
       () => messenger.setMockMessageHandler('yubiboard/overlay_window', null),
     );
+    return calls;
   }
 
   Finder productionButton(String key) => find.descendant(
@@ -127,6 +132,8 @@ void main() {
       tester,
       () => find.byKey(const ValueKey('pairing-code')).evaluate().isNotEmpty,
     );
+    expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
+    expect(find.textContaining('スマホを検索'), findsOneWidget);
     expect(enabled(tester, start), isFalse);
     expect(enabled(tester, stop), isTrue);
 
@@ -204,17 +211,70 @@ void main() {
     expect(enabled(tester, calibrationStart), isTrue);
 
     await socket.close();
-    await settle(tester);
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty,
+    );
+    expect(calibrationStart, findsNothing);
+    await navigateFromDrawer(tester, 'nav-calibration');
     expect(enabled(tester, calibrationStart), isFalse);
 
     await navigateFromDrawer(tester, 'nav-connection');
     await tester.tap(stop);
-    await waitFor(tester, () => enabled(tester, start));
+    await waitFor(tester, () => !enabled(tester, stop));
+    expect(enabled(tester, start), isTrue);
     expect(enabled(tester, stop), isFalse);
     expect(find.byKey(const ValueKey('pairing-code')), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await settle(tester, const Duration(milliseconds: 100));
+  });
+
+  testWidgets('UDP検索timeout後も手動接続情報を残し、再試行で検索に戻る', (tester) async {
+    mockNative(enterSucceeds: false);
+    final probe = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final discoveryPort = probe.port;
+    probe.close();
+    final pairing = PairingController(
+      discoveryFactory:
+          () => DesktopDiscovery(
+            token: 'unused-test-token',
+            wsPort: 1,
+            discoveryPort: discoveryPort,
+            broadcastAddresses: const ['127.0.0.1'],
+            offerInterval: const Duration(milliseconds: 40),
+          ),
+      searchTimeout: const Duration(milliseconds: 220),
+    );
+    final port = 20000 + Random().nextInt(20000);
+    await tester.pumpWidget(
+      MaterialApp(home: HomePage(port: port, pairingController: pairing)),
+    );
+    await tester.pump();
+
+    await tester.tap(productionButton('server-toggle'));
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('pairing-retry')).evaluate().isNotEmpty,
+    );
+    expect(find.textContaining('スマホが見つかりません'), findsOneWidget);
+    expect(find.byKey(const ValueKey('connection-info')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pairing-code')), findsOneWidget);
+    expect(find.text('IPアドレス'), findsOneWidget);
+    expect(find.text('IPポート'), findsOneWidget);
+    expect(enabled(tester, productionButton('server-toggle')), isTrue);
+    expect(enabled(tester, productionButton('server-stop')), isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('pairing-retry')));
+    await settle(tester, const Duration(milliseconds: 40));
+    expect(find.textContaining('スマホを検索'), findsOneWidget);
+    expect(find.byKey(const ValueKey('pairing-code')), findsOneWidget);
+
+    await tester.tap(productionButton('server-stop'));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester, const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('再位置合わせの中止はtrackingへ戻りワークスペースを再表示する', (tester) async {
@@ -301,6 +361,64 @@ void main() {
     await socket.close();
     await settle(tester);
     await navigateFromDrawer(tester, 'nav-connection');
+    await tester.tap(productionButton('server-stop'));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester, const Duration(milliseconds: 100));
+  });
+
+  testWidgets('スマホ切断時は描画オーバーレイを閉じて再検索画面へ戻る', (tester) async {
+    final nativeCalls = mockNative(enterSucceeds: true);
+    final port = 20000 + Random().nextInt(20000);
+    await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
+    await tester.pump();
+
+    await tester.tap(productionButton('server-toggle'));
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('pairing-code')).evaluate().isNotEmpty,
+    );
+    final code =
+        tester
+            .widget<SelectableText>(find.byKey(const ValueKey('pairing-code')))
+            .data!;
+    final socket = await WebSocket.connect('ws://localhost:$port/ws/v1/input');
+    socket.listen((_) {});
+    socket.add(
+      jsonEncode({
+        'schemaVersion': 1,
+        'messageType': 'hello',
+        'deviceId': 'overlay-disconnect-phone',
+        'pairingToken': code,
+      }),
+    );
+    await waitFor(
+      tester,
+      () =>
+          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
+    );
+
+    await navigateFromDrawer(tester, 'nav-workspace');
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('overlay-enter')),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('workspace-page')).evaluate().isEmpty,
+    );
+    expect(nativeCalls, contains('enterOverlay'));
+
+    await socket.close();
+    await waitFor(
+      tester,
+      () => find.byKey(const ValueKey('connection-page')).evaluate().isNotEmpty,
+    );
+    expect(nativeCalls, contains('exitOverlay'));
+    expect(find.byKey(const ValueKey('server-toggle')), findsOneWidget);
+
     await tester.tap(productionButton('server-stop'));
     await settle(tester);
     await tester.pumpWidget(const SizedBox.shrink());

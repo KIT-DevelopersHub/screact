@@ -55,6 +55,9 @@ class OverlayWindowController {
     if (_disposed || !_available) return false;
     try {
       return await channel.invokeMethod<bool>('enterOverlay') ?? false;
+    } on MissingPluginException {
+      _available = false;
+      return false;
     } on PlatformException {
       return false;
     }
@@ -65,6 +68,8 @@ class OverlayWindowController {
     if (_disposed || !_available) return;
     try {
       await channel.invokeMethod('exitOverlay');
+    } on MissingPluginException {
+      _available = false;
     } on PlatformException {
       // 失敗してもUI側は通常モードへ戻す（ネイティブ側の脱出経路が別にある）
     }

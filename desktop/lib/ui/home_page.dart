@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,12 +8,14 @@ import '../core/calibration_config.dart';
 import '../core/interaction_engine.dart';
 import '../core/pointer_state.dart';
 import '../net/connection_log.dart';
+import '../net/discovery.dart';
 import '../net/input_server.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
 import 'overlay_canvas.dart';
+import 'pairing_controller.dart';
 import 'production_design.dart';
 
 enum DesktopSection { connection, calibration, workspace, settings }
@@ -25,7 +28,19 @@ class HomePage extends StatefulWidget {
   /// テスト用のポート差し替え。nullならYUBI_PORT、未指定時は8765。
   final int? port;
 
-  const HomePage({super.key, this.port});
+  /// ペアリング状態を決定的に駆動するテスト用差し替え。
+  /// 省略時は現在のIP・待受ポート・6桁コードでUDP offerを送る。
+  final PairingController? pairingController;
+
+  /// OS入力権限を決定的に駆動するテスト用差し替え。
+  final DesktopBridge? desktopBridge;
+
+  const HomePage({
+    super.key,
+    this.port,
+    this.pairingController,
+    this.desktopBridge,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -43,13 +58,14 @@ class _HomePageState extends State<HomePage> {
   final _calibConfig = CalibrationConfig.forCalibrationTarget();
   late final _engine = InteractionEngine(config: _calibConfig);
   final _overlay = OverlayModel();
-  final _bridge = DesktopBridge.forPlatform();
+  late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
   final _connLog = ConnectionLog();
 
   late final TextEditingController _ipController;
   late final TextEditingController _portController;
   late final OverlayWindowController _overlayWin;
+  late final PairingController _pairing;
 
   InputServer? _server;
   InputServer? _startingServerInstance;
@@ -66,6 +82,8 @@ class _HomePageState extends State<HomePage> {
   bool _startingServer = false;
   bool _overlayOn = false;
   bool _overlayAvailable = false;
+  bool? _accessibilityTrusted;
+  bool _checkingAccessibility = false;
   bool _autoFlowFired = false;
   bool _disposed = false;
   double _workspaceZoom = 1;
@@ -89,11 +107,17 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _configuredPort = widget.port ?? _environmentPort;
+    _bridge = widget.desktopBridge ?? DesktopBridge.forPlatform();
     _ipController = TextEditingController();
     _portController = TextEditingController(text: '$_configuredPort');
     _draftSensitivity = _engine.recognitionSensitivity;
     _draftSmoothing = _engine.smoothingEnabled;
     _syncCalibrationDraftFromConfig();
+
+    _pairing =
+        widget.pairingController ??
+        PairingController(discoveryFactory: _createDiscovery);
+    _pairing.addListener(_handlePairingChanged);
 
     _overlayWin = OverlayWindowController(
       onExited: _handleOverlayExited,
@@ -109,12 +133,15 @@ class _HomePageState extends State<HomePage> {
     _connLog.addListener(_handleLogChanged);
     _connLog.init();
     _refreshWifiIp();
-    if (_autoFlow) scheduleMicrotask(_startServer);
+    if (Platform.isMacOS) unawaited(_refreshAccessibility());
+    if (_autoFlow) scheduleMicrotask(_startPairing);
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _pairing.removeListener(_handlePairingChanged);
+    _pairing.dispose();
     _flow.removeListener(_handleFlowChanged);
     _connLog.removeListener(_handleLogChanged);
     final server =
@@ -143,12 +170,30 @@ class _HomePageState extends State<HomePage> {
     if (!_disposed && mounted) setState(() {});
   }
 
+  void _handlePairingChanged() {
+    if (!_disposed && mounted) setState(() {});
+  }
+
   void _handleServerLog(String message) {
     if (!_disposed) _connLog.add(message);
   }
 
   void _handleServerEvents(List<InteractionEvent> events) {
     if (!_disposed) _applyEvents(events);
+  }
+
+  DesktopDiscovery _createDiscovery() {
+    final code = _pairingCode;
+    final wsPort = _server?.boundPort;
+    if (code == null || wsPort == null) {
+      throw StateError('接続情報の準備前に検索を開始しようとしました');
+    }
+    return DesktopDiscovery(
+      token: code,
+      wsPort: wsPort,
+      ip: _wifiIp,
+      onLog: _handleServerLog,
+    );
   }
 
   void _handleOverlayExited() {
@@ -166,6 +211,29 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _wifiIp = ip;
       _ipController.text = ip ?? '';
+    });
+  }
+
+  Future<void> _refreshAccessibility() async {
+    if (_checkingAccessibility) return;
+    _checkingAccessibility = true;
+    final trusted = await _bridge.accessibilityTrusted();
+    if (_disposed || !mounted) return;
+    setState(() {
+      _accessibilityTrusted = trusted;
+      _checkingAccessibility = false;
+    });
+  }
+
+  Future<void> _requestAccessibility() async {
+    if (_checkingAccessibility) return;
+    setState(() => _checkingAccessibility = true);
+    await _bridge.requestAccessibility();
+    final trusted = await _bridge.accessibilityTrusted();
+    if (_disposed || !mounted) return;
+    setState(() {
+      _accessibilityTrusted = trusted;
+      _checkingAccessibility = false;
     });
   }
 
@@ -194,6 +262,20 @@ class _HomePageState extends State<HomePage> {
       ),
       _ => event,
     };
+  }
+
+  /// WebSocket待受の成功後だけUDP offerを広告する。
+  /// 待受失敗時に検索だけが残る状態を作らない。
+  Future<void> _startPairing() async {
+    await _startServer();
+    if (_disposed || !mounted || !_running || _phoneConnected) return;
+    await _pairing.start();
+  }
+
+  Future<void> _retryPairing() async {
+    if (_disposed || !mounted || !_running || _phoneConnected) return;
+    setState(() => _serverError = null);
+    await _pairing.start();
   }
 
   Future<void> _startServer() async {
@@ -246,6 +328,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _stopServer() async {
+    // UDPタイマー/ソケットを先に止め、古いofferからの再接続を防ぐ。
+    _pairing.cancel();
     final server = _server;
     if (server == null) return;
     _stoppingServerInstance = server;
@@ -280,21 +364,39 @@ class _HomePageState extends State<HomePage> {
     if (_disposed || !mounted) return;
     final wasConnected = _phoneConnected;
     final wasCalibrating = _flow.showingTarget;
+    final justConnected = !wasConnected && status.clientId != null;
     setState(() {
       _status = status;
-      if (!wasConnected && status.clientId != null) {
+      if (justConnected) {
         _section =
             _engine.isCalibrated
                 ? DesktopSection.workspace
                 : DesktopSection.calibration;
       }
     });
+    if (justConnected) {
+      // helloの認証完了を接続確定とし、UDP広告はここで終了する。
+      // 位置合わせtargetは画面のボタンが押されるまで開始しない。
+      _pairing.onConnected();
+    }
     _flow.onEngineEpoch(_engine.calibrationCount);
     if (wasCalibrating && !_flow.showingTarget && _engine.isCalibrated) {
       _server?.acceptCalibrationMessages = false;
       setState(() => _section = DesktopSection.workspace);
-    } else if (wasConnected && status.clientId == null && _flow.showingTarget) {
-      _cancelCalibration();
+    } else if (wasConnected && status.clientId == null) {
+      // 実機側から切断された時も、全画面の位置合わせ／描画オーバーレイを
+      // 必ず閉じる。これを行わないと透明な操作窓だけが残り、再検索ボタンへ
+      // 戻れなくなる。
+      if (_flow.showingTarget) {
+        _cancelCalibration(sectionOverride: DesktopSection.connection);
+      } else {
+        final shouldExitOverlay = _overlayOn;
+        setState(() {
+          _overlayOn = false;
+          _section = DesktopSection.connection;
+        });
+        if (shouldExitOverlay) unawaited(_overlayWin.exit());
+      }
     }
     if (_autoFlow && !_autoFlowFired && status.clientId != null) {
       _autoFlowFired = true;
@@ -398,6 +500,9 @@ class _HomePageState extends State<HomePage> {
   void _goTo(DesktopSection section) {
     setState(() => _section = section);
     _scaffoldKey.currentState?.closeDrawer();
+    if (section == DesktopSection.settings && Platform.isMacOS) {
+      unawaited(_refreshAccessibility());
+    }
   }
 
   Widget _currentScreen() {
@@ -427,6 +532,32 @@ class _HomePageState extends State<HomePage> {
 
   Widget _connectionScreen() {
     final code = _running ? _pairingCode : null;
+    final pairingPhase = _pairing.phase;
+    final canRestartSearch =
+        _running &&
+        !_phoneConnected &&
+        (pairingPhase == PairingPhase.idle ||
+            pairingPhase == PairingPhase.timeout);
+    final retrying = pairingPhase == PairingPhase.timeout && canRestartSearch;
+    final primaryLabel = switch (pairingPhase) {
+      _ when _startingServer => '準備中',
+      PairingPhase.searching => '検索中',
+      PairingPhase.waitingConnect => '接続待ち',
+      PairingPhase.timeout when canRestartSearch => '再試行',
+      PairingPhase.idle when canRestartSearch => '再検索',
+      _ => '始める',
+    };
+    final VoidCallback? primaryAction =
+        _startingServer ||
+                _phoneConnected ||
+                pairingPhase == PairingPhase.searching ||
+                pairingPhase == PairingPhase.waitingConnect
+            ? null
+            : canRestartSearch
+            ? _retryPairing
+            : _running
+            ? null
+            : _startPairing;
     return _designCanvas(
       key: const ValueKey('connection-page'),
       children: [
@@ -464,16 +595,19 @@ class _HomePageState extends State<HomePage> {
         Positioned(
           top: 472,
           left: 330,
-          child: ProductionButton(
-            key: const ValueKey('server-toggle'),
-            width: 430,
-            height: 78,
-            label: _startingServer ? '準備中' : '始める',
-            icon: Icons.edit_outlined,
-            onPressed: _running || _startingServer ? null : _startServer,
-            textStyle: const TextStyle(
-              fontSize: 38,
-              fontWeight: FontWeight.w800,
+          child: KeyedSubtree(
+            key: retrying ? const ValueKey('pairing-retry') : null,
+            child: ProductionButton(
+              key: const ValueKey('server-toggle'),
+              width: 430,
+              height: 78,
+              label: primaryLabel,
+              icon: retrying ? Icons.refresh_rounded : Icons.edit_outlined,
+              onPressed: primaryAction,
+              textStyle: const TextStyle(
+                fontSize: 38,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ),
@@ -500,6 +634,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               Text(
                 _connectionStatusLabel(),
+                key: const ValueKey('pairing-status'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 34,
@@ -603,7 +738,14 @@ class _HomePageState extends State<HomePage> {
   String _connectionStatusLabel() {
     if (_startingServer) return '接続を準備しています・・・';
     if (!_running) return '接続を開始してください';
-    if (!_phoneConnected) return 'スマホの接続待ち・・・';
+    if (!_phoneConnected) {
+      return switch (_pairing.phase) {
+        PairingPhase.searching => 'スマホを検索しています・・・',
+        PairingPhase.waitingConnect => 'スマホを検出しました。接続を待っています・・・',
+        PairingPhase.timeout => 'スマホが見つかりません。再試行してください',
+        PairingPhase.idle => 'スマホの接続待ち・・・',
+      };
+    }
     if (_engine.isCalibrated && _status.mode == EngineMode.tracking) {
       return '操作できます';
     }
@@ -1052,6 +1194,46 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
+                if (Platform.isMacOS && _accessibilityTrusted == false) ...[
+                  const Divider(thickness: 1.5),
+                  Row(
+                    key: const ValueKey('accessibility-warning'),
+                    children: [
+                      const Icon(
+                        Icons.accessibility_new_rounded,
+                        size: 40,
+                        color: ProductionDesign.textColor,
+                      ),
+                      const SizedBox(width: 18),
+                      const Expanded(
+                        child: Text(
+                          'PCを指で操作するには、macOSの'
+                          'アクセシビリティ許可が必要です。',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 18),
+                      ProductionButton(
+                        key: const ValueKey('accessibility-request'),
+                        width: 330,
+                        height: 58,
+                        label:
+                            _checkingAccessibility ? '確認中...' : 'アクセシビリティを許可',
+                        onPressed:
+                            _checkingAccessibility
+                                ? null
+                                : _requestAccessibility,
+                        textStyle: const TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

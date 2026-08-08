@@ -1,8 +1,39 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:thehack_overlay/core/interaction_engine.dart';
 import 'package:thehack_overlay/main.dart';
+import 'package:thehack_overlay/platform/desktop_bridge.dart';
+import 'package:thehack_overlay/ui/home_page.dart';
 
 const _menuKey = ValueKey('desktop-header-menu');
+
+class _AccessibilityBridge implements DesktopBridge {
+  bool trusted = false;
+  int requestCount = 0;
+
+  @override
+  bool get isNativeBackend => true;
+
+  @override
+  String get name => 'macos test native';
+
+  @override
+  Future<bool> accessibilityTrusted() async => trusted;
+
+  @override
+  Future<void> requestAccessibility() async {
+    requestCount++;
+    trusted = true;
+  }
+
+  @override
+  Future<void> applyEvent(InteractionEvent e) async {}
+
+  @override
+  Future<void> setOverlayVisible(bool visible) async {}
+}
 
 Future<void> navigateFromDrawer(WidgetTester tester, String destination) async {
   await tester.tap(find.byKey(_menuKey));
@@ -35,6 +66,7 @@ void main() {
 
     expect(find.byKey(const ValueKey('connection-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('server-toggle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
     expect(find.byKey(_menuKey), findsOneWidget);
     expect(
       find.byKey(const ValueKey('desktop-header-settings')),
@@ -89,6 +121,11 @@ void main() {
         expectInViewport(
           tester,
           find.byKey(const ValueKey('server-toggle')),
+          viewport,
+        );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('pairing-status')),
           viewport,
         );
         final connectionCharacter = tester.getRect(
@@ -163,4 +200,38 @@ void main() {
       },
     );
   }
+
+  testWidgets('未許可なら設定画面からアクセシビリティを要求して再確認する', (tester) async {
+    if (!Platform.isMacOS) return;
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final bridge = _AccessibilityBridge();
+
+    await tester.pumpWidget(MaterialApp(home: HomePage(desktopBridge: bridge)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('desktop-header-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('accessibility-warning')), findsOneWidget);
+    expectInViewport(
+      tester,
+      find.byKey(const ValueKey('accessibility-request')),
+      const Size(800, 600),
+    );
+    expectInViewport(
+      tester,
+      find.byKey(const ValueKey('settings-save')),
+      const Size(800, 600),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('accessibility-request')));
+    await tester.pumpAndSettle();
+    expect(bridge.requestCount, 1);
+    expect(find.byKey(const ValueKey('accessibility-warning')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
 }

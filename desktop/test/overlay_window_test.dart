@@ -97,6 +97,7 @@ void main() {
       mockNative();
       await tester.pumpWidget(const YubiBoardApp());
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
       await navigateToWorkspace(tester);
       expect(find.byKey(const ValueKey('overlay-enter')), findsOneWidget);
 
@@ -117,6 +118,7 @@ void main() {
       final calls = mockNative();
       await tester.pumpWidget(const YubiBoardApp());
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pairing-status')), findsOneWidget);
       await navigateToWorkspace(tester);
 
       expect(overlayButton(), findsOneWidget);

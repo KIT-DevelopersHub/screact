@@ -53,6 +53,29 @@ class ProductionModelsTest {
     }
 
     @Test
+    fun `discovery waiting is visible only while disconnected`() {
+        val waiting = ProductionUiState(
+            camera = CameraUiState.READY,
+            pairing = PairingUiState.WAITING,
+        )
+
+        assertEquals(ProductionStage.DISCOVERY_WAITING, waiting.stage())
+        assertEquals(ProductionVisualState.DISCOVERY_WAITING, waiting.visualState())
+        assertEquals(
+            ProductionStage.CONNECTING,
+            waiting.copy(
+                connection = ConnectionSnapshot(ConnectionStatus.CONNECTING),
+            ).stage(),
+        )
+        assertEquals(
+            ProductionStage.READY,
+            waiting.copy(
+                connection = ConnectionSnapshot(ConnectionStatus.CONNECTED),
+            ).stage(),
+        )
+    }
+
+    @Test
     fun `ready visuals distinguish an active hand from idle tracking`() {
         val base = ProductionUiState(
             camera = CameraUiState.READY,

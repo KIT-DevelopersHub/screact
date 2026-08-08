@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Size
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -152,6 +153,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -264,6 +266,8 @@ class MainActivity : ComponentActivity() {
                     onOpenSystemSettings = ::openAppSettings,
                     onRetryCamera = ::startCamera,
                     onConnect = viewModel::connect,
+                    onStartAutoPairing = viewModel::startAutoPairing,
+                    onCancelAutoPairing = viewModel::cancelAutoPairing,
                     onCancelConnection = viewModel::disconnect,
                     onDisconnect = viewModel::disconnect,
                     onRetryNow = viewModel::retryNow,
@@ -290,6 +294,11 @@ class MainActivity : ComponentActivity() {
             cameraPermissionPermanentlyDenied = false
             startCamera()
         }
+    }
+
+    override fun onStop() {
+        viewModel.onAppBackgrounded()
+        super.onStop()
     }
 
     override fun onDestroy() {

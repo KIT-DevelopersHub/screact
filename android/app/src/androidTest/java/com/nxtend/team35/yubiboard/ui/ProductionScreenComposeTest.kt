@@ -51,6 +51,7 @@ class ProductionScreenComposeTest {
 
         composeRule.onNodeWithTag("production_camera_preview").assertIsDisplayed()
         composeRule.onNodeWithTag("production_character").assertIsDisplayed()
+        composeRule.onNodeWithTag("show_manual_connection").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
         composeRule.onNodeWithText("接続情報はPCアプリに\n表示されています！").assertIsDisplayed()
         val hostField = composeRule.onNodeWithTag("host_field")
@@ -70,6 +71,35 @@ class ProductionScreenComposeTest {
         connectButton.performClick()
 
         assertTrue(connectClicked)
+    }
+
+    @Test
+    fun autoPairingStartWaitingAndCancelStayOnProductionUi() {
+        val currentState = mutableStateOf(ProductionUiState(camera = CameraUiState.READY))
+        var startClicked = false
+        var cancelClicked = false
+        setScreenContent(
+            stateProvider = { currentState.value },
+            onStartAutoPairing = {
+                startClicked = true
+                currentState.value = currentState.value.copy(pairing = PairingUiState.WAITING)
+            },
+            onCancelAutoPairing = {
+                cancelClicked = true
+                currentState.value = currentState.value.copy(pairing = PairingUiState.IDLE)
+            },
+        )
+
+        composeRule.onNodeWithText("画面認識をはじめましょう").assertIsDisplayed()
+        composeRule.onNodeWithTag("auto_pair_button").assertIsDisplayed().performClick()
+        assertTrue(startClicked)
+
+        composeRule.onNodeWithText("PCからの接続を待っています").assertIsDisplayed()
+        composeRule.onNodeWithTag("pairing_progress").assertIsDisplayed()
+        composeRule.onNodeWithTag("cancel_pairing_button").assertIsDisplayed().performClick()
+        assertTrue(cancelClicked)
+        composeRule.onNodeWithTag("auto_pair_button").assertIsDisplayed()
+        assertGuideFitsViewport("自動検出待受")
     }
 
     @Test
@@ -199,6 +229,7 @@ class ProductionScreenComposeTest {
             },
         )
 
+        composeRule.onNodeWithTag("show_manual_connection").assertIsDisplayed().performClick()
         val connectButton = composeRule.onNodeWithTag("connect_button")
         assertNodeFitsViewport(connectButton, "入力エラー前の接続ボタン")
         connectButton.assertIsDisplayed()
@@ -220,7 +251,11 @@ class ProductionScreenComposeTest {
             ProductionVisualState.CAMERA_ERROR ->
                 composeRule.onNodeWithText("カメラを再起動").assertIsDisplayed()
             ProductionVisualState.CONNECTION_FORM ->
-                composeRule.onNodeWithTag("connect_button").assertIsDisplayed()
+                composeRule.onNodeWithTag("auto_pair_button").assertIsDisplayed()
+            ProductionVisualState.DISCOVERY_WAITING -> {
+                composeRule.onNodeWithTag("pairing_progress").assertIsDisplayed()
+                composeRule.onNodeWithTag("cancel_pairing_button").assertIsDisplayed()
+            }
             ProductionVisualState.CONNECTION_PROGRESS -> {
                 val action = if (state.stage() == ProductionStage.AUTO_CONNECTING) {
                     "接続先を変更"
@@ -310,12 +345,16 @@ class ProductionScreenComposeTest {
     private fun setScreen(
         state: ProductionUiState,
         onConnect: (String, String, String) -> String? = { _, _, _ -> null },
+        onStartAutoPairing: () -> Unit = {},
+        onCancelAutoPairing: () -> Unit = {},
         onDisconnect: () -> Unit = {},
         onRetryNow: () -> Unit = {},
         onChangeConnectionSettings: () -> Unit = {},
     ) = setScreenContent(
         stateProvider = { state },
         onConnect = onConnect,
+        onStartAutoPairing = onStartAutoPairing,
+        onCancelAutoPairing = onCancelAutoPairing,
         onDisconnect = onDisconnect,
         onRetryNow = onRetryNow,
         onChangeConnectionSettings = onChangeConnectionSettings,
@@ -324,6 +363,8 @@ class ProductionScreenComposeTest {
     private fun setScreenContent(
         stateProvider: () -> ProductionUiState,
         onConnect: (String, String, String) -> String? = { _, _, _ -> null },
+        onStartAutoPairing: () -> Unit = {},
+        onCancelAutoPairing: () -> Unit = {},
         onDisconnect: () -> Unit = {},
         onRetryNow: () -> Unit = {},
         onChangeConnectionSettings: () -> Unit = {},
@@ -341,6 +382,8 @@ class ProductionScreenComposeTest {
                     onOpenSystemSettings = {},
                     onRetryCamera = {},
                     onConnect = onConnect,
+                    onStartAutoPairing = onStartAutoPairing,
+                    onCancelAutoPairing = onCancelAutoPairing,
                     onCancelConnection = {},
                     onDisconnect = onDisconnect,
                     onRetryNow = onRetryNow,

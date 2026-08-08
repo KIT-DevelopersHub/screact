@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">YubiBoard</string>
+    <string name="app_name">Screact</string>
     <string name="camera_preview">背面カメラのプレビュー</string>
     <string name="camera_starting">カメラを起動中</string>
     <string name="camera_ready">カメラ準備完了</string>

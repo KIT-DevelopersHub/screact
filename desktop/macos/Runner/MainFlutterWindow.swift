@@ -4,6 +4,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var overlayMode: OverlayModeController?
+  private var desktopInput: DesktopInputController?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -13,6 +14,19 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     overlayMode = OverlayModeController(window: self, flutterViewController: flutterViewController)
+    // OSクリック/ドラッグ/スクロールの実注入（CGEvent）。channel: desktop_input。
+    desktopInput = DesktopInputController(
+      messenger: flutterViewController.engine.binaryMessenger)
+
+    // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
+    // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、
+    //   FlutterViewController 差し替えで xib の初期サイズも失われるため）。
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.title = "Screact"
+      self.setContentSize(NSSize(width: 1160, height: 740))
+      self.center()
+    }
 
     super.awakeFromNib()
   }
@@ -89,9 +103,16 @@ final class OverlayModeController: NSObject {
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
-    window.level = .screenSaver
+    // 全Space・他アプリのフルスクリーンより手前に居続ける。
+    // level は screenSaver より上の CGShieldingWindowLevel 級（最大級）。
+    window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
     window.ignoresMouseEvents = true
-    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    // canJoinAllSpaces: 全デスクトップに出る / fullScreenAuxiliary: 他アプリの
+    // フルスクリーン上にも重ねる / stationary: Space切替アニメで動かさない /
+    // ignoresCycle: Cmd+` のウィンドウ循環に含めない。
+    window.collectionBehavior = [
+      .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
+    ]
     flutterViewController?.backgroundColor = .clear
     if let screen = window.screen ?? NSScreen.main {
       window.setFrame(screen.frame, display: true)
@@ -135,7 +156,7 @@ final class OverlayModeController: NSObject {
     if let button = item.button {
       // deployment target 10.14 のため SF Symbol は使わずテキストで表示
       button.title = "✏"
-      button.toolTip = "YubiBoard オーバーレイ中（クリックで解除メニュー）"
+      button.toolTip = "Screact オーバーレイ中（クリックで解除メニュー）"
     }
     let menu = NSMenu()
     let exit = NSMenuItem(

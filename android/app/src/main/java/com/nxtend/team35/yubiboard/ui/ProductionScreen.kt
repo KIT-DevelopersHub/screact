@@ -35,6 +35,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -83,6 +84,8 @@ fun ProductionScreen(
     onOpenSystemSettings: () -> Unit,
     onRetryCamera: () -> Unit,
     onConnect: (String, String, String) -> String?,
+    onStartAutoPairing: () -> Unit,
+    onCancelAutoPairing: () -> Unit,
     onCancelConnection: () -> Unit,
     onDisconnect: () -> Unit,
     onRetryNow: () -> Unit,
@@ -95,6 +98,8 @@ fun ProductionScreen(
     var token by rememberSaveable { mutableStateOf("") }
     var formError by remember { mutableStateOf<String?>(null) }
     var showHelp by rememberSaveable { mutableStateOf(false) }
+    // 手動接続（IP・6桁コード入力）はブロードキャスト不達環境向けの逃げ道。
+    var showManual by rememberSaveable { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier
@@ -116,6 +121,15 @@ fun ProductionScreen(
                     onPortChange = { port = it.filter(Char::isDigit).take(5) },
                     onTokenChange = { token = it.filter(Char::isDigit).take(6) },
                     onConnect = { formError = onConnect(host, port, token) },
+                    showManual = showManual,
+                    onStartAutoPairing = { formError = null; onStartAutoPairing() },
+                    onCancelAutoPairing = onCancelAutoPairing,
+                    onShowManual = {
+                        onCancelAutoPairing()
+                        formError = null
+                        showManual = true
+                    },
+                    onHideManual = { formError = null; showManual = false },
                     onRequestCameraPermission = onRequestCameraPermission,
                     onOpenSystemSettings = onOpenSystemSettings,
                     onRetryCamera = onRetryCamera,
@@ -141,6 +155,15 @@ fun ProductionScreen(
                     onPortChange = { port = it.filter(Char::isDigit).take(5) },
                     onTokenChange = { token = it.filter(Char::isDigit).take(6) },
                     onConnect = { formError = onConnect(host, port, token) },
+                    showManual = showManual,
+                    onStartAutoPairing = { formError = null; onStartAutoPairing() },
+                    onCancelAutoPairing = onCancelAutoPairing,
+                    onShowManual = {
+                        onCancelAutoPairing()
+                        formError = null
+                        showManual = true
+                    },
+                    onHideManual = { formError = null; showManual = false },
                     onRequestCameraPermission = onRequestCameraPermission,
                     onOpenSystemSettings = onOpenSystemSettings,
                     onRetryCamera = onRetryCamera,
@@ -195,6 +218,11 @@ private fun ProductionGuidePanel(
     onPortChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onConnect: () -> Unit,
+    showManual: Boolean,
+    onStartAutoPairing: () -> Unit,
+    onCancelAutoPairing: () -> Unit,
+    onShowManual: () -> Unit,
+    onHideManual: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onOpenSystemSettings: () -> Unit,
     onRetryCamera: () -> Unit,
@@ -262,16 +290,36 @@ private fun ProductionGuidePanel(
                             compact = compact,
                             narrow = narrow,
                         )
-                        ProductionVisualState.CONNECTION_FORM -> ConnectionFormPanel(
+                        ProductionVisualState.CONNECTION_FORM -> {
+                            if (showManual) {
+                                ConnectionFormPanel(
+                                    state = state,
+                                    host = host,
+                                    port = port,
+                                    token = token,
+                                    formError = formError,
+                                    onHostChange = onHostChange,
+                                    onPortChange = onPortChange,
+                                    onTokenChange = onTokenChange,
+                                    onConnect = onConnect,
+                                    onHideManual = onHideManual,
+                                    compact = compact,
+                                    narrow = narrow,
+                                )
+                            } else {
+                                AutoPairingStartPanel(
+                                    state = state,
+                                    onStartAutoPairing = onStartAutoPairing,
+                                    onShowManual = onShowManual,
+                                    compact = compact,
+                                    narrow = narrow,
+                                )
+                            }
+                        }
+                        ProductionVisualState.DISCOVERY_WAITING -> DiscoveryWaitingPanel(
                             state = state,
-                            host = host,
-                            port = port,
-                            token = token,
-                            formError = formError,
-                            onHostChange = onHostChange,
-                            onPortChange = onPortChange,
-                            onTokenChange = onTokenChange,
-                            onConnect = onConnect,
+                            onCancelAutoPairing = onCancelAutoPairing,
+                            onShowManual = onShowManual,
                             compact = compact,
                             narrow = narrow,
                         )
@@ -322,7 +370,6 @@ private fun ProductionGuidePanel(
                         GuideFeedback(notice, compact = compact)
                     }
                 }
-
                 if (state.visualState() == ProductionVisualState.PLACEMENT) {
                     GuideCharacter(
                         compact = compact,
@@ -400,6 +447,99 @@ private fun CameraErrorPanel(
 }
 
 @Composable
+private fun AutoPairingStartPanel(
+    state: ProductionUiState,
+    onStartAutoPairing: () -> Unit,
+    onShowManual: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        // 実機の横向きスマホでは案内パネルが約300dp幅になる。ここだけは
+        // 1文字が次行へ孤立しない大きさに抑え、見出しを中央1行に収める。
+        compactFontSize = 21.sp,
+        compactLineHeight = 25.sp,
+        modifier = Modifier.fillMaxWidth(if (compact) 1f else 0.86f),
+    )
+    GuideCharacter(
+        compact = compact,
+        sizeOverride = if (compact) 68.dp else 116.dp,
+    )
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 12.dp else 22.dp))
+    GuideFilledButton(
+        text = "画面認識開始",
+        onClick = onStartAutoPairing,
+        compact = compact,
+        tag = "auto_pair_button",
+    )
+    TextButton(
+        onClick = onShowManual,
+        modifier = Modifier.testTag("show_manual_connection"),
+    ) {
+        Text(
+            text = "手動で接続する（IP・6桁コード）",
+            color = GuideBodyInk,
+            fontSize = if (compact) 12.sp else 15.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun DiscoveryWaitingPanel(
+    state: ProductionUiState,
+    onCancelAutoPairing: () -> Unit,
+    onShowManual: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        compactFontSize = 24.sp,
+        compactLineHeight = 28.sp,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.92f else 0.86f),
+    )
+    GuideCharacter(
+        compact = compact,
+        sizeOverride = if (compact) 62.dp else 108.dp,
+    )
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 9.dp else 16.dp))
+    LinearProgressIndicator(
+        color = GuideInk,
+        trackColor = Color.White.copy(alpha = 0.64f),
+        modifier = Modifier
+            .fillMaxWidth(if (compact) 0.76f else 0.70f)
+            .height(4.dp)
+            .testTag("pairing_progress"),
+    )
+    Spacer(Modifier.height(if (compact) 11.dp else 20.dp))
+    GuideOutlinedButton(
+        text = "キャンセル",
+        onClick = onCancelAutoPairing,
+        compact = compact,
+        tag = "cancel_pairing_button",
+    )
+    TextButton(
+        onClick = onShowManual,
+        modifier = Modifier.testTag("show_manual_connection"),
+    ) {
+        Text(
+            text = "手動で接続する（IP・6桁コード）",
+            color = GuideBodyInk,
+            fontSize = if (compact) 12.sp else 15.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
 private fun ConnectionFormPanel(
     state: ProductionUiState,
     host: String,
@@ -410,6 +550,7 @@ private fun ConnectionFormPanel(
     onPortChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onConnect: () -> Unit,
+    onHideManual: () -> Unit,
     compact: Boolean,
     narrow: Boolean,
 ) {
@@ -498,6 +639,17 @@ private fun ConnectionFormPanel(
         tag = "connect_button",
         widthFraction = if (compact) 0.66f else 0.60f,
     )
+    TextButton(
+        onClick = onHideManual,
+        modifier = Modifier.testTag("hide_manual_connection"),
+    ) {
+        Text(
+            text = "自動検出に戻る",
+            color = GuideBodyInk,
+            fontSize = if (compact) 12.sp else 15.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }
 
 @Composable
@@ -965,9 +1117,10 @@ private fun GuideHelpButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
 private fun stageTitle(state: ProductionUiState): String = when (state.stage()) {
     ProductionStage.CAMERA_PERMISSION -> "手の動きを読み取るためにカメラを使います"
     ProductionStage.CAMERA_ERROR -> "カメラを起動できません"
-    ProductionStage.CONNECT -> "PCに接続"
+    ProductionStage.CONNECT -> "画面認識をはじめましょう"
+    ProductionStage.DISCOVERY_WAITING -> "PCからの接続を待っています"
     ProductionStage.CONNECTING -> "PCに接続しています"
-    ProductionStage.AUTO_CONNECTING -> "前回のPCに接続しています"
+    ProductionStage.AUTO_CONNECTING -> "PCに自動接続しています"
     ProductionStage.CONNECTION_ERROR -> connectionErrorTitle(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "${state.connection.retryInSeconds ?: 0}秒後に再接続します"
     ProductionStage.CALIBRATION -> when (state.calibration) {
@@ -990,9 +1143,10 @@ private fun stageTitle(state: ProductionUiState): String = when (state.stage()) 
 private fun stageMessage(state: ProductionUiState): String = when (state.stage()) {
     ProductionStage.CAMERA_PERMISSION -> "背面カメラで手とPC画面のマーカーを検出します。"
     ProductionStage.CAMERA_ERROR -> "ほかのアプリがカメラを使用していないか確認してください。"
-    ProductionStage.CONNECT -> "接続情報はPCアプリに表示されています。"
+    ProductionStage.CONNECT -> "PC画面全体が映る位置に端末を固定して、ボタンを押してください。"
+    ProductionStage.DISCOVERY_WAITING -> "PC側で「スマホ設置完了」を押すと自動で接続されます。"
     ProductionStage.CONNECTING -> "通常は5秒以内に応答します。"
-    ProductionStage.AUTO_CONNECTING -> "保存済みの信頼済み接続情報を使用しています。"
+    ProductionStage.AUTO_CONNECTING -> "保存済み、または自動検出した接続情報を使用しています。"
     ProductionStage.CONNECTION_ERROR -> connectionErrorMessage(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "PCとの接続が切れました。"
     ProductionStage.CALIBRATION -> "PC画面の4隅がすべて映るように端末を固定してください。"
@@ -1105,6 +1259,10 @@ fun productionStateLabSamples(): List<StateLabSample> {
         StateLabSample("権限", ProductionUiState(camera = CameraUiState.PERMISSION_REQUIRED)),
         StateLabSample("カメラ異常", ProductionUiState(camera = CameraUiState.ERROR)),
         StateLabSample("接続", ProductionUiState(camera = CameraUiState.READY)),
+        StateLabSample(
+            "検出待受",
+            ProductionUiState(camera = CameraUiState.READY, pairing = PairingUiState.WAITING),
+        ),
         StateLabSample("接続中", ProductionUiState(CameraUiState.READY, ConnectionSnapshot(ConnectionStatus.CONNECTING))),
         StateLabSample(
             "自動接続中",
@@ -1179,6 +1337,8 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     onOpenSystemSettings = { lastAction = "Android設定" },
                     onRetryCamera = { lastAction = "カメラ再起動" },
                     onConnect = { _, _, _ -> lastAction = "接続"; null },
+                    onStartAutoPairing = { lastAction = "画面認識開始" },
+                    onCancelAutoPairing = { lastAction = "待受キャンセル" },
                     onCancelConnection = { lastAction = "キャンセル" },
                     onDisconnect = { lastAction = "切断" },
                     onRetryNow = { lastAction = "今すぐ再接続" },

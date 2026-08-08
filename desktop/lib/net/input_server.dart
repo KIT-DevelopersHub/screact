@@ -39,6 +39,9 @@ class InputServer {
   final void Function(HandFrame)? onFrame;
   final int port;
 
+  /// WebSocket確立後、helloを送らない接続が単一クライアント枠を占有できる時間。
+  final Duration helloTimeout;
+
   /// 6桁ペアリングコード（null なら照合しない）。UIがサーバ開始時に生成して表示する。
   final String? pairingCode;
 
@@ -54,6 +57,7 @@ class InputServer {
 
   HttpServer? _http;
   WebSocket? _socket;
+  Timer? _helloTimer;
   String? _sessionId;
   String? _clientId;
   int _frames = 0;
@@ -70,6 +74,7 @@ class InputServer {
     required this.onStatus,
     this.onFrame,
     this.port = 8765,
+    this.helloTimeout = const Duration(seconds: 5),
     this.pairingCode,
     this.enforcePairing = true,
     this.acceptCalibrationMessages = true,
@@ -132,31 +137,49 @@ class InputServer {
   }
 
   void _attach(WebSocket ws, String from) {
-    // 単一クライアント運用（single_user）。既存があれば置き換える。
-    if (_socket != null) _log('既存接続を置き換え（新しい接続を優先）');
-    _socket?.close();
+    // single_user: 最初に到着したソケットが接続枠を確保する。後着接続で
+    // 現在の操作端末を追い出すと、同じ offer を受けた複数端末が互いを切断し
+    // 続けるため、既存接続は維持して後着側だけを明示的に拒否する。
+    if (_socket != null) {
+      _log('後着接続を拒否 ($from): 既存端末が接続中 (server_busy)');
+      ws.listen((_) {}, onError: (_) {}, cancelOnError: true);
+      _sendTo(
+        ws,
+        const HelloError(
+          code: 'server_busy',
+          message: '別の端末が接続中です',
+          retryable: true,
+        ).toJson(),
+      );
+      unawaited(ws.close(4002, 'server_busy'));
+      return;
+    }
+
     _socket = ws;
-    _clientId = null;
-    _frames = 0;
+    _clearConnectionState(releaseInput: false);
+    _helloTimer = Timer(helloTimeout, () => _onHelloTimeout(ws, from));
     ws.listen(
-      (data) => _onMessage(data),
+      (data) => _onMessage(ws, data),
       onDone: () {
         _log(
           '切断 ($from) closeCode=${ws.closeCode ?? "-"} '
           'reason=${ws.closeReason ?? "-"}',
         );
-        _onClose();
+        _onClose(ws);
       },
       onError: (Object e) {
         _log('ソケットエラー ($from): $e');
-        _onClose();
+        _onClose(ws);
       },
       cancelOnError: true,
     );
     _emit();
   }
 
-  void _onMessage(dynamic data) {
+  void _onMessage(WebSocket source, dynamic data) {
+    // close/error の遅延通知や拒否済みソケットからのデータが、後から確立した
+    // 現在のセッションを変更しないよう、全受信をソケットidentityで守る。
+    if (!identical(_socket, source)) return;
     Map<String, dynamic> j;
     try {
       j = (jsonDecode(data as String) as Map).cast<String, dynamic>();
@@ -166,27 +189,35 @@ class InputServer {
       return;
     }
     final type = j['messageType'];
-    switch (type) {
-      case 'hello':
-        _onHello(Hello.fromJson(j));
-        break;
-      case 'hand_frame':
-        _enqueueFrame(HandFrame.fromJson(j));
-        break;
-      case 'calibration_markers':
-        _onCalibration(CalibrationMarkers.fromJson(j));
-        break;
-      case 'slide_corners':
-        _onSlideCorners(SlideCorners.fromJson(j));
-        break;
-      case 'heartbeat':
-        break; // 受信のみ（生存確認）
-      default:
-        _emit(error: 'unknown messageType: $type');
+    try {
+      switch (type) {
+        case 'hello':
+          _onHello(source, Hello.fromJson(j));
+          break;
+        case 'hand_frame':
+          _enqueueFrame(HandFrame.fromJson(j));
+          break;
+        case 'calibration_markers':
+          _onCalibration(CalibrationMarkers.fromJson(j));
+          break;
+        case 'slide_corners':
+          _onSlideCorners(SlideCorners.fromJson(j));
+          break;
+        case 'heartbeat':
+          break; // 受信のみ（生存確認）
+        default:
+          _emit(error: 'unknown messageType: $type');
+      }
+    } catch (error) {
+      // スキーマ不正なJSONでstream callbackを例外終了させず、その接続を
+      // hello timeout/次メッセージで回復可能な状態に保つ。
+      _log('不正メッセージを受信（無視）: type=$type error=$error');
+      _emit(error: 'invalid payload: $type');
     }
   }
 
-  void _onHello(Hello hello) {
+  void _onHello(WebSocket source, Hello hello) {
+    if (!identical(_socket, source)) return;
     _log(
       'hello 受信: deviceId=${hello.deviceId} '
       'version=${hello.clientVersion ?? "-"} '
@@ -197,18 +228,26 @@ class InputServer {
         pairingCode != null &&
         hello.pairingToken != pairingCode) {
       _log('hello_error 送信: 6桁コード不一致 → 切断 (端末: ${hello.deviceId})');
-      _send(
+      _sendTo(
+        source,
         const HelloError(
           code: 'pairing_code_mismatch',
           message: '6桁コードが一致しません',
         ).toJson(),
       );
-      _socket?.close(4001, 'pairing_code_mismatch');
-      _socket = null;
+      // close完了を待たず枠を解放する。遅れて届くこのソケットの onDone は
+      // _onClose のidentity guardにより、次の正常セッションを消さない。
+      if (identical(_socket, source)) {
+        _socket = null;
+        _clearConnectionState(releaseInput: false);
+      }
+      unawaited(source.close(4001, 'pairing_code_mismatch'));
       _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
       return;
     }
     _clientId = hello.deviceId;
+    _helloTimer?.cancel();
+    _helloTimer = null;
     _sessionId = 'session-${_randHex(8)}';
     _log(
       'hello_ack 送信: session=$_sessionId '
@@ -221,7 +260,7 @@ class InputServer {
       heightPx: 1080,
       calibrationRequired: !engine.isCalibrated,
     );
-    _send(ack.toJson());
+    _sendTo(source, ack.toJson());
     engine.mode =
         engine.isCalibrated ? EngineMode.tracking : EngineMode.calibration;
     _emit();
@@ -311,22 +350,64 @@ class InputServer {
 
   void _send(Map<String, dynamic> j) => _socket?.add(jsonEncode(j));
 
-  void _onClose() {
+  static void _sendTo(WebSocket socket, Map<String, dynamic> j) {
+    socket.add(jsonEncode(j));
+  }
+
+  void _onClose(WebSocket source) {
+    // 旧ソケットの onDone/onError は非同期で遅れて届く。別のソケットが既に
+    // 接続済みなら、その現行session/client状態には一切触れない。
+    if (!identical(_socket, source)) return;
     _socket = null;
+    _clearConnectionState(releaseInput: true);
+    _emit();
+  }
+
+  void _onHelloTimeout(WebSocket source, String from) {
+    if (!identical(_socket, source) || _clientId != null) return;
+    _log('hello timeout ($from): 認証メッセージ未受信のため切断');
+    _sendTo(
+      source,
+      const HelloError(
+        code: 'hello_timeout',
+        message: '接続の初期化が時間切れになりました',
+        retryable: true,
+      ).toJson(),
+    );
+    _socket = null;
+    _clearConnectionState(releaseInput: false);
+    unawaited(source.close(4003, 'hello_timeout'));
+    _emit(error: 'helloを受信できず接続を終了しました');
+  }
+
+  void _clearConnectionState({required bool releaseInput}) {
+    _helloTimer?.cancel();
+    _helloTimer = null;
+    _sessionId = null;
     _clientId = null;
+    _frames = 0;
+    _lastFrameId = null;
+    _handDetected = false;
+    _pending = null;
+    if (!releaseInput) return;
     onEvents(
       engine.onFrame(
         const HandFrame(frameId: -1, capturedAtMonotonicMs: 0, detected: false),
       ),
     );
-    _emit();
   }
 
   Future<void> stop() async {
     _log('サーバ停止');
-    await _socket?.close();
-    await _http?.close(force: true);
+    final socket = _socket;
+    final http = _http;
+    // close のコールバックより先にidentityを外して状態を消す。これにより
+    // stop完了時に古いsessionIdがstatusへ残らない。
+    _socket = null;
     _http = null;
+    _clearConnectionState(releaseInput: socket != null);
+    await socket?.close();
+    await http?.close(force: true);
     _emit(listening: false);
   }
 

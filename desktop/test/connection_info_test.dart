@@ -75,6 +75,7 @@ void main() {
     Future<InputServer> startServer({
       required String? code,
       bool enforce = true,
+      Duration helloTimeout = const Duration(seconds: 5),
       void Function(ServerStatus)? onStatus,
     }) async {
       final server = InputServer(
@@ -84,6 +85,7 @@ void main() {
         onStatus: onStatus ?? (_) {},
         pairingCode: code,
         enforcePairing: enforce,
+        helloTimeout: helloTimeout,
       );
       await server.start();
       addTearDown(server.stop);
@@ -158,6 +160,132 @@ void main() {
       ws.add(jsonEncode(hello('999999')));
       final m = await ack.timeout(const Duration(seconds: 5));
       expect(m['messageType'], 'hello_ack');
+    });
+
+    test('後着ソケットは server_busy で拒否され、先着セッションは維持される', () async {
+      ServerStatus latest = const ServerStatus();
+      final server = await startServer(
+        code: '123456',
+        onStatus: (status) => latest = status,
+      );
+      final (first, firstMessages) = await connect(server);
+      addTearDown(first.close);
+      final firstAck = firstMessages.firstWhere(
+        (m) => m['messageType'] == 'hello_ack',
+      );
+      first.add(jsonEncode(hello('123456')));
+      final ack = await firstAck.timeout(const Duration(seconds: 5));
+      final firstSession = ack['sessionId'];
+      expect(latest.clientId, 'pairing-test');
+
+      final (late, lateMessages) = await connect(server);
+      final lateEvents = <Map<String, dynamic>>[];
+      final lateDone = Completer<void>();
+      lateMessages.listen(lateEvents.add, onDone: lateDone.complete);
+      await lateDone.future.timeout(const Duration(seconds: 5));
+
+      expect(lateEvents, hasLength(1));
+      expect(lateEvents.single['messageType'], 'hello_error');
+      expect(lateEvents.single['code'], 'server_busy');
+      expect(lateEvents.single['retryable'], isTrue);
+      expect(latest.clientId, 'pairing-test');
+      expect(latest.sessionId, firstSession);
+
+      // 拒否側のonDone後も、現行ソケットへの送信が生きていることを確認する。
+      final control = firstMessages.firstWhere(
+        (m) => m['messageType'] == 'control_message',
+      );
+      server.requestMode('tracking');
+      expect(
+        (await control.timeout(const Duration(seconds: 5)))['mode'],
+        'tracking',
+      );
+    });
+
+    test('helloを送らない接続はtimeout後に枠を解放する', () async {
+      final server = await startServer(
+        code: '123456',
+        helloTimeout: const Duration(milliseconds: 80),
+      );
+      final (stalled, stalledMessages) = await connect(server);
+      addTearDown(stalled.close);
+      final timeoutError = stalledMessages.firstWhere(
+        (message) => message['messageType'] == 'hello_error',
+      );
+      expect(
+        (await timeoutError.timeout(const Duration(seconds: 5)))['code'],
+        'hello_timeout',
+      );
+
+      final (next, nextMessages) = await connect(server);
+      addTearDown(next.close);
+      final ack = nextMessages.firstWhere(
+        (message) => message['messageType'] == 'hello_ack',
+      );
+      next.add(jsonEncode(hello('123456')));
+      expect(
+        (await ack.timeout(const Duration(seconds: 5)))['sessionId'],
+        isNotNull,
+      );
+    });
+
+    test('拒否済み旧ソケットの遅延onDoneが新しいセッションを消さない', () async {
+      ServerStatus latest = const ServerStatus();
+      final server = await startServer(
+        code: '123456',
+        onStatus: (status) => latest = status,
+      );
+
+      final (rejected, rejectedMessages) = await connect(server);
+      final rejection = rejectedMessages.firstWhere(
+        (m) => m['messageType'] == 'hello_error',
+      );
+      rejected.add(jsonEncode(hello('000000')));
+      expect(
+        (await rejection.timeout(const Duration(seconds: 5)))['code'],
+        'pairing_code_mismatch',
+      );
+
+      // サーバはclose完了前に旧枠を解放する。直ちに正常接続を確立することで、
+      // 後から来る旧onDoneのidentity guardを回帰検証する。
+      final (current, currentMessages) = await connect(server);
+      addTearDown(current.close);
+      final currentAck = currentMessages.firstWhere(
+        (m) => m['messageType'] == 'hello_ack',
+      );
+      current.add(jsonEncode(hello('123456')));
+      final session =
+          (await currentAck.timeout(const Duration(seconds: 5)))['sessionId'];
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(latest.clientId, 'pairing-test');
+      expect(latest.sessionId, session);
+    });
+
+    test('現行ソケットのcloseとserver stopでsession状態を確実に消す', () async {
+      ServerStatus latest = const ServerStatus();
+      final server = await startServer(
+        code: '123456',
+        onStatus: (status) => latest = status,
+      );
+      final (ws, messages) = await connect(server);
+      final ack = messages.firstWhere((m) => m['messageType'] == 'hello_ack');
+      ws.add(jsonEncode(hello('123456')));
+      await ack.timeout(const Duration(seconds: 5));
+      expect(latest.sessionId, isNotNull);
+
+      await ws.close();
+      final sw = Stopwatch()..start();
+      while (latest.sessionId != null &&
+          sw.elapsed < const Duration(seconds: 5)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(latest.clientId, isNull);
+      expect(latest.sessionId, isNull);
+
+      await server.stop();
+      expect(latest.listening, isFalse);
+      expect(latest.clientId, isNull);
+      expect(latest.sessionId, isNull);
     });
 
     test('LAN側IP宛でも接続できる（0.0.0.0バインドの回帰）', () async {
