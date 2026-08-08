@@ -14,6 +14,16 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     overlayMode = OverlayModeController(window: self, flutterViewController: flutterViewController)
 
+    // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
+    // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、
+    //   FlutterViewController 差し替えで xib の初期サイズも失われるため）。
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.title = "YubiBoard"
+      self.setContentSize(NSSize(width: 1160, height: 740))
+      self.center()
+    }
+
     super.awakeFromNib()
   }
 }
