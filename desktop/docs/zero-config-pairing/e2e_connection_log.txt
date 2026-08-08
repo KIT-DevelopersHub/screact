@@ -1,0 +1,12 @@
+2026-08-08T15:19:10.671540 hand_frame 受信開始 (frameId=0)
+15:20:29 listen 開始: ws://0.0.0.0:18765/ws/v1/input (全インターフェースで待受・コード照合=ON)
+15:20:29 6桁コード: 797483
+2026-08-08T15:20:29.254344 [発見] UDPブロードキャスト開始 → 127.0.0.1:18766 (wsPort=18765)
+2026-08-08T15:20:29.284538 [発見] スマホ発見: Pixel 7 (mock) (127.0.0.1)
+2026-08-08T15:20:31.296426 [発見] 接続許可を送信: Pixel 7 (mock) (127.0.0.1:18766)
+2026-08-08T15:20:31.360031 http request from 127.0.0.1:62416 path=/ws/v1/input (WS upgrade要求)
+2026-08-08T15:20:31.371007 ws upgraded (127.0.0.1:62416) — WebSocket確立
+2026-08-08T15:20:31.381206 hello 受信: deviceId=mock-a version=0.1.0-mock token=(あり)
+2026-08-08T15:20:31.381980 hello_ack 送信: session=session-1789f737 calibrationRequired=true — 接続完了
+2026-08-08T15:20:34.398603 calibration_markers で位置合わせ成功 → set_mode tracking 送信
+2026-08-08T15:20:34.443775 hand_frame 受信開始 (frameId=0)
