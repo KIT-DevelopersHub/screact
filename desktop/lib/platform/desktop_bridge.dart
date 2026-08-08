@@ -12,11 +12,19 @@ abstract class DesktopBridge {
   String get name;
   bool get isNativeBackend;
 
-  /// 操作イベントをOSへ反映（ポインタ移動・押下・描画・スクロール等）。
+  /// 操作イベントをOSへ反映（ポインタ移動・OSクリック/ドラッグ・スクロール等）。
+  /// インク描画（draw*）はオーバーレイ専用でOSには注入しない。
   Future<void> applyEvent(InteractionEvent e);
 
   /// 透過クリックスルーのオーバーレイ窓の表示切替。
   Future<void> setOverlayVisible(bool visible);
+
+  /// OSクリック注入に必要なアクセシビリティ権限を持っているか。
+  /// （macOS: AXIsProcessTrusted。未対応OS/Noopでは true 扱い）。
+  Future<bool> accessibilityTrusted();
+
+  /// アクセシビリティ権限の許可プロンプトを出す（システム設定の一覧に登録）。
+  Future<void> requestAccessibility();
 
   /// 実行OSに応じたブリッジを返す。ネイティブ未接続時は Noop。
   static DesktopBridge forPlatform() {
@@ -36,6 +44,10 @@ class NoopDesktopBridge implements DesktopBridge {
   Future<void> applyEvent(InteractionEvent e) async {}
   @override
   Future<void> setOverlayVisible(bool visible) async {}
+  @override
+  Future<bool> accessibilityTrusted() async => true;
+  @override
+  Future<void> requestAccessibility() async {}
 }
 
 /// 各OSのネイティブプラグインへ MethodChannel で委譲する。
@@ -66,9 +78,18 @@ class _MethodChannelBridge implements DesktopBridge {
   @override
   bool get isNativeBackend => _native;
 
+  /// インク描画はオーバーレイ専用でOSに注入しない（OSへ流すのはポインタ移動・
+  /// クリック/ドラッグ・スクロールのみ）。
+  static const _overlayOnlyKinds = {
+    InteractionKind.drawDown,
+    InteractionKind.drawMove,
+    InteractionKind.drawUp,
+  };
+
   @override
   Future<void> applyEvent(InteractionEvent e) async {
     if (!_native) return;
+    if (_overlayOnlyKinds.contains(e.kind)) return;
     try {
       await _ch.invokeMethod('applyEvent', {
         'kind': e.kind.name,
@@ -82,6 +103,30 @@ class _MethodChannelBridge implements DesktopBridge {
     } on PlatformException catch (err) {
       debugPrint('desktop_bridge applyEvent error: ${err.message}');
     }
+  }
+
+  @override
+  Future<bool> accessibilityTrusted() async {
+    if (!_native) return false;
+    try {
+      final ok = await _ch.invokeMethod<bool>('accessibilityTrusted');
+      return ok ?? false;
+    } on MissingPluginException {
+      _native = false;
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> requestAccessibility() async {
+    if (!_native) return;
+    try {
+      await _ch.invokeMethod('requestAccessibility');
+    } on MissingPluginException {
+      _native = false;
+    } on PlatformException catch (_) {}
   }
 
   @override

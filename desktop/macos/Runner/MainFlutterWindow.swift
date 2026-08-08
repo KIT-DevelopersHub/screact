@@ -4,6 +4,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var overlayMode: OverlayModeController?
+  private var desktopInput: DesktopInputController?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -13,6 +14,9 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     overlayMode = OverlayModeController(window: self, flutterViewController: flutterViewController)
+    // OSクリック/ドラッグ/スクロールの実注入（CGEvent）。channel: desktop_input。
+    desktopInput = DesktopInputController(
+      messenger: flutterViewController.engine.binaryMessenger)
 
     // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
     // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、
@@ -99,9 +103,16 @@ final class OverlayModeController: NSObject {
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
-    window.level = .screenSaver
+    // 全Space・他アプリのフルスクリーンより手前に居続ける。
+    // level は screenSaver より上の CGShieldingWindowLevel 級（最大級）。
+    window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
     window.ignoresMouseEvents = true
-    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    // canJoinAllSpaces: 全デスクトップに出る / fullScreenAuxiliary: 他アプリの
+    // フルスクリーン上にも重ねる / stationary: Space切替アニメで動かさない /
+    // ignoresCycle: Cmd+` のウィンドウ循環に含めない。
+    window.collectionBehavior = [
+      .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
+    ]
     flutterViewController?.backgroundColor = .clear
     if let screen = window.screen ?? NSScreen.main {
       window.setFrame(screen.frame, display: true)
