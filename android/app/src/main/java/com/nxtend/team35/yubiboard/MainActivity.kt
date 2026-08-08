@@ -301,6 +301,8 @@ class MainActivity : ComponentActivity() {
                         onOpenSystemSettings = ::openAppSettings,
                         onRetryCamera = ::startCamera,
                         onConnect = viewModel::connect,
+                        onStartAutoPairing = viewModel::startAutoPairing,
+                        onCancelAutoPairing = viewModel::cancelAutoPairing,
                         onCancelConnection = viewModel::disconnect,
                         onDisconnect = viewModel::disconnect,
                         onRetryNow = viewModel::retryNow,

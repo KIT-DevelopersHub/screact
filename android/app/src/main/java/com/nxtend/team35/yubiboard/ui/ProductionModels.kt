@@ -43,6 +43,15 @@ enum class TrackingUiState {
     LONG_LOST,
 }
 
+/** ゼロコンフィグ・ペアリング（UDP発見待受）の状態。 */
+enum class PairingUiState {
+    /** 待受していない（「画面認識開始」待ち）。 */
+    IDLE,
+
+    /** デスクトップのブロードキャストを待受中。 */
+    WAITING,
+}
+
 data class ProductionUiState(
     val camera: CameraUiState = CameraUiState.STARTING,
     val connection: ConnectionSnapshot = ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
@@ -50,6 +59,7 @@ data class ProductionUiState(
     val calibration: CalibrationUiState = CalibrationUiState.Inactive,
     val tracking: TrackingUiState = TrackingUiState.INACTIVE,
     val experience: ExperienceMode = ExperienceMode.PRODUCTION,
+    val pairing: PairingUiState = PairingUiState.IDLE,
     val indexTip: LandmarkPoint? = null,
     val markers: List<DetectedMarker> = emptyList(),
     val sourceWidth: Int = 0,
@@ -61,6 +71,7 @@ enum class ProductionStage {
     CAMERA_PERMISSION,
     CAMERA_ERROR,
     CONNECT,
+    DISCOVERY_WAITING,
     CONNECTING,
     CONNECTION_ERROR,
     RECONNECTING,
@@ -76,7 +87,8 @@ fun ProductionUiState.stage(): ProductionStage = when {
     connection.status == ConnectionStatus.RECONNECTING -> ProductionStage.RECONNECTING
     connection.status in setOf(ConnectionStatus.CONNECTING, ConnectionStatus.AWAITING_ACK) ->
         ProductionStage.CONNECTING
-    connection.status == ConnectionStatus.DISCONNECTED -> ProductionStage.CONNECT
+    connection.status == ConnectionStatus.DISCONNECTED ->
+        if (pairing == PairingUiState.WAITING) ProductionStage.DISCOVERY_WAITING else ProductionStage.CONNECT
     captureMode == CaptureMode.CALIBRATION -> ProductionStage.CALIBRATION
     else -> ProductionStage.READY
 }

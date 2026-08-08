@@ -25,6 +25,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -62,6 +63,8 @@ fun ProductionScreen(
     onOpenSystemSettings: () -> Unit,
     onRetryCamera: () -> Unit,
     onConnect: (String, String, String) -> String?,
+    onStartAutoPairing: () -> Unit,
+    onCancelAutoPairing: () -> Unit,
     onCancelConnection: () -> Unit,
     onDisconnect: () -> Unit,
     onRetryNow: () -> Unit,
@@ -74,6 +77,8 @@ fun ProductionScreen(
     var token by rememberSaveable { mutableStateOf("") }
     var formError by remember { mutableStateOf<String?>(null) }
     var showHelp by rememberSaveable { mutableStateOf(false) }
+    // 手動接続（IP・6桁コード入力）はブロードキャスト不達環境向けの逃げ道。
+    var showManual by rememberSaveable { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier
@@ -96,6 +101,15 @@ fun ProductionScreen(
                     onPortChange = { port = it.filter(Char::isDigit).take(5) },
                     onTokenChange = { token = it.filter(Char::isDigit).take(6) },
                     onConnect = { formError = onConnect(host, port, token) },
+                    showManual = showManual,
+                    onStartAutoPairing = { formError = null; onStartAutoPairing() },
+                    onCancelAutoPairing = onCancelAutoPairing,
+                    onShowManual = {
+                        onCancelAutoPairing()
+                        formError = null
+                        showManual = true
+                    },
+                    onHideManual = { formError = null; showManual = false },
                     onRequestCameraPermission = onRequestCameraPermission,
                     onOpenSystemSettings = onOpenSystemSettings,
                     onRetryCamera = onRetryCamera,
@@ -122,6 +136,15 @@ fun ProductionScreen(
                     onPortChange = { port = it.filter(Char::isDigit).take(5) },
                     onTokenChange = { token = it.filter(Char::isDigit).take(6) },
                     onConnect = { formError = onConnect(host, port, token) },
+                    showManual = showManual,
+                    onStartAutoPairing = { formError = null; onStartAutoPairing() },
+                    onCancelAutoPairing = onCancelAutoPairing,
+                    onShowManual = {
+                        onCancelAutoPairing()
+                        formError = null
+                        showManual = true
+                    },
+                    onHideManual = { formError = null; showManual = false },
                     onRequestCameraPermission = onRequestCameraPermission,
                     onOpenSystemSettings = onOpenSystemSettings,
                     onRetryCamera = onRetryCamera,
@@ -165,6 +188,11 @@ private fun ProductionGuidePanel(
     onPortChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onConnect: () -> Unit,
+    showManual: Boolean,
+    onStartAutoPairing: () -> Unit,
+    onCancelAutoPairing: () -> Unit,
+    onShowManual: () -> Unit,
+    onHideManual: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onOpenSystemSettings: () -> Unit,
     onRetryCamera: () -> Unit,
@@ -218,38 +246,63 @@ private fun ProductionGuidePanel(
                     }
                 }
                 ProductionStage.CONNECT, ProductionStage.CONNECTION_ERROR -> {
-                    OutlinedTextField(
-                        value = host,
-                        onValueChange = onHostChange,
-                        label = { Text("PCのIPまたはホスト名") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!showManual) {
+                        // ゼロコンフィグ: 1ボタンで待受開始（IP・コード入力なし）。
+                        Button(
+                            onClick = onStartAutoPairing,
+                            modifier = Modifier.fillMaxWidth().height(56.dp).testTag("auto_pair_button"),
+                        ) { Text("画面認識開始") }
+                        TextButton(onClick = onShowManual, modifier = Modifier.fillMaxWidth()) {
+                            Text("手動で接続する（IP・6桁コード）")
+                        }
+                    } else {
                         OutlinedTextField(
-                            value = port,
-                            onValueChange = onPortChange,
-                            label = { Text("ポート") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            value = host,
+                            onValueChange = onHostChange,
+                            label = { Text("PCのIPまたはホスト名") },
                             singleLine = true,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        OutlinedTextField(
-                            value = token,
-                            onValueChange = onTokenChange,
-                            label = { Text("6桁コード") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = port,
+                                onValueChange = onPortChange,
+                                label = { Text("ポート") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            OutlinedTextField(
+                                value = token,
+                                onValueChange = onTokenChange,
+                                label = { Text("6桁コード") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (!formError.isNullOrBlank()) {
+                            Text(formError, color = MaterialTheme.colorScheme.error)
+                        }
+                        Button(
+                            onClick = onConnect,
+                            modifier = Modifier.fillMaxWidth().height(52.dp).testTag("connect_button"),
+                        ) { Text("接続する") }
+                        TextButton(onClick = onHideManual, modifier = Modifier.fillMaxWidth()) {
+                            Text("自動検出に戻る")
+                        }
                     }
-                    if (!formError.isNullOrBlank()) {
-                        Text(formError, color = MaterialTheme.colorScheme.error)
+                }
+                ProductionStage.DISCOVERY_WAITING -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text("PCと同じWi-Fiに接続していれば、自動で見つかります。")
+                    OutlinedButton(
+                        onClick = onCancelAutoPairing,
+                        modifier = Modifier.fillMaxWidth().testTag("cancel_pairing_button"),
+                    ) { Text("キャンセル") }
+                    TextButton(onClick = onShowManual, modifier = Modifier.fillMaxWidth()) {
+                        Text("手動で接続する（IP・6桁コード）")
                     }
-                    Button(
-                        onClick = onConnect,
-                        modifier = Modifier.fillMaxWidth().height(52.dp).testTag("connect_button"),
-                    ) { Text("接続する") }
                 }
                 ProductionStage.CONNECTING -> {
                     Text("接続先  $host:$port")
@@ -309,7 +362,8 @@ private fun CalibrationProgress(state: CalibrationUiState) {
 private fun stageTitle(state: ProductionUiState): String = when (state.stage()) {
     ProductionStage.CAMERA_PERMISSION -> "手の動きを読み取るためにカメラを使います"
     ProductionStage.CAMERA_ERROR -> "カメラを起動できません"
-    ProductionStage.CONNECT -> "PCに接続"
+    ProductionStage.CONNECT -> "画面認識をはじめましょう"
+    ProductionStage.DISCOVERY_WAITING -> "PCからの接続を待っています"
     ProductionStage.CONNECTING -> "PCに接続しています"
     ProductionStage.CONNECTION_ERROR -> connectionErrorTitle(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "${state.connection.retryInSeconds ?: 0}秒後に再接続します"
@@ -332,7 +386,8 @@ private fun stageTitle(state: ProductionUiState): String = when (state.stage()) 
 private fun stageMessage(state: ProductionUiState): String = when (state.stage()) {
     ProductionStage.CAMERA_PERMISSION -> "背面カメラで手とPC画面のマーカーを検出します。"
     ProductionStage.CAMERA_ERROR -> "ほかのアプリがカメラを使用していないか確認してください。"
-    ProductionStage.CONNECT -> "接続情報はPCアプリに表示されています。"
+    ProductionStage.CONNECT -> "PC画面全体が映る位置に端末を固定して、ボタンを押してください。"
+    ProductionStage.DISCOVERY_WAITING -> "PC側で「スマホ設置完了」を押すと自動で接続されます。"
     ProductionStage.CONNECTING -> "通常は5秒以内に応答します。"
     ProductionStage.CONNECTION_ERROR -> connectionErrorMessage(state.connection.errorCode)
     ProductionStage.RECONNECTING -> "PCとの接続が切れました。"
@@ -405,6 +460,10 @@ fun productionStateLabSamples(): List<StateLabSample> {
         StateLabSample("権限", ProductionUiState(camera = CameraUiState.PERMISSION_REQUIRED)),
         StateLabSample("カメラ異常", ProductionUiState(camera = CameraUiState.ERROR)),
         StateLabSample("接続", ProductionUiState(camera = CameraUiState.READY)),
+        StateLabSample(
+            "検出待受",
+            ProductionUiState(camera = CameraUiState.READY, pairing = PairingUiState.WAITING),
+        ),
         StateLabSample("接続中", ProductionUiState(CameraUiState.READY, ConnectionSnapshot(ConnectionStatus.CONNECTING))),
         StateLabSample(
             "コード不一致",
@@ -469,6 +528,8 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     onOpenSystemSettings = { lastAction = "Android設定" },
                     onRetryCamera = { lastAction = "カメラ再起動" },
                     onConnect = { _, _, _ -> lastAction = "接続"; null },
+                    onStartAutoPairing = { lastAction = "画面認識開始" },
+                    onCancelAutoPairing = { lastAction = "待受キャンセル" },
                     onCancelConnection = { lastAction = "キャンセル" },
                     onDisconnect = { lastAction = "切断" },
                     onRetryNow = { lastAction = "今すぐ再接続" },

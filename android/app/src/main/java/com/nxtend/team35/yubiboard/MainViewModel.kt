@@ -5,9 +5,12 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import android.content.Context
+import android.net.wifi.WifiManager
 import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
+import com.nxtend.team35.yubiboard.network.DesktopDiscoveryListener
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
@@ -17,6 +20,7 @@ import com.nxtend.team35.yubiboard.ui.CalibrationRetryReason
 import com.nxtend.team35.yubiboard.ui.CalibrationUiState
 import com.nxtend.team35.yubiboard.ui.CameraUiState
 import com.nxtend.team35.yubiboard.ui.ExperienceMode
+import com.nxtend.team35.yubiboard.ui.PairingUiState
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
@@ -52,14 +56,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val savedHost: String get() = preferences.getString(KEY_HOST, "") ?: ""
     val savedPort: Int get() = preferences.getInt(KEY_PORT, DEFAULT_PORT)
 
+    private val deviceId = getOrCreateDeviceId()
+
     private val webSocketClient = YubiBoardWebSocketClient(
-        deviceId = getOrCreateDeviceId(),
+        deviceId = deviceId,
         clientVersion = BuildConfig.VERSION_NAME,
         onStateChanged = ::handleConnectionChanged,
         onModeChanged = ::handleModeChanged,
         onCalibrationStatus = ::handleCalibrationStatus,
         onLog = mutableLog::postValue,
     )
+
+    @Volatile
+    private var discoveryListener: DesktopDiscoveryListener? = null
 
     init {
         webSocketClient.setMaxFrameRate(currentSettings.maxSendFps)
@@ -78,7 +87,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return null
     }
 
-    fun disconnect() = webSocketClient.disconnect()
+    /**
+     * 「画面認識開始」: デスクトップのUDPブロードキャストの待受を開始する。
+     * デスクトップに選択されると自動で WebSocket 接続する（IP/コード入力なし）。
+     */
+    fun startAutoPairing() {
+        if (discoveryListener?.isRunning == true) return
+        val listener = DesktopDiscoveryListener(
+            deviceId = deviceId,
+            deviceName = android.os.Build.MODEL ?: "Android",
+            model = android.os.Build.MODEL ?: "Android",
+            onSelected = ::onDesktopSelected,
+            onLog = mutableLog::postValue,
+            multicastLock = createMulticastLock(),
+        )
+        val error = runCatching { listener.start() }.exceptionOrNull()
+        if (error != null) {
+            AppDiagnostics.event("discovery", "listen_failed", mapOf("message" to error.message))
+            mutableLog.postValue("自動検出を開始できませんでした。手動接続をお試しください")
+            return
+        }
+        discoveryListener = listener
+        updateProduction { it.copy(pairing = PairingUiState.WAITING) }
+    }
+
+    /** 待受のキャンセル（「画面認識開始」前の状態に戻す）。 */
+    fun cancelAutoPairing() {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE) }
+    }
+
+    private fun onDesktopSelected(host: String, wsPort: Int, token: String) {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE) }
+        connect(host, wsPort.toString(), token)?.let { error ->
+            mutableLog.postValue(error)
+        }
+    }
+
+    private fun stopDiscovery() {
+        discoveryListener?.stop()
+        discoveryListener = null
+    }
+
+    private fun createMulticastLock(): DesktopDiscoveryListener.Lock? = runCatching {
+        val wifi = getApplication<Application>()
+            .applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifi.createMulticastLock("screact-discovery").apply { setReferenceCounted(false) }
+        object : DesktopDiscoveryListener.Lock {
+            override fun acquire() = lock.acquire()
+            override fun release() {
+                if (lock.isHeld) lock.release()
+            }
+        }
+    }.getOrNull()
+
+    fun disconnect() {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE) }
+        webSocketClient.disconnect()
+    }
 
     fun retryNow() = webSocketClient.retryNow()
 
@@ -87,12 +155,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onNetworkAvailable() = webSocketClient.onNetworkAvailable()
 
     fun changeConnectionSettings() {
+        stopDiscovery()
         webSocketClient.disconnect()
         updateProduction {
             it.copy(
                 connection = ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
                 calibration = CalibrationUiState.Inactive,
                 tracking = TrackingUiState.INACTIVE,
+                pairing = PairingUiState.IDLE,
             )
         }
     }
@@ -307,6 +377,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        stopDiscovery()
         webSocketClient.close()
         super.onCleared()
     }
