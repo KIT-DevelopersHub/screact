@@ -6,7 +6,7 @@ void main() {
   runApp(const YubiBoardApp());
 }
 
-/// THE HACK 2026 / THE WIN — YubiBoard デスクトップ（共通Flutter層）。
+/// THE HACK 2026 / THE WIN — Screact（旧称YubiBoard）デスクトップ（共通Flutter層）。
 /// 各OSのネイティブ（複数ポインタ注入・透過オーバーレイ）は DesktopBridge の裏。
 class YubiBoardApp extends StatelessWidget {
   const YubiBoardApp({super.key});
@@ -15,7 +15,7 @@ class YubiBoardApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const seed = Color(0xFF2B6CB0);
     return MaterialApp(
-      title: 'YubiBoard Desktop',
+      title: 'Screact Desktop',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: seed,

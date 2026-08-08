@@ -1,4 +1,4 @@
-# YubiBoardドキュメント索引
+# Screact（旧称YubiBoard）ドキュメント索引
 
 プロジェクト文書を責任範囲ごとに分け、Androidとデスクトップの並行作業で同じMarkdownファイルを編集する機会を減らす。
 

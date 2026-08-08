@@ -19,7 +19,7 @@ class MainFlutterWindow: NSWindow {
     //   FlutterViewController 差し替えで xib の初期サイズも失われるため）。
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      self.title = "YubiBoard"
+      self.title = "Screact"
       self.setContentSize(NSSize(width: 1160, height: 740))
       self.center()
     }
@@ -145,7 +145,7 @@ final class OverlayModeController: NSObject {
     if let button = item.button {
       // deployment target 10.14 のため SF Symbol は使わずテキストで表示
       button.title = "✏"
-      button.toolTip = "YubiBoard オーバーレイ中（クリックで解除メニュー）"
+      button.toolTip = "Screact オーバーレイ中（クリックで解除メニュー）"
     }
     let menu = NSMenu()
     let exit = NSMenuItem(

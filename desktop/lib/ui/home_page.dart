@@ -282,7 +282,7 @@ class _HomePageState extends State<HomePage> {
             child: const Icon(Icons.gesture, color: Colors.white, size: 18),
           ),
           const SizedBox(width: 10),
-          const Text('YubiBoard',
+          const Text('Screact',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
           const SizedBox(width: 12),
           Text('スライドを、指先で。',

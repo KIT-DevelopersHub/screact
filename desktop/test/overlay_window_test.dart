@@ -92,13 +92,13 @@ void main() {
       // ホットキー相当: ネイティブから overlayEntered
       await pushNativeCall('overlayEntered');
       await tester.pump();
-      expect(find.text('YubiBoard'), findsNothing);
+      expect(find.text('Screact'), findsNothing);
       expect(find.text('オーバーレイ表示'), findsNothing);
 
       // メニューバー相当: ネイティブから overlayExited
       await pushNativeCall('overlayExited');
       await tester.pump();
-      expect(find.text('YubiBoard'), findsOneWidget);
+      expect(find.text('Screact'), findsOneWidget);
     });
 
     testWidgets('ボタン押下で enterOverlay がネイティブへ飛ぶ', (tester) async {
@@ -114,7 +114,7 @@ void main() {
       await tester.pump();
       expect(calls, contains('enterOverlay'));
       // オーバーレイモードに切り替わり、パネルは消えている
-      expect(find.text('YubiBoard'), findsNothing);
+      expect(find.text('Screact'), findsNothing);
     });
   });
 }

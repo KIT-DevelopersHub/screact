@@ -6,7 +6,7 @@ void main() {
   testWidgets('app boots and shows control surface', (tester) async {
     await tester.pumpWidget(const YubiBoardApp());
     await tester.pump();
-    expect(find.text('YubiBoard'), findsOneWidget);
+    expect(find.text('Screact'), findsOneWidget);
     expect(find.text('サーバ開始'), findsOneWidget);
     // 開発者向け要素は折りたたみ配下に移動したため、展開してから確認する。
     // SelectableText 内部にも Scrollable があるため、パネルの ListView を明示する
