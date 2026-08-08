@@ -95,8 +95,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (discoveryListener?.isRunning == true) return
         val listener = DesktopDiscoveryListener(
             deviceId = deviceId,
-            deviceName = android.os.Build.MODEL ?: "Android",
-            model = android.os.Build.MODEL ?: "Android",
+            deviceName = android.os.Build.MODEL.ifBlank { "Android" },
+            model = android.os.Build.MODEL.ifBlank { "Android" },
             onSelected = ::onDesktopSelected,
             onLog = mutableLog::postValue,
             multicastLock = createMulticastLock(),
