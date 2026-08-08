@@ -14,6 +14,10 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -83,6 +87,7 @@ import com.nxtend.team35.yubiboard.vision.ProductionOverlayView
 import com.nxtend.team35.yubiboard.ui.CameraUiState
 import com.nxtend.team35.yubiboard.ui.ProductionScreen
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
+import com.nxtend.team35.yubiboard.ui.SplashScreen
 import com.nxtend.team35.yubiboard.ui.ProductionStateLab
 
 class MainActivity : ComponentActivity() {
@@ -247,33 +252,46 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             YubiBoardTheme {
+                // スプラッシュは本番 UI の前段の装飾。裏で ProductionScreen を先に
+                // 組んでおき、GIF が終わってフェードアウトした瞬間にカメラが出ている
+                // ようにする（黒画面やチラつきを避ける）。
+                var showSplash by rememberSaveable { mutableStateOf(true) }
                 val productionState by viewModel.productionState.observeAsState(ProductionUiState())
-                ProductionScreen(
-                    state = productionState,
-                    savedHost = viewModel.savedHost,
-                    savedPort = viewModel.savedPort,
-                    hasTrustedPc = viewModel.hasTrustedPc,
-                    cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
-                    previewContent = {
-                        Box(Modifier.fillMaxSize()) {
-                            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                            AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
-                        }
-                    },
-                    onRequestCameraPermission = {
-                        permissionLauncher.launch(Manifest.permission.CAMERA)
-                    },
-                    onOpenSystemSettings = ::openAppSettings,
-                    onRetryCamera = ::startCamera,
-                    onConnect = viewModel::connect,
-                    onStartAutoPairing = viewModel::startAutoPairing,
-                    onCancelAutoPairing = viewModel::cancelAutoPairing,
-                    onCancelConnection = viewModel::disconnect,
-                    onDisconnect = viewModel::disconnect,
-                    onRetryNow = viewModel::retryNow,
-                    onChangeConnectionSettings = viewModel::changeConnectionSettings,
-                    onForgetTrustedPc = viewModel::forgetTrustedPc,
-                )
+                Box(Modifier.fillMaxSize().background(Color(0xFF101010))) {
+                    ProductionScreen(
+                        state = productionState,
+                        savedHost = viewModel.savedHost,
+                        savedPort = viewModel.savedPort,
+                        hasTrustedPc = viewModel.hasTrustedPc,
+                        cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
+                        previewContent = {
+                            Box(Modifier.fillMaxSize()) {
+                                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                                AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
+                            }
+                        },
+                        onRequestCameraPermission = {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        onOpenSystemSettings = ::openAppSettings,
+                        onRetryCamera = ::startCamera,
+                        onConnect = viewModel::connect,
+                        onStartAutoPairing = viewModel::startAutoPairing,
+                        onCancelAutoPairing = viewModel::cancelAutoPairing,
+                        onCancelConnection = viewModel::disconnect,
+                        onDisconnect = viewModel::disconnect,
+                        onRetryNow = viewModel::retryNow,
+                        onChangeConnectionSettings = viewModel::changeConnectionSettings,
+                        onForgetTrustedPc = viewModel::forgetTrustedPc,
+                    )
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = EnterTransition.None,
+                        exit = fadeOut(animationSpec = tween(durationMillis = 450)),
+                    ) {
+                        SplashScreen(onFinished = { showSplash = false })
+                    }
+                }
             }
         }
 
