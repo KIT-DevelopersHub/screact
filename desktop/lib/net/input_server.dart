@@ -45,6 +45,10 @@ class InputServer {
   /// コード照合を行うか（UIのトグルで切替可能・既定ON）。
   bool enforcePairing;
 
+  /// UIが全画面ターゲットを表示している間だけ位置合わせ入力を受け付ける。
+  /// 既定trueは既存の直接利用・テストとの互換性を保つ。
+  bool acceptCalibrationMessages;
+
   /// 接続診断ログ（UI/ファイルへ流す。null なら無効）。
   final void Function(String)? onLog;
 
@@ -68,6 +72,7 @@ class InputServer {
     this.port = 8765,
     this.pairingCode,
     this.enforcePairing = true,
+    this.acceptCalibrationMessages = true,
     this.onLog,
   });
 
@@ -84,8 +89,10 @@ class InputServer {
 
   Future<void> start() async {
     _http = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    _log('listen 開始: ws://0.0.0.0:${_http!.port}/ws/v1/input '
-        '(全インターフェースで待受・コード照合=${enforcePairing ? "ON" : "OFF"})');
+    _log(
+      'listen 開始: ws://0.0.0.0:${_http!.port}/ws/v1/input '
+      '(全インターフェースで待受・コード照合=${enforcePairing ? "ON" : "OFF"})',
+    );
     if (pairingCode != null) _log('6桁コード: $pairingCode');
     _emit(listening: true);
     _http!.listen((req) async {
@@ -97,13 +104,17 @@ class InputServer {
           // 圧縮拡張は必ずオフにする。Dart既定の permessage-deflate 応答
           // （client_max_window_bits付き）を Android の OkHttp が拒否し、
           // closeCode=1010 で即切断される（実機で確認した接続不可の根本原因）。
-          final ws = await WebSocketTransformer.upgrade(req,
-              compression: CompressionOptions.compressionOff);
+          final ws = await WebSocketTransformer.upgrade(
+            req,
+            compression: CompressionOptions.compressionOff,
+          );
           _log('ws upgraded ($from) — WebSocket確立');
           _attach(ws, from);
         } else {
-          _log('http request from $from path=${req.uri.path} '
-              '(upgrade無し→404: パス誤りか疎通確認)');
+          _log(
+            'http request from $from path=${req.uri.path} '
+            '(upgrade無し→404: パス誤りか疎通確認)',
+          );
           req.response.statusCode = HttpStatus.notFound;
           await req.response.close();
         }
@@ -130,8 +141,10 @@ class InputServer {
     ws.listen(
       (data) => _onMessage(data),
       onDone: () {
-        _log('切断 ($from) closeCode=${ws.closeCode ?? "-"} '
-            'reason=${ws.closeReason ?? "-"}');
+        _log(
+          '切断 ($from) closeCode=${ws.closeCode ?? "-"} '
+          'reason=${ws.closeReason ?? "-"}',
+        );
         _onClose();
       },
       onError: (Object e) {
@@ -174,18 +187,22 @@ class InputServer {
   }
 
   void _onHello(Hello hello) {
-    _log('hello 受信: deviceId=${hello.deviceId} '
-        'version=${hello.clientVersion ?? "-"} '
-        'token=${hello.pairingToken == null ? "(なし)" : "(あり)"}');
+    _log(
+      'hello 受信: deviceId=${hello.deviceId} '
+      'version=${hello.clientVersion ?? "-"} '
+      'token=${hello.pairingToken == null ? "(なし)" : "(あり)"}',
+    );
     // 6桁コード照合（不一致は hello_error で拒否して切断）。
     if (enforcePairing &&
         pairingCode != null &&
         hello.pairingToken != pairingCode) {
       _log('hello_error 送信: 6桁コード不一致 → 切断 (端末: ${hello.deviceId})');
-      _send(const HelloError(
-        code: 'pairing_code_mismatch',
-        message: '6桁コードが一致しません',
-      ).toJson());
+      _send(
+        const HelloError(
+          code: 'pairing_code_mismatch',
+          message: '6桁コードが一致しません',
+        ).toJson(),
+      );
       _socket?.close(4001, 'pairing_code_mismatch');
       _socket = null;
       _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
@@ -193,8 +210,10 @@ class InputServer {
     }
     _clientId = hello.deviceId;
     _sessionId = 'session-${_randHex(8)}';
-    _log('hello_ack 送信: session=$_sessionId '
-        'calibrationRequired=${!engine.isCalibrated} — 接続完了');
+    _log(
+      'hello_ack 送信: session=$_sessionId '
+      'calibrationRequired=${!engine.isCalibrated} — 接続完了',
+    );
     final ack = HelloAck(
       sessionId: _sessionId!,
       surfaceId: 'primary-display',
@@ -209,6 +228,10 @@ class InputServer {
   }
 
   void _onCalibration(CalibrationMarkers markers) {
+    if (!acceptCalibrationMessages) {
+      _emit();
+      return;
+    }
     if (!engine.config.acceptsAruco) {
       _emit(); // 設定で除外中のソースは静かに無視
       return;
@@ -227,6 +250,10 @@ class InputServer {
 
   /// スマホ検出のスライド四隅で位置合わせ（ArUcoなしの経路）。
   void _onSlideCorners(SlideCorners sc) {
+    if (!acceptCalibrationMessages) {
+      _emit();
+      return;
+    }
     if (!engine.config.acceptsSlideCorners) {
       _emit(); // 設定で除外中のソースは静かに無視
       return;
@@ -241,7 +268,12 @@ class InputServer {
     }
     // 安定判定の蓄積中はエラーにしない（退化した四隅だけを報告）。
     final degenerate = Homography.fromCorners(sc.corners) == null;
-    _emit(error: degenerate ? 'slide_corners calibration failed (degenerate quad)' : null);
+    _emit(
+      error:
+          degenerate
+              ? 'slide_corners calibration failed (degenerate quad)'
+              : null,
+    );
   }
 
   void _enqueueFrame(HandFrame f) {
@@ -282,8 +314,11 @@ class InputServer {
   void _onClose() {
     _socket = null;
     _clientId = null;
-    onEvents(engine.onFrame(const HandFrame(
-        frameId: -1, capturedAtMonotonicMs: 0, detected: false)));
+    onEvents(
+      engine.onFrame(
+        const HandFrame(frameId: -1, capturedAtMonotonicMs: 0, detected: false),
+      ),
+    );
     _emit();
   }
 
@@ -296,16 +331,18 @@ class InputServer {
   }
 
   void _emit({bool? listening, String? error}) {
-    onStatus(ServerStatus(
-      listening: listening ?? (_http != null),
-      clientId: _clientId,
-      sessionId: _sessionId,
-      mode: engine.mode,
-      frames: _frames,
-      lastFrameId: _lastFrameId,
-      handDetected: _handDetected,
-      lastError: error,
-    ));
+    onStatus(
+      ServerStatus(
+        listening: listening ?? (_http != null),
+        clientId: _clientId,
+        sessionId: _sessionId,
+        mode: engine.mode,
+        frames: _frames,
+        lastFrameId: _lastFrameId,
+        handDetected: _handDetected,
+        lastError: error,
+      ),
+    );
   }
 
   static String _randHex(int n) {

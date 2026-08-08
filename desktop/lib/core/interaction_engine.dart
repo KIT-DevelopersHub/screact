@@ -25,7 +25,11 @@ class InteractionEvent {
   final InteractionKind kind;
   final Vec2 screen;
   final Vec2 delta; // scroll 用
-  const InteractionEvent(this.kind, this.screen, {this.delta = const Vec2(0, 0)});
+  const InteractionEvent(
+    this.kind,
+    this.screen, {
+    this.delta = const Vec2(0, 0),
+  });
 }
 
 enum EngineMode { calibration, tracking }
@@ -35,6 +39,7 @@ enum EngineMode { calibration, tracking }
 class InteractionEngine {
   final GestureRecognizer _rec;
   final Vec2Filter _screenFilter;
+  bool _smoothingEnabled;
 
   /// キャリブレーションの調整値（インセット補正・安定判定・受付ソース）。
   /// UIの設定パネルから同一インスタンスを書き換えて反映する。
@@ -67,11 +72,40 @@ class InteractionEngine {
     GestureRecognizer? recognizer,
     this.mode = EngineMode.calibration,
     CalibrationConfig? config,
-  })  : _rec = recognizer ?? GestureRecognizer(),
-        _screenFilter = Vec2Filter(),
-        config = config ?? CalibrationConfig();
+    bool smoothingEnabled = true,
+  }) : _rec = recognizer ?? GestureRecognizer(),
+       _screenFilter = Vec2Filter(),
+       _smoothingEnabled = smoothingEnabled,
+       config = config ?? CalibrationConfig();
 
   bool get isCalibrated => _homography != null;
+
+  /// ピンチ認識の感度（0..1）。既定0.5は従来の比率ON=0.40/OFF=0.60。
+  double get recognitionSensitivity => _rec.recognitionSensitivity;
+
+  set recognitionSensitivity(double value) {
+    if (value == _rec.recognitionSensitivity) return;
+    _rec.recognitionSensitivity = value;
+    _resetRuntimeFilters();
+  }
+
+  /// falseでは画面座標をOne-Euroフィルタに通さず、そのまま操作へ使う。
+  bool get smoothingEnabled => _smoothingEnabled;
+
+  set smoothingEnabled(bool value) {
+    if (value == _smoothingEnabled) return;
+    _smoothingEnabled = value;
+    _resetRuntimeFilters();
+  }
+
+  /// 設定変更前のヒステリシスや平滑化履歴を次フレームへ持ち越さない。
+  /// 押下状態自体は保持し、次フレームの新しい設定による判定で安全に
+  /// pressMove / pressUpへ遷移させる。
+  void _resetRuntimeFilters() {
+    _rec.reset();
+    _screenFilter.reset();
+    _lastScrollAnchor = null;
+  }
 
   /// ArUcoマーカーからホモグラフィを作成（位置合わせ）。
   /// ID 10..13→画面四隅の対応付けとマーカーインセット外挿は config に従う。
@@ -133,17 +167,27 @@ class InteractionEngine {
     if (pose == null || !f.isValid) return _releaseAll();
 
     final t = f.capturedAtMonotonicMs;
-    final screen = _screenFilter.filter(_toScreen(pose.indexTip), t);
+    final rawScreen = _toScreen(pose.indexTip);
+    final screen =
+        _smoothingEnabled ? _screenFilter.filter(rawScreen, t) : rawScreen;
     final events = <InteractionEvent>[];
 
     // スクロール: 人差し指＋中指を立てて動かす（ピンチしていない時）。
-    final scrolling = !pose.pinching && pose.indexUp && pose.middleUp &&
+    final scrolling =
+        !pose.pinching &&
+        pose.indexUp &&
+        pose.middleUp &&
         pose.extendedFingers >= 2;
     if (scrolling) {
       if (_pressed) events.addAll(_endPress(screen));
       if (_lastScrollAnchor != null) {
-        events.add(InteractionEvent(InteractionKind.scroll, screen,
-            delta: screen - _lastScrollAnchor!));
+        events.add(
+          InteractionEvent(
+            InteractionKind.scroll,
+            screen,
+            delta: screen - _lastScrollAnchor!,
+          ),
+        );
       }
       _lastScrollAnchor = screen;
       _lastScreen = screen;
@@ -187,11 +231,19 @@ class InteractionEngine {
   List<InteractionEvent> _releaseAll() {
     final events = <InteractionEvent>[];
     if (_pressed) {
-      events.add(InteractionEvent(
-          InteractionKind.pressUp, _lastScreen ?? const Vec2(0, 0)));
+      events.add(
+        InteractionEvent(
+          InteractionKind.pressUp,
+          _lastScreen ?? const Vec2(0, 0),
+        ),
+      );
     }
-    events.add(InteractionEvent(
-        InteractionKind.release, _lastScreen ?? const Vec2(0, 0)));
+    events.add(
+      InteractionEvent(
+        InteractionKind.release,
+        _lastScreen ?? const Vec2(0, 0),
+      ),
+    );
     _pressed = false;
     _pressStart = null;
     _lastScrollAnchor = null;

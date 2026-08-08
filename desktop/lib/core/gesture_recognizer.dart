@@ -24,12 +24,40 @@ class HandPose {
 /// ON は比率 [pinchOnRatio] 未満、OFF は [pinchOffRatio] 超で判定し、
 /// 境界付近のチャタリング（線の途切れ・二重判定）を防ぐ。
 class GestureRecognizer {
-  final double pinchOnRatio;
-  final double pinchOffRatio;
+  /// UIで扱う認識感度。0は指同士をより近づけないとピンチにならず、
+  /// 1はより離れた状態でもピンチとして認識する。
+  ///
+  /// 既定値0.5では従来のON=0.40 / OFF=0.60をそのまま使う。
+  static const double defaultRecognitionSensitivity = 0.5;
+
+  double _recognitionSensitivity;
   bool _pinched = false;
 
-  GestureRecognizer({this.pinchOnRatio = 0.40, this.pinchOffRatio = 0.60})
-      : assert(pinchOnRatio < pinchOffRatio);
+  GestureRecognizer({
+    double recognitionSensitivity = defaultRecognitionSensitivity,
+  }) : _recognitionSensitivity = _validateRecognitionSensitivity(
+         recognitionSensitivity,
+       );
+
+  double get recognitionSensitivity => _recognitionSensitivity;
+
+  set recognitionSensitivity(double value) {
+    final validated = _validateRecognitionSensitivity(value);
+    if (validated == _recognitionSensitivity) return;
+    _recognitionSensitivity = validated;
+    reset();
+  }
+
+  /// 感度0..1を、幅0.20のヒステリシスを保ったピンチ比率へ写す。
+  double get pinchOnRatio => 0.20 + 0.40 * _recognitionSensitivity;
+  double get pinchOffRatio => 0.40 + 0.40 * _recognitionSensitivity;
+
+  static double _validateRecognitionSensitivity(double value) {
+    if (!value.isFinite || value < 0 || value > 1) {
+      throw RangeError.range(value, 0, 1, 'recognitionSensitivity');
+    }
+    return value;
+  }
 
   /// トラッキング喪失時などに呼び、ピンチ状態を初期化する。
   void reset() => _pinched = false;
@@ -53,7 +81,8 @@ class GestureRecognizer {
     final pinching = _pinched;
 
     bool up(int tip, int pip) =>
-        wrist.distanceTo(f.at(tip)!.xy) > wrist.distanceTo(f.at(pip)!.xy) * 1.02;
+        wrist.distanceTo(f.at(tip)!.xy) >
+        wrist.distanceTo(f.at(pip)!.xy) * 1.02;
     final indexUp = up(HandFrame.indexTip, 6);
     final middleUp = up(HandFrame.middleTip, 10);
     final ringUp = up(HandFrame.ringTip, 14);

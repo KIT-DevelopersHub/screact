@@ -25,6 +25,7 @@ class OverlayModel extends ChangeNotifier {
       case InteractionKind.pointerMove:
         cursor = e.screen;
         pressed = false;
+        _active = null;
         break;
       case InteractionKind.pressDown:
         cursor = e.screen;
