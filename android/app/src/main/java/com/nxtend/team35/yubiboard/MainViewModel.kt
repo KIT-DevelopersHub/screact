@@ -97,7 +97,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             deviceId = deviceId,
             deviceName = android.os.Build.MODEL.ifBlank { "Android" },
             model = android.os.Build.MODEL.ifBlank { "Android" },
-            onSelected = ::onDesktopSelected,
+            onConnect = ::onDesktopSelected,
             onLog = mutableLog::postValue,
             multicastLock = createMulticastLock(),
         )
@@ -118,9 +118,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun onDesktopSelected(host: String, wsPort: Int, token: String) {
-        // 待受はここでは止めない: Desktop は ACK を受信するまで select を再送する
-        // ため、リスナーを生かして重複 select に ACK を返し続ける（到達保証）。
-        // WebSocket が確立/終了したら handleConnectionChanged 側で stop する。
+        // offer 受信で PC の接続情報が揃ったので、UDP待受は閉じて WS 接続へ移る。
+        // 以後の再接続は WebSocketClient 自身が担う（生UDPに依存しない）。
+        stopDiscovery()
         updateProduction { it.copy(pairing = PairingUiState.IDLE) }
         connect(host, wsPort.toString(), token)?.let { error ->
             mutableLog.postValue(error)

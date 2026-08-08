@@ -8,15 +8,22 @@ import kotlin.concurrent.thread
 
 /**
  * 「画面認識開始」押下後の待受け。UDP :8766 で Desktop の discovery_offer を
- * 待ち、応答(discovery_response)を送信元へユニキャスト返信する。Desktop に
- * 選ばれる（discovery_select 受信）と ACK(discovery_select_ack) を返信した
- * うえで onSelected(host, wsPort, token) を1回呼ぶ。host は select の送信元
+ * 待ち、offer を受けた時点で **自分から** PC の WebSocket へ接続しに行く
+ * （onConnect(host, wsPort, token) を1回呼ぶ）。host は offer の送信元
  * アドレスを優先する（offer の ip フィールドは参考値）。
  *
- * select 受信後も待受は止めない: Desktop は ACK を受信するまで select を
- * 再送するため、重複 select に ACK を返し続ける必要がある（最初の ACK が
- * 落ちた場合の到達保証）。待受の終了は呼び出し側（ViewModel）が WebSocket
- * 確立後などに stop() で行う。
+ * 【接続の向きを反転した理由（TCC非依存化）】
+ * 実機で、PC(macOS)の「ローカルネットワーク」権限が未許可だと PC からの
+ * アウトバウンドUDP（discovery_select のユニキャスト/ブロードキャスト）が
+ * OSに落とされ、Android に届かないことを確認した（offer は届き response も
+ * 返るのに select だけ届かない非対称）。そこで PC→Android の生UDPユニ
+ * キャスト(select)を接続確立の必須経路から外し、offer に含まれる
+ * ip/wsPort/token を使って Android 側から WS を張る。Android→PC の
+ * アウトバウンド（response・WS hello）は生きているため権限に依存しない。
+ *
+ * response(discovery_response) は PC のUI/ログ表示用に最初の offer に対して
+ * 1回返す（接続自体は response に依存しない）。discovery_select を受けた
+ * 場合は後方互換で ACK を返すが、接続トリガにはしない。
  *
  * WifiManager.MulticastLock はブロードキャスト受信をフィルタする端末向け。
  * 呼び出し側（ViewModel）が acquire/release 可能な形で渡す（テストでは null）。
@@ -25,7 +32,7 @@ class DesktopDiscoveryListener(
     private val deviceId: String,
     private val deviceName: String,
     private val model: String,
-    private val onSelected: (host: String, wsPort: Int, token: String) -> Unit,
+    private val onConnect: (host: String, wsPort: Int, token: String) -> Unit,
     private val onLog: (String) -> Unit = {},
     private val port: Int = DISCOVERY_PORT,
     private val multicastLock: Lock? = null,
@@ -69,8 +76,7 @@ class DesktopDiscoveryListener(
 
     private fun loop(socket: DatagramSocket) {
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
-        var respondedOnce = false
-        var selectedOnce = false
+        var connectedOnce = false
         while (running) {
             val packet = DatagramPacket(buffer, buffer.size)
             try {
@@ -82,16 +88,16 @@ class DesktopDiscoveryListener(
             val text = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
             when (val message = DiscoveryCodec.parse(text)) {
                 is DiscoveryOffer -> {
-                    if (selectedOnce) continue // 選択済み: 以後の offer には応答しない
-                    if (!respondedOnce) {
-                        respondedOnce = true
-                        AppDiagnostics.event(
-                            "discovery",
-                            "offer_received",
-                            mapOf("from" to packet.address?.hostAddress, "wsPort" to message.wsPort),
-                        )
-                        onLog("PCを検出しました。選択を待っています…")
-                    }
+                    if (connectedOnce) continue // 接続開始済み: 以後の offer は無視
+                    // offer の送信元アドレスを最優先（NATや複数IFでも確実）。
+                    val host = packet.address?.hostAddress ?: message.ip ?: continue
+                    AppDiagnostics.event(
+                        "discovery",
+                        "offer_received",
+                        mapOf("from" to host, "wsPort" to message.wsPort),
+                    )
+                    onLog("PCを検出しました。自動で接続します…")
+                    // PC のUI/ログ表示用に response を1回返す（接続には不要）。
                     val reply = DiscoveryCodec.encode(
                         DiscoveryResponse(deviceId = deviceId, deviceName = deviceName, model = model),
                     ).toByteArray(Charsets.UTF_8)
@@ -100,13 +106,20 @@ class DesktopDiscoveryListener(
                     }.onFailure {
                         AppDiagnostics.event("discovery", "response_send_failed", mapOf("message" to it.message))
                     }
+                    // 接続の向きを反転: Android から PC の WS へ張りに行く。
+                    connectedOnce = true
+                    AppDiagnostics.event(
+                        "discovery",
+                        "connect_from_offer",
+                        mapOf("host" to host, "wsPort" to message.wsPort),
+                    )
+                    onConnect(host, message.wsPort, message.token)
                 }
 
                 is DiscoverySelect -> {
+                    // 後方互換: PC が select を送ってきたら ACK を返す（接続トリガ
+                    // にはしない。接続は offer 受信で既に開始している）。
                     if (message.deviceId != deviceId || !message.selected) continue
-                    val host = packet.address?.hostAddress ?: message.ip ?: continue
-                    // 到達保証: select を受けるたび（再送された重複分にも）ACK を
-                    // ユニキャスト返信する。Desktop は ACK 受信まで select を再送する。
                     val ack = DiscoveryCodec.encode(DiscoverySelectAck(deviceId = deviceId))
                         .toByteArray(Charsets.UTF_8)
                     runCatching {
@@ -114,22 +127,11 @@ class DesktopDiscoveryListener(
                         AppDiagnostics.event(
                             "discovery",
                             "select_ack_sent",
-                            mapOf("to" to packet.address?.hostAddress, "duplicate" to selectedOnce),
+                            mapOf("to" to packet.address?.hostAddress),
                         )
                     }.onFailure {
                         AppDiagnostics.event("discovery", "select_ack_send_failed", mapOf("message" to it.message))
                     }
-                    if (selectedOnce) continue // 自動接続の開始は最初の1回だけ
-                    selectedOnce = true
-                    AppDiagnostics.event(
-                        "discovery",
-                        "selected",
-                        mapOf("host" to host, "wsPort" to message.wsPort),
-                    )
-                    onLog("PCに選択されました。自動接続します")
-                    // 待受はここでは止めない（重複 select への ACK 返信を続ける）。
-                    // 終了は ViewModel が WebSocket 確立/切断時に stop() する。
-                    onSelected(host, message.wsPort, message.token)
                 }
 
                 is DiscoveryResponse, is DiscoverySelectAck, null -> Unit // 他端末の応答等は無視

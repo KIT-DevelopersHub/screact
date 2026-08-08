@@ -7,11 +7,17 @@
 
 ## 目次
 
-- [全体シーケンス](#全体シーケンス)
+- [全体シーケンス（現行・接続の向きを反転）](#全体シーケンス現行接続の向きを反転)
 - [画面遷移のトリガ一覧](#画面遷移のトリガ一覧)
+- [設計変遷（なぜ向きを反転したか）](#設計変遷なぜ向きを反転したか)
 - [実機で起きた不具合と対策（select ACK）](#実機で起きた不具合と対策select-ack)
 
-## 全体シーケンス
+## 全体シーケンス（現行・接続の向きを反転）
+
+**要点**: PC→Android の生UDPユニキャスト(select)は接続確立の経路に使わない。
+Android は offer を受けた時点で、offer 同梱の ip/wsPort/token を使って
+**自分から PC の WebSocket へ接続する**（Android→PC のアウトバウンドだけに
+依存＝macOSのローカルネットワーク権限に左右されない）。
 
 ```mermaid
 sequenceDiagram
@@ -31,35 +37,22 @@ sequenceDiagram
     Note over AU: pairing=WAITING → [DISCOVERY_WAITING]<br>「PCからの接続を待っています」
 
     Note over DU: [idle] 「スマホ設置完了」ボタン
-    DU->>WS: _startServer() (6桁token生成)
+    DU->>WS: _startServer() (6桁token生成・WS待受開始)
     DU->>PC: start()
     PC->>DD: start()
     Note over DU: phase=searching → 「スマホを探しています…」
 
-    loop 1秒ごと (offerInterval)
-        DD-->>AL: discovery_offer (broadcast 255.255.255.255 + subnet :8766)
-        AL-->>DD: discovery_response (unicast, deviceId/deviceName)
-    end
-    Note over PC: 最初のresponseで2秒の集約ウィンドウ<br>1台=自動選択 / 複数=選択UI(selecting)
-
-    PC->>DD: select(device)
-    Note over DU: phase=waitingConnect → 「(名前)と接続しています…」
-    loop 300msごと・最大20回 (ACK受信まで再送)
-        DD-->>AL: discovery_select (unicast + broadcast併送, deviceId/wsPort/token)
-        AL-->>DD: discovery_select_ack (unicast, deviceId)
-    end
-    Note over DD: ACK受信で再送停止（ログ「selectのACKを受信」）
-    Note over AL: 初回selectのみ onSelected 発火<br>重複selectにはACK返信のみ
-
-    AL->>AV: onSelected(host, wsPort, token)
+    DD-->>AL: discovery_offer (broadcast :8766, ip/wsPort/token)
+    Note over AL: 初回offerで確定:<br>host=offer送信元 / wsPort / token
+    AL-->>DD: discovery_response (PCのUI/ログ表示用・接続には不要)
+    AL->>AV: onConnect(host, wsPort, token)  ★向きを反転
     Note over AU: pairing=IDLE + status=CONNECTING → [CONNECTING]<br>「PCに接続しています」
-    AV->>AC: connect(host, wsPort, token)
-    AC->>WS: WebSocket接続 (ws://host:wsPort/ws/v1/input)
+    AV->>AL: stopDiscovery() (UDP待受終了・以後はWSが接続を担う)
+
+    AC->>WS: WebSocket接続 (ws://host:wsPort/ws/v1/input) ← Android発信
     AC->>WS: hello (deviceId, pairingToken=token)
     WS-->>AC: hello_ack (sessionId, calibrationRequired)
-
     Note over AC: sessionId確定 → status=CONNECTED
-    AV->>AL: stopDiscovery() (CONNECTED決着でUDP待受終了)
     Note over AU: [CALIBRATION]「4つのマーカーを映してください」<br>(calibrationRequired=false なら [READY])
 
     WS->>DU: onStatus(clientId≠null) = hello受領
@@ -71,6 +64,11 @@ sequenceDiagram
     Note over DU: ターゲット自動クローズ → [操作可能]
     Note over AU: [READY]「操作できます」
 ```
+
+> 補足: Desktop は後方互換のため offer 後に `discovery_select`(ユニキャスト＋
+> ブロードキャスト併送)＋ACK再送も従来どおり行うが、現行 Android は offer で
+> 既に接続を開始しているため select は接続の必須経路ではない（旧 Android
+> 向けの保険）。旧 Android が select を受けた場合は ACK を返すのみ。
 
 ## 画面遷移のトリガ一覧
 
@@ -92,12 +90,56 @@ sequenceDiagram
 |---|---|
 | CONNECT「画面認識をはじめましょう」 | 初期状態（DISCONNECTED × pairing=IDLE） |
 | DISCOVERY_WAITING「PCからの接続を待っています」 | 「画面認識開始」押下（pairing=WAITING） |
-| CONNECTING「PCに接続しています」 | **discovery_select受信**（`onSelected` → `connect` → status=CONNECTING/AWAITING_ACK） |
+| CONNECTING「PCに接続しています」 | **discovery_offer受信**（`onConnect` → `connect` → status=CONNECTING/AWAITING_ACK）★向き反転後 |
 | CALIBRATION「4つのマーカーを映して…」 | **hello_ack受信**（status=CONNECTED × calibrationRequired=true → CaptureMode.CALIBRATION） |
 | READY「操作できます」 | set_mode(tracking) 受信（位置合わせ完了）または calibrationRequired=false |
 | RECONNECTING | WS切断/接続失敗（status=RECONNECTING） |
 
+## 設計変遷（なぜ向きを反転したか）
+
+実機テストで3段階の対策を経て、最終的に「接続の向きの反転」に至った。以下は時系列。
+
+| 段階 | 症状 | 打った手 | 結果 |
+|---|---|---|---|
+| 初期 | PC=「接続しています」／Android=待ちのまま | — | selectがAndroidに届かず双方停止 |
+| 対策1 | 同上 | select ACK＋再送(最大20回) | 改善せず（selectそのものが届かない） |
+| 対策2 | 同上・警告カード表示 | selectをブロードキャスト併送＋権限案内 | 改善せず（PCアウトバウンドUDPが権限で全滅） |
+| 対策3 | — | 署名安定化＋Info.plist権限記述＋能動トリガ | TCC一覧に登録されず・プロンプトも出ず |
+| **対策4（現行）** | **解決** | **接続の向きを反転（offer駆動でAndroid→WS）** | TCC許可不要でペアリング成立 |
+
+### 真因（対策1〜3で確定）
+
+**macOSの「ローカルネットワーク」権限が未許可のとき、アプリからの LAN 宛て
+アウトバウンドUDP（ユニキャスト・ブロードキャストとも実機で全滅）が
+OSに落とされる。** 一方で inbound(offer受信→response)や、`flutter run`/未署名の
+debug .app では TCC 一覧への登録・プロンプト提示が安定せず、ユーザーが許可を
+付けることすらできなかった（対策3で確認）。よって **PC→Android のアウトバウンド
+UDP に依存する設計そのものが実機で不成立**。
+
+### 対策4 = 接続の向きを反転（TCC非依存）
+
+生きている経路だけで組み直した:
+
+- **PC→Android の offer(ブロードキャスト inbound to phone)は生きている**（実機で
+  response が返ることで実証済み）。
+- **Android→PC のアウトバウンド（TCP/WS）は生きている**。実機検証:
+  Mac で TCP:8765 を listen → 実機(192.168.17.211)から `nc` で接続 →
+  `ACCEPTED from ('192.168.17.211', ...)` ＋双方向データ授受を確認。**PCのWS
+  サーバの inbound accept は TCC の影響を受けない**。
+- したがって Android は offer を受けた時点で（offer 同梱の ip/wsPort/token を
+  使い）**自分から** WS を張る。PC→Android のユニキャスト(select)を接続経路から
+  完全に外した。
+
+### 検証（対策4）
+
+- 実機TCP到達性: Android→Mac の inbound TCP accept＋往復データ OK（上記）。
+- offer inbound to phone: 実機ログで response 返信を確認済み（従来から成立）。
+- 単体/結合: Android `DesktopDiscoveryListener` の offer駆動 onConnect テスト、
+  Desktop の `offer→Android自発WS接続→hello_ack→両側遷移` loopback E2E が green。
+
 ## 実機で起きた不具合と対策（select ACK）
+
+> 以下は対策1〜3の記録（現行は上記「対策4」で置換済み。selectは後方互換で残置）。
 
 ### 事象（2026-08 実機テスト）
 

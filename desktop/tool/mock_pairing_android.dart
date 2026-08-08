@@ -51,6 +51,7 @@ Future<void> main(List<String> args) async {
     if (j['app'] != 'screact') return;
     switch (j['messageType']) {
       case 'discovery_offer':
+        // PC表示用に response を返す（接続には不要）。
         for (var i = 0; i < devices; i++) {
           sock.send(
             utf8.encode(jsonEncode({
@@ -65,11 +66,23 @@ Future<void> main(List<String> args) async {
             dg.port,
           );
         }
+        // 接続の向きを反転: offer受信で自分からWSに接続する（実機と同じ）。
+        // 複数台モードでも接続するのは1台目(mock-a)だけにする。
+        if (respondOnly || connecting) return;
+        connecting = true;
+        stdout.writeln('offer received → connecting from mock-a '
+            '(token=${j['token']} wsPort=${j['wsPort']})');
+        _connectAndDrive(
+          host: dg.address.address,
+          port: (j['wsPort'] as num).toInt(),
+          token: j['token'] as String,
+          deviceId: 'mock-a',
+          calibDelay: calibDelay,
+        );
         break;
       case 'discovery_select':
+        // 後方互換: select が来たら ACK を返すだけ（接続はofferで開始済み）。
         final id = j['deviceId'];
-        stdout.writeln('selected: $id (token=${j['token']} wsPort=${j['wsPort']})');
-        // 実機同様に select には毎回 ACK を返す（PC は ACK 受信まで再送する）。
         sock.send(
           utf8.encode(jsonEncode({
             'app': 'screact',
@@ -79,15 +92,6 @@ Future<void> main(List<String> args) async {
           })),
           dg.address,
           dg.port,
-        );
-        if (respondOnly || connecting) return;
-        connecting = true;
-        _connectAndDrive(
-          host: dg.address.address,
-          port: (j['wsPort'] as num).toInt(),
-          token: j['token'] as String,
-          deviceId: id as String,
-          calibDelay: calibDelay,
         );
         break;
     }
