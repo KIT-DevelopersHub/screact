@@ -197,16 +197,25 @@ class DesktopDiscovery extends ChangeNotifier {
 
   Future<void> start() async {
     if (_socket != null) return;
-    final s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    s.broadcastEnabled = true;
-    _socket = s;
-    s.listen(_onSocketEvent);
-    _log('UDPブロードキャスト開始 → ${_targets.join(", ")}:$discoveryPort '
-        '(wsPort=$wsPort)');
-    _sendOffer();
-    _offerTimer = Timer.periodic(offerInterval, (_) {
+    // RawDatagramSocket.send の失敗（macOSのローカルネットワーク権限拒否時の
+    // EHOSTUNREACH 等）は同期 try/catch を素通りして zone に上がることがある。
+    // 発見はベストエフォートなので、ソケット起因の非同期例外は全てログに落として
+    // アプリを落とさない。
+    await runZonedGuarded(() async {
+      final s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      s.broadcastEnabled = true;
+      _socket = s;
+      s.listen(_onSocketEvent, onError: (Object e) => _log('受信エラー: $e'));
+      _log('UDPブロードキャスト開始 → ${_targets.join(", ")}:$discoveryPort '
+          '(wsPort=$wsPort)');
       _sendOffer();
-      _expireStale();
+      _offerTimer = Timer.periodic(offerInterval, (_) {
+        _sendOffer();
+        _expireStale();
+      });
+    }, (e, _) {
+      _log('発見ソケットエラー（継続）: $e '
+          '— macOSの「ローカルネットワーク」権限を確認してください');
     });
   }
 

@@ -69,6 +69,13 @@ class _HomePageState extends State<HomePage> {
   int get _discoveryPort => const int.fromEnvironment('YUBI_DISCOVERY_PORT',
       defaultValue: kDiscoveryPort);
 
+  /// UDP発見の送信先override（E2E検証用: 例 YUBI_DISCOVERY_BCAST=127.0.0.1）。
+  /// 未指定なら null（255.255.255.255＋サブネットブロードキャストを自動選定）。
+  static const String _discoveryBcast =
+      String.fromEnvironment('YUBI_DISCOVERY_BCAST');
+  List<String>? get _discoveryTargets =>
+      _discoveryBcast.isEmpty ? null : _discoveryBcast.split(',');
+
   /// スマホと接続済みか（hello 受領済み）。設置完了ボタン等の活性条件。
   bool get _phoneConnected => _status.clientId != null;
 
@@ -104,6 +111,7 @@ class _HomePageState extends State<HomePage> {
         wsPort: _server?.boundPort ?? _port,
         ip: _wifiIp,
         discoveryPort: _discoveryPort,
+        broadcastAddresses: _discoveryTargets,
         onLog: _connLog.add,
       ),
     );
