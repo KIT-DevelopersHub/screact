@@ -1,33 +1,42 @@
 package com.nxtend.team35.yubiboard.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,12 +49,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.nxtend.team35.yubiboard.BuildConfig
+import com.nxtend.team35.yubiboard.R
 import com.nxtend.team35.yubiboard.network.ConnectionErrorCode
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
@@ -68,7 +88,6 @@ fun ProductionScreen(
     onRetryNow: () -> Unit,
     onChangeConnectionSettings: () -> Unit,
     onForgetTrustedPc: () -> Unit,
-    onOpenDebug: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var host by rememberSaveable { mutableStateOf(savedHost.ifBlank { "127.0.0.1" }) }
@@ -80,13 +99,12 @@ fun ProductionScreen(
     BoxWithConstraints(
         modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .safeDrawingPadding(),
+            .background(Color(0xFFD8D8D8)),
     ) {
         val portrait = maxHeight >= maxWidth
         if (portrait) {
             Column(Modifier.fillMaxSize()) {
-                PreviewPane(Modifier.fillMaxWidth().weight(1f), previewContent)
+                PreviewPane(Modifier.fillMaxWidth().weight(0.85f), previewContent)
                 ProductionGuidePanel(
                     state = state,
                     host = host,
@@ -106,13 +124,12 @@ fun ProductionScreen(
                     onRetryNow = onRetryNow,
                     onChangeConnectionSettings = onChangeConnectionSettings,
                     onShowHelp = { showHelp = true },
-                    onOpenDebug = onOpenDebug,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1.15f),
                 )
             }
         } else {
             Row(Modifier.fillMaxSize()) {
-                PreviewPane(Modifier.weight(1.6f).fillMaxHeight(), previewContent)
+                PreviewPane(Modifier.weight(2.1f).fillMaxHeight(), previewContent)
                 ProductionGuidePanel(
                     state = state,
                     host = host,
@@ -132,7 +149,6 @@ fun ProductionScreen(
                     onRetryNow = onRetryNow,
                     onChangeConnectionSettings = onChangeConnectionSettings,
                     onShowHelp = { showHelp = true },
-                    onOpenDebug = onOpenDebug,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
@@ -141,11 +157,11 @@ fun ProductionScreen(
 
     if (showHelp) {
         HelpDialog(
-            canOpenDebug = BuildConfig.DEBUG,
             hasTrustedPc = hasTrustedPc,
+            isConnected = state.connection.status == ConnectionStatus.CONNECTED,
             onChangeConnectionSettings = { showHelp = false; onChangeConnectionSettings() },
+            onDisconnect = { showHelp = false; onDisconnect() },
             onForgetTrustedPc = { showHelp = false; onForgetTrustedPc() },
-            onOpenDebug = { showHelp = false; onOpenDebug() },
             onDismiss = { showHelp = false },
         )
     }
@@ -153,10 +169,19 @@ fun ProductionScreen(
 
 @Composable
 private fun PreviewPane(modifier: Modifier, content: @Composable () -> Unit) {
-    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(
+        modifier.background(Color(0xFFD8D8D8)).testTag("production_camera_preview"),
+        contentAlignment = Alignment.Center,
+    ) {
         content()
     }
 }
+
+private val GuideInk = Color(0xFF4A4A4A)
+private val GuideBodyInk = Color(0xFF686666)
+private val GuideButton = Color(0xFF686666)
+private val GuideField = Color(0xFFFFFDFD)
+private val GuideError = Color(0xFF9B3E3A)
 
 @Composable
 private fun ProductionGuidePanel(
@@ -178,144 +203,762 @@ private fun ProductionGuidePanel(
     onRetryNow: () -> Unit,
     onChangeConnectionSettings: () -> Unit,
     onShowHelp: () -> Unit,
-    onOpenDebug: () -> Unit,
     modifier: Modifier,
 ) {
-    Surface(modifier = modifier, tonalElevation = 4.dp) {
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stageTitle(state),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("production_title"),
-                    )
-                    Text(
-                        stageMessage(state),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = onShowHelp) { Text("設定・ヘルプ") }
-            }
+    BoxWithConstraints(modifier = modifier.background(Color.White)) {
+        // Phone landscape content is only about 400dp tall after system insets. Use the
+        // compact measurements before applying those insets so every state fits without scroll.
+        val compact = maxHeight < 520.dp
+        val narrow = maxWidth < 220.dp
+        val horizontalPadding = when {
+            narrow -> 12.dp
+            compact -> 14.dp
+            else -> 30.dp
+        }
+        val verticalPadding = if (compact) 6.dp else 22.dp
 
-            when (state.stage()) {
-                ProductionStage.CAMERA_PERMISSION -> {
-                    Text("映像自体はPCへ送信せず、端末内で手と位置合わせマーカーを解析します。")
-                    Button(
-                        onClick = if (cameraPermissionPermanentlyDenied) {
-                            onOpenSystemSettings
-                        } else {
-                            onRequestCameraPermission
-                        },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                    ) {
-                        Text(if (cameraPermissionPermanentlyDenied) "設定を開く" else "カメラを許可")
+        Image(
+            painter = painterResource(R.drawable.production_watercolor_background),
+            contentDescription = null,
+            contentScale = ContentScale.FillBounds,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Vertical + WindowInsetsSides.End,
+                    ),
+                ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("production_guide_viewport"),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .padding(horizontal = horizontalPadding, vertical = verticalPadding)
+                        .testTag("production_guide_content"),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    when (state.visualState()) {
+                        ProductionVisualState.CAMERA_PERMISSION -> CameraPermissionPanel(
+                            state = state,
+                            cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
+                            onRequestCameraPermission = onRequestCameraPermission,
+                            onOpenSystemSettings = onOpenSystemSettings,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.CAMERA_ERROR -> CameraErrorPanel(
+                            state = state,
+                            onRetryCamera = onRetryCamera,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.CONNECTION_FORM -> ConnectionFormPanel(
+                            state = state,
+                            host = host,
+                            port = port,
+                            token = token,
+                            formError = formError,
+                            onHostChange = onHostChange,
+                            onPortChange = onPortChange,
+                            onTokenChange = onTokenChange,
+                            onConnect = onConnect,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.CONNECTION_PROGRESS -> ConnectionProgressPanel(
+                            state = state,
+                            host = host,
+                            port = port,
+                            onCancelConnection = onCancelConnection,
+                            onChangeConnectionSettings = onChangeConnectionSettings,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.RECONNECTING -> ReconnectingPanel(
+                            state = state,
+                            onRetryNow = onRetryNow,
+                            onChangeConnectionSettings = onChangeConnectionSettings,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.PLACEMENT -> PlacementPanel(
+                            state = state,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.CALIBRATION_PROGRESS -> CalibrationPanel(
+                            state = state,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.READY_IDLE -> ReadyPanel(
+                            state = state,
+                            onDisconnect = onDisconnect,
+                            showActions = false,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                        ProductionVisualState.READY_ACTIVE -> ReadyPanel(
+                            state = state,
+                            onDisconnect = onDisconnect,
+                            showActions = true,
+                            compact = compact,
+                            narrow = narrow,
+                        )
+                    }
+
+                    state.notice?.takeIf(String::isNotBlank)?.let { notice ->
+                        Spacer(Modifier.height(if (compact) 6.dp else 12.dp))
+                        GuideFeedback(notice, compact = compact)
                     }
                 }
-                ProductionStage.CAMERA_ERROR -> {
-                    Button(onClick = onRetryCamera, modifier = Modifier.fillMaxWidth()) {
-                        Text("カメラを再起動")
-                    }
-                }
-                ProductionStage.CONNECT, ProductionStage.CONNECTION_ERROR -> {
-                    OutlinedTextField(
-                        value = host,
-                        onValueChange = onHostChange,
-                        label = { Text("PCのIPまたはホスト名") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+
+                if (state.visualState() == ProductionVisualState.PLACEMENT) {
+                    GuideCharacter(
+                        compact = compact,
+                        sizeOverride = if (compact) 68.dp else 112.dp,
+                        modifier = Modifier.align(Alignment.BottomEnd),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedTextField(
-                            value = port,
-                            onValueChange = onPortChange,
-                            label = { Text("ポート") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedTextField(
-                            value = token,
-                            onValueChange = onTokenChange,
-                            label = { Text("6桁コード") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (!formError.isNullOrBlank()) {
-                        Text(formError, color = MaterialTheme.colorScheme.error)
-                    }
-                    Button(
-                        onClick = onConnect,
-                        modifier = Modifier.fillMaxWidth().height(52.dp).testTag("connect_button"),
-                    ) { Text("接続する") }
                 }
-                ProductionStage.CONNECTING, ProductionStage.AUTO_CONNECTING -> {
-                    Text("接続先  $host:$port")
-                    OutlinedButton(onClick = onCancelConnection, modifier = Modifier.fillMaxWidth()) {
-                        Text("キャンセル")
-                    }
-                    if (state.stage() == ProductionStage.AUTO_CONNECTING) {
-                        TextButton(
-                            onClick = onChangeConnectionSettings,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("接続先を変更") }
-                    }
-                }
-                ProductionStage.RECONNECTING -> {
-                    Text("PCへ座標は送信されていません。カメラ解析は継続しています。")
-                    Button(onClick = onRetryNow, modifier = Modifier.fillMaxWidth()) {
-                        Text("今すぐ再接続")
-                    }
-                    OutlinedButton(onClick = onChangeConnectionSettings, modifier = Modifier.fillMaxWidth()) {
-                        Text("接続設定を変更")
-                    }
-                }
-                ProductionStage.CALIBRATION -> CalibrationProgress(state.calibration)
-                ProductionStage.READY -> {
-                    OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
-                        Text("PCから切断")
-                    }
-                }
-            }
-            if (state.notice != null) Text(state.notice)
-            if (BuildConfig.DEBUG && state.experience == ExperienceMode.PRODUCTION) {
-                TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.End)) {
-                    Text("デバッグへ戻る")
-                }
+
+                GuideHelpButton(
+                    onClick = onShowHelp,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CalibrationProgress(state: CalibrationUiState) {
+private fun CameraPermissionPanel(
+    state: ProductionUiState,
+    cameraPermissionPermanentlyDenied: Boolean,
+    onRequestCameraPermission: () -> Unit,
+    onOpenSystemSettings: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        compactFontSize = 22.sp,
+        compactLineHeight = 26.sp,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.90f else 0.86f),
+    )
+    GuideCharacter(
+        compact = compact,
+        sizeOverride = if (compact) 64.dp else 126.dp,
+    )
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
+    GuideSecondaryText(
+        "映像はPCへ送信せず、端末内で解析します。",
+        compact = compact,
+        narrow = narrow,
+    )
+    Spacer(Modifier.height(if (compact) 12.dp else 22.dp))
+    GuideFilledButton(
+        text = if (cameraPermissionPermanentlyDenied) "設定を開く" else "カメラを許可",
+        onClick = if (cameraPermissionPermanentlyDenied) {
+            onOpenSystemSettings
+        } else {
+            onRequestCameraPermission
+        },
+        compact = compact,
+    )
+}
+
+@Composable
+private fun CameraErrorPanel(
+    state: ProductionUiState,
+    onRetryCamera: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.76f else 0.86f),
+    )
+    GuideCharacter(compact = compact)
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 16.dp else 28.dp))
+    GuideFilledButton("カメラを再起動", onRetryCamera, compact = compact)
+}
+
+@Composable
+private fun ConnectionFormPanel(
+    state: ProductionUiState,
+    host: String,
+    port: String,
+    token: String,
+    formError: String?,
+    onHostChange: (String) -> Unit,
+    onPortChange: (String) -> Unit,
+    onTokenChange: (String) -> Unit,
+    onConnect: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    val spacing = if (compact) 5.dp else 12.dp
+    val connectionError = state.stage() == ProductionStage.CONNECTION_ERROR
+    val visibleFormError = formError?.takeIf(String::isNotBlank)
+    Box(
+        modifier = Modifier.fillMaxWidth(if (compact) 0.96f else 0.84f),
+        contentAlignment = Alignment.Center,
+    ) {
+        GuideCharacter(
+            compact = true,
+            sizeOverride = if (narrow) 40.dp else 46.dp,
+            modifier = Modifier.align(Alignment.CenterStart),
+        )
+        GuideTitle(
+            "PCに接続",
+            compact = compact,
+            narrow = narrow,
+            compactFontSize = 24.sp,
+            compactLineHeight = 28.sp,
+            maxLines = 1,
+            modifier = Modifier.fillMaxWidth().testTag("production_title"),
+        )
+    }
+    Spacer(Modifier.height(spacing))
+    if (connectionError) {
+        GuideFeedback(
+            "${connectionErrorTitle(state.connection.errorCode)}。${connectionErrorMessage(state.connection.errorCode)}",
+            compact = compact,
+        )
+        Spacer(Modifier.height(spacing))
+    } else if (visibleFormError != null) {
+        GuideFeedback(visibleFormError, compact = compact)
+        Spacer(Modifier.height(spacing))
+    } else {
+        GuideBody(
+            "接続情報はPCアプリに\n表示されています！",
+            compact = compact,
+            narrow = narrow,
+        )
+        Spacer(Modifier.height(spacing))
+    }
+
+    ConnectionField(
+        label = "PCのIPアドレスまたはホスト名入力",
+        value = host,
+        onValueChange = onHostChange,
+        keyboardType = KeyboardType.Uri,
+        tag = "host_field",
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.96f else 0.84f),
+    )
+    Spacer(Modifier.height(spacing))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(if (narrow) 8.dp else 12.dp),
+    ) {
+        ConnectionField(
+            label = "ポート入力",
+            value = port,
+            onValueChange = onPortChange,
+            keyboardType = KeyboardType.Number,
+            tag = "port_field",
+            compact = compact,
+            narrow = narrow,
+            modifier = Modifier.weight(1f),
+        )
+        ConnectionField(
+            label = "6桁コード入力",
+            value = token,
+            onValueChange = onTokenChange,
+            keyboardType = KeyboardType.NumberPassword,
+            tag = "pairing_code_field",
+            compact = compact,
+            narrow = narrow,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    Spacer(Modifier.height(if (compact) 9.dp else 22.dp))
+    GuideFilledButton(
+        text = "接続",
+        onClick = onConnect,
+        compact = compact,
+        tag = "connect_button",
+        widthFraction = if (compact) 0.66f else 0.60f,
+    )
+}
+
+@Composable
+private fun ConnectionProgressPanel(
+    state: ProductionUiState,
+    host: String,
+    port: String,
+    onCancelConnection: () -> Unit,
+    onChangeConnectionSettings: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.82f else 0.90f),
+    )
+    GuideCharacter(compact = compact)
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
+    GuideSecondaryText("接続先  $host:$port", compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 14.dp else 24.dp))
+    GuideOutlinedButton("キャンセル", onCancelConnection, compact = compact)
+    if (state.stage() == ProductionStage.AUTO_CONNECTING) {
+        Spacer(Modifier.height(if (compact) 9.dp else 14.dp))
+        GuideFilledButton("接続先を変更", onChangeConnectionSettings, compact = compact)
+    }
+}
+
+@Composable
+private fun ReconnectingPanel(
+    state: ProductionUiState,
+    onRetryNow: () -> Unit,
+    onChangeConnectionSettings: () -> Unit,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.78f else 0.86f),
+    )
+    Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
+    GuideBody("PCとの接続が途切れました。", compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
+    GuideSecondaryText(
+        "PCへの座標は送信されていません。\nカメラ解析は継続しています。",
+        compact = compact,
+        narrow = narrow,
+    )
+    Spacer(Modifier.height(if (compact) 20.dp else 34.dp))
+    GuideOutlinedButton(
+        "今すぐ再接続",
+        onRetryNow,
+        compact = compact,
+        tag = "reconnect_now_button",
+    )
+    Spacer(Modifier.height(if (compact) 9.dp else 14.dp))
+    GuideFilledButton(
+        "接続設定を変更",
+        onChangeConnectionSettings,
+        compact = compact,
+        tag = "reconnect_settings_button",
+    )
+    Spacer(Modifier.height(if (compact) 3.dp else 8.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (compact) 48.dp else 82.dp),
+    ) {
+        GuideCharacter(
+            compact = compact,
+            sizeOverride = if (compact) 62.dp else 105.dp,
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
+    }
+}
+
+@Composable
+private fun PlacementPanel(
+    state: ProductionUiState,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(if (compact) 0.76f else 0.86f),
+    )
+    Spacer(Modifier.height(if (compact) 16.dp else 28.dp))
+    GuideBody(
+        "PC画面の4隅がすべて映るように\n端末を固定してください。",
+        compact = compact,
+        narrow = narrow,
+    )
+    Spacer(Modifier.height(if (compact) 14.dp else 24.dp))
+    GuideSecondaryText(
+        "PC画面全体が映る位置に固定し、\nPCで「配置OK」を\n押してください。",
+        compact = compact,
+        narrow = narrow,
+    )
+}
+
+@Composable
+private fun CalibrationPanel(
+    state: ProductionUiState,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(stageTitle(state), compact = compact, narrow = narrow)
+    Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    GuideCharacter(
+        compact = compact,
+        sizeOverride = if (compact) 76.dp else 120.dp,
+    )
+    CalibrationProgress(state.calibration, compact = compact, narrow = narrow)
+}
+
+@Composable
+private fun ReadyPanel(
+    state: ProductionUiState,
+    onDisconnect: () -> Unit,
+    showActions: Boolean,
+    compact: Boolean,
+    narrow: Boolean,
+) {
+    GuideTitle(
+        stageTitle(state),
+        compact = compact,
+        narrow = narrow,
+        modifier = Modifier.fillMaxWidth(
+            if (compact && showActions) 0.72f else 1f,
+        ),
+    )
+    GuideCharacter(
+        compact = compact,
+        sizeOverride = when {
+            compact && showActions -> 68.dp
+            compact -> 80.dp
+            showActions -> 110.dp
+            else -> 126.dp
+        },
+    )
+    GuideBody(stageMessage(state), compact = compact, narrow = narrow)
+    if (showActions) {
+        Spacer(Modifier.height(if (compact) 14.dp else 28.dp))
+        GuideOutlinedButton("PCから切断", onDisconnect, compact = compact)
+    } else {
+        Spacer(Modifier.height(if (compact) 116.dp else 160.dp))
+    }
+}
+
+@Composable
+private fun CalibrationProgress(
+    state: CalibrationUiState,
+    compact: Boolean,
+    narrow: Boolean,
+) {
     when (state) {
-        CalibrationUiState.PlacementWaiting ->
-            Text("PC画面全体が映る位置に固定し、PCで「配置OK」を押してください。")
-        is CalibrationUiState.FindingMarkers -> Text("検出済み ${state.found}/4")
+        CalibrationUiState.PlacementWaiting -> GuideSecondaryText(
+            "PC画面全体が映る位置に固定し、PCで「配置OK」を押してください。",
+            compact = compact,
+            narrow = narrow,
+        )
+        is CalibrationUiState.FindingMarkers -> GuideSecondaryText(
+            "検出済み ${state.found}/4",
+            compact = compact,
+            narrow = narrow,
+        )
         is CalibrationUiState.Stabilizing -> {
-            Text("安定度 ${state.current}/${state.required}")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                repeat(state.required) { index ->
+            GuideSecondaryText(
+                "安定度 ${state.current}/${state.required}",
+                compact = compact,
+                narrow = narrow,
+            )
+            Spacer(Modifier.height(if (compact) 7.dp else 10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+            ) {
+                repeat(state.required.coerceAtMost(12)) { index ->
                     Surface(
-                        modifier = Modifier.width(32.dp).height(8.dp),
-                        color = if (index < state.current) Color.White else Color.DarkGray,
+                        modifier = Modifier.weight(1f).height(if (compact) 7.dp else 9.dp),
+                        color = if (index < state.current) GuideInk else Color(0xFFD2D2D2),
                         shape = RoundedCornerShape(50),
                     ) {}
                 }
             }
         }
-        is CalibrationUiState.RetryRequired -> Text(calibrationRetryMessage(state.reason))
-        CalibrationUiState.WaitingForPc -> Text("端末を動かさず、そのままお待ちください。")
-        CalibrationUiState.Complete -> Text("位置合わせが完了しました。")
-        CalibrationUiState.Inactive -> Text("PCからの位置合わせ開始を待っています。")
+        is CalibrationUiState.RetryRequired -> GuideFeedback(
+            calibrationRetryMessage(state.reason),
+            compact = compact,
+        )
+        CalibrationUiState.WaitingForPc -> GuideSecondaryText(
+            "端末を動かさず、そのままお待ちください。",
+            compact = compact,
+            narrow = narrow,
+        )
+        CalibrationUiState.Complete -> GuideSecondaryText(
+            "位置合わせが完了しました。",
+            compact = compact,
+            narrow = narrow,
+        )
+        CalibrationUiState.Inactive -> GuideSecondaryText(
+            "PCからの位置合わせ開始を待っています。",
+            compact = compact,
+            narrow = narrow,
+        )
+    }
+}
+
+@Composable
+private fun ConnectionField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType,
+    tag: String,
+    compact: Boolean,
+    narrow: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            text = label,
+            color = GuideBodyInk,
+            fontSize = if (narrow || compact) 11.sp else 15.sp,
+            lineHeight = if (narrow || compact) 13.sp else 18.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            textStyle = TextStyle(
+                color = GuideInk,
+                fontSize = if (compact) 16.sp else 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+            cursorBrush = SolidColor(GuideInk),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    innerTextField()
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (compact) 48.dp else 52.dp)
+                .background(GuideField, RoundedCornerShape(if (compact) 12.dp else 16.dp))
+                .border(
+                    width = 1.5.dp,
+                    color = GuideInk,
+                    shape = RoundedCornerShape(if (compact) 12.dp else 16.dp),
+                )
+                .semantics { contentDescription = label }
+                .testTag(tag),
+        )
+    }
+}
+
+@Composable
+private fun GuideTitle(
+    text: String,
+    compact: Boolean,
+    narrow: Boolean,
+    compactFontSize: TextUnit = 28.sp,
+    compactLineHeight: TextUnit = 32.sp,
+    maxLines: Int = Int.MAX_VALUE,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    val fontSize = when {
+        narrow -> 25.sp
+        compact -> compactFontSize
+        else -> 38.sp
+    }
+    Text(
+        text = text,
+        color = GuideInk,
+        fontSize = fontSize,
+        lineHeight = when {
+            narrow -> 28.sp
+            compact -> compactLineHeight
+            else -> 43.sp
+        },
+        fontWeight = FontWeight.Black,
+        textAlign = TextAlign.Center,
+        maxLines = maxLines,
+        modifier = modifier.testTag("production_title"),
+    )
+}
+
+@Composable
+private fun GuideBody(text: String, compact: Boolean, narrow: Boolean) {
+    val fontSize = when {
+        narrow -> 13.sp
+        compact -> 14.sp
+        else -> 20.sp
+    }
+    Text(
+        text = text,
+        color = GuideBodyInk,
+        fontSize = fontSize,
+        lineHeight = when {
+            narrow -> 17.sp
+            compact -> 18.sp
+            else -> 26.sp
+        },
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun GuideSecondaryText(text: String, compact: Boolean, narrow: Boolean) {
+    val fontSize = when {
+        narrow -> 12.sp
+        compact -> 14.sp
+        else -> 17.sp
+    }
+    Text(
+        text = text,
+        color = GuideBodyInk,
+        fontSize = fontSize,
+        lineHeight = when {
+            narrow -> 16.sp
+            compact -> 18.sp
+            else -> 23.sp
+        },
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun GuideFeedback(text: String, compact: Boolean) {
+    Text(
+        text = text,
+        color = GuideError,
+        fontSize = if (compact) 12.sp else 15.sp,
+        lineHeight = if (compact) 16.sp else 20.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun GuideCharacter(
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+    sizeOverride: androidx.compose.ui.unit.Dp? = null,
+) {
+    val width = sizeOverride ?: if (compact) 80.dp else 126.dp
+    Image(
+        painter = painterResource(R.drawable.production_character),
+        contentDescription = "ゆびボードのキャラクター",
+        // The supplied square PNG has transparent space above and below the artwork. Cropping
+        // only that empty area keeps the character's visible size while avoiding wasted height.
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .size(width = width, height = width * 0.75f)
+            .testTag("production_character"),
+    )
+}
+
+@Composable
+private fun GuideFilledButton(
+    text: String,
+    onClick: () -> Unit,
+    compact: Boolean,
+    tag: String? = null,
+    widthFraction: Float = 0.84f,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(if (compact) 12.dp else 18.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = GuideButton,
+            contentColor = Color.White,
+        ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth(widthFraction)
+            .heightIn(min = if (compact) 44.dp else 56.dp)
+            .then(if (tag == null) Modifier else Modifier.testTag(tag)),
+    ) {
+        Text(
+            text = text,
+            fontSize = if (compact) 20.sp else 27.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun GuideOutlinedButton(
+    text: String,
+    onClick: () -> Unit,
+    compact: Boolean,
+    tag: String? = null,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(if (compact) 12.dp else 18.dp),
+        border = BorderStroke(if (compact) 1.5.dp else 2.dp, GuideInk),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = GuideField,
+            contentColor = GuideBodyInk,
+        ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth(0.84f)
+            .heightIn(min = if (compact) 44.dp else 56.dp)
+            .then(if (tag == null) Modifier else Modifier.testTag(tag)),
+    ) {
+        Text(
+            text = text,
+            fontSize = if (compact) 20.sp else 26.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun GuideHelpButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics { contentDescription = "設定・ヘルプ" }
+            .clickable(role = Role.Button, onClick = onClick)
+            .testTag("production_help_button"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .background(Color.White.copy(alpha = 0.45f), CircleShape)
+                .border(3.dp, GuideInk, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "?",
+                color = GuideInk,
+                fontSize = 22.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
     }
 }
 
@@ -340,7 +983,7 @@ private fun stageTitle(state: ProductionUiState): String = when (state.stage()) 
         TrackingUiState.TRACKING -> "手を検出しています"
         TrackingUiState.TEMPORARILY_LOST -> "手を見失いました"
         TrackingUiState.LONG_LOST -> "手が見つかりません"
-        else -> "操作できます"
+        else -> "操作できます！"
     }
 }
 
@@ -388,11 +1031,11 @@ private fun calibrationRetryMessage(reason: CalibrationRetryReason): String = wh
 
 @Composable
 private fun HelpDialog(
-    canOpenDebug: Boolean,
     hasTrustedPc: Boolean,
+    isConnected: Boolean,
     onChangeConnectionSettings: () -> Unit,
+    onDisconnect: () -> Unit,
     onForgetTrustedPc: () -> Unit,
-    onOpenDebug: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -400,27 +1043,53 @@ private fun HelpDialog(
         title = { Text("設定・ヘルプ") },
         text = {
             Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.testTag("production_help_content"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text("設置方法", fontWeight = FontWeight.Bold)
-                Text("PC画面全体が映る位置へ端末を固定し、反射や逆光を避けてください。")
-                Text("プライバシー", fontWeight = FontWeight.Bold)
-                Text("カメラ映像は端末内で解析され、PCへは手とマーカーの座標だけを送信します。")
-                OutlinedButton(onClick = onChangeConnectionSettings, modifier = Modifier.fillMaxWidth()) {
-                    Text("接続先を変更")
+                Text("設置方法", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "PC画面全体が映る位置へ端末を固定し、反射や逆光を避けてください。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text("プライバシー", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "カメラ映像は端末内で解析され、PCへは手とマーカーの座標だけを送信します。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onChangeConnectionSettings,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                    ) {
+                        Text("接続先を変更", maxLines = 1)
+                    }
+                    if (isConnected) {
+                        OutlinedButton(
+                            onClick = onDisconnect,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                        ) {
+                            Text("PCから切断", maxLines = 1)
+                        }
+                    }
                 }
                 if (hasTrustedPc) {
-                    OutlinedButton(onClick = onForgetTrustedPc, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = onForgetTrustedPc,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                    ) {
                         Text("このPCを忘れる")
                     }
                 }
-                Text("アプリバージョン ${BuildConfig.VERSION_NAME}")
-                if (canOpenDebug) {
-                    OutlinedButton(onClick = onOpenDebug, modifier = Modifier.fillMaxWidth()) {
-                        Text("デバッグ画面を開く")
-                    }
-                }
+                Text(
+                    "アプリバージョン ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
@@ -515,7 +1184,6 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     onRetryNow = { lastAction = "今すぐ再接続" },
                     onChangeConnectionSettings = { lastAction = "接続設定変更" },
                     onForgetTrustedPc = { lastAction = "このPCを忘れる" },
-                    onOpenDebug = { lastAction = "デバッグへ戻る" },
                     modifier = Modifier.weight(1f),
                 )
             }

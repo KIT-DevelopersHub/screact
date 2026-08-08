@@ -7,8 +7,6 @@ import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 
-enum class ExperienceMode { PRODUCTION, DEBUG }
-
 enum class CameraUiState {
     PERMISSION_REQUIRED,
     PERMISSION_DENIED,
@@ -64,7 +62,6 @@ data class ProductionUiState(
     val captureMode: CaptureMode = CaptureMode.TRACKING,
     val calibration: CalibrationUiState = CalibrationUiState.Inactive,
     val tracking: TrackingUiState = TrackingUiState.INACTIVE,
-    val experience: ExperienceMode = ExperienceMode.PRODUCTION,
     val indexTip: LandmarkPoint? = null,
     val markers: List<DetectedMarker> = emptyList(),
     val sourceWidth: Int = 0,
@@ -84,6 +81,25 @@ enum class ProductionStage {
     READY,
 }
 
+/**
+ * Visual families used by the production guide panel.
+ *
+ * Keeping this mapping separate from the composables makes the redesigned UI follow the
+ * existing connection/calibration/tracking state machine without introducing a second source
+ * of truth for app behaviour.
+ */
+enum class ProductionVisualState {
+    CAMERA_PERMISSION,
+    CAMERA_ERROR,
+    CONNECTION_FORM,
+    CONNECTION_PROGRESS,
+    RECONNECTING,
+    PLACEMENT,
+    CALIBRATION_PROGRESS,
+    READY_IDLE,
+    READY_ACTIVE,
+}
+
 fun ProductionUiState.stage(): ProductionStage = when {
     camera == CameraUiState.PERMISSION_REQUIRED || camera == CameraUiState.PERMISSION_DENIED ->
         ProductionStage.CAMERA_PERMISSION
@@ -95,4 +111,25 @@ fun ProductionUiState.stage(): ProductionStage = when {
     connection.status == ConnectionStatus.DISCONNECTED -> ProductionStage.CONNECT
     captureMode == CaptureMode.CALIBRATION -> ProductionStage.CALIBRATION
     else -> ProductionStage.READY
+}
+
+fun ProductionUiState.visualState(): ProductionVisualState = when (stage()) {
+    ProductionStage.CAMERA_PERMISSION -> ProductionVisualState.CAMERA_PERMISSION
+    ProductionStage.CAMERA_ERROR -> ProductionVisualState.CAMERA_ERROR
+    ProductionStage.CONNECT, ProductionStage.CONNECTION_ERROR ->
+        ProductionVisualState.CONNECTION_FORM
+    ProductionStage.CONNECTING, ProductionStage.AUTO_CONNECTING ->
+        ProductionVisualState.CONNECTION_PROGRESS
+    ProductionStage.RECONNECTING -> ProductionVisualState.RECONNECTING
+    ProductionStage.CALIBRATION -> when (calibration) {
+        CalibrationUiState.PlacementWaiting -> ProductionVisualState.PLACEMENT
+        else -> ProductionVisualState.CALIBRATION_PROGRESS
+    }
+    ProductionStage.READY -> when (tracking) {
+        TrackingUiState.CANDIDATE,
+        TrackingUiState.TRACKING,
+        TrackingUiState.TEMPORARILY_LOST,
+        TrackingUiState.LONG_LOST -> ProductionVisualState.READY_ACTIVE
+        else -> ProductionVisualState.READY_IDLE
+    }
 }

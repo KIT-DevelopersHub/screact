@@ -80,7 +80,6 @@ import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
 import com.nxtend.team35.yubiboard.vision.ProductionOverlayView
 import com.nxtend.team35.yubiboard.ui.CameraUiState
-import com.nxtend.team35.yubiboard.ui.ExperienceMode
 import com.nxtend.team35.yubiboard.ui.ProductionScreen
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.ProductionStateLab
@@ -246,70 +245,31 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             YubiBoardTheme {
-                val connection by viewModel.connection.observeAsState(
-                    ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
-                )
-                val mode by viewModel.mode.observeAsState(CaptureMode.TRACKING)
-                val settings by viewModel.settings.observeAsState(initialSettings)
                 val productionState by viewModel.productionState.observeAsState(ProductionUiState())
-                if (settings.debugModeEnabled && BuildConfig.DEBUG) {
-                    YubiBoardScreen(
-                        previewView = previewView,
-                        debugOverlay = debugOverlay,
-                        cameraStatus = cameraStatus,
-                        cameraPermissionGranted = cameraPermissionGranted,
-                        connection = connection,
-                        mode = mode,
-                        settings = settings,
-                        savedHost = viewModel.savedHost,
-                        savedPort = viewModel.savedPort,
-                        transientMessage = transientMessage,
-                        onRequestCameraPermission = {
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        },
-                        onConnect = { host, port, token ->
-                            transientMessage = null
-                            viewModel.connect(host, port, token).also { error ->
-                                if (error != null) transientMessage = error
-                            }
-                        },
-                        onDisconnect = viewModel::disconnect,
-                        onModeChange = viewModel::setModeManually,
-                        onApplySettings = ::applySettings,
-                        onFakeHand = viewModel::submitDebugHand,
-                        onFakeMarkers = viewModel::submitDebugCalibration,
-                        onClearDiagnostics = AppDiagnostics::clear,
-                        onExportDiagnostics = {
-                            diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
-                        },
-                    )
-                } else {
-                    ProductionScreen(
-                        state = productionState,
-                        savedHost = viewModel.savedHost,
-                        savedPort = viewModel.savedPort,
-                        hasTrustedPc = viewModel.hasTrustedPc,
-                        cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
-                        previewContent = {
-                            Box(Modifier.fillMaxSize()) {
-                                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                                AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
-                            }
-                        },
-                        onRequestCameraPermission = {
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        },
-                        onOpenSystemSettings = ::openAppSettings,
-                        onRetryCamera = ::startCamera,
-                        onConnect = viewModel::connect,
-                        onCancelConnection = viewModel::disconnect,
-                        onDisconnect = viewModel::disconnect,
-                        onRetryNow = viewModel::retryNow,
-                        onChangeConnectionSettings = viewModel::changeConnectionSettings,
-                        onForgetTrustedPc = viewModel::forgetTrustedPc,
-                        onOpenDebug = { viewModel.setExperienceMode(ExperienceMode.DEBUG) },
-                    )
-                }
+                ProductionScreen(
+                    state = productionState,
+                    savedHost = viewModel.savedHost,
+                    savedPort = viewModel.savedPort,
+                    hasTrustedPc = viewModel.hasTrustedPc,
+                    cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
+                    previewContent = {
+                        Box(Modifier.fillMaxSize()) {
+                            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                            AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
+                        }
+                    },
+                    onRequestCameraPermission = {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    },
+                    onOpenSystemSettings = ::openAppSettings,
+                    onRetryCamera = ::startCamera,
+                    onConnect = viewModel::connect,
+                    onCancelConnection = viewModel::disconnect,
+                    onDisconnect = viewModel::disconnect,
+                    onRetryNow = viewModel::retryNow,
+                    onChangeConnectionSettings = viewModel::changeConnectionSettings,
+                    onForgetTrustedPc = viewModel::forgetTrustedPc,
+                )
             }
         }
 
@@ -354,12 +314,7 @@ class MainActivity : ComponentActivity() {
         cameraStatus = "手を探索中"
         cameraStarted = false
         viewModel.updateCameraState(CameraUiState.STARTING)
-        val settings = viewModel.currentSettings
-        val profile = if (settings.debugModeEnabled && BuildConfig.DEBUG) {
-            CameraProfile.from(Size(settings.analysisWidth, settings.analysisHeight))
-        } else {
-            CameraProfile.HD_720
-        }
+        val profile = CameraProfile.HD_720
         cameraSession.start(profile, allowFallback = !profile.debugOnly)
     }
 

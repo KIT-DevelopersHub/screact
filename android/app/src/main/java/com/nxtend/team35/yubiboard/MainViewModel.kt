@@ -20,7 +20,6 @@ import com.nxtend.team35.yubiboard.settings.TrustedConnectionStore
 import com.nxtend.team35.yubiboard.ui.CalibrationRetryReason
 import com.nxtend.team35.yubiboard.ui.CalibrationUiState
 import com.nxtend.team35.yubiboard.ui.CameraUiState
-import com.nxtend.team35.yubiboard.ui.ExperienceMode
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.ui.calibrationUiStateAfterFrame
@@ -37,13 +36,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableMode = MutableLiveData(CaptureMode.TRACKING)
     private val mutableLog = MutableLiveData<String>()
     private val mutableSettings = MutableLiveData(loadSettings())
-    private var productionSnapshot = ProductionUiState(
-        experience = if (mutableSettings.value?.debugModeEnabled == true) {
-            ExperienceMode.DEBUG
-        } else {
-            ExperienceMode.PRODUCTION
-        },
-    )
+    private var productionSnapshot = ProductionUiState()
     private val mutableProductionState = MutableLiveData(productionSnapshot)
     private val mutableCalibrationReset = MutableLiveData<Long>()
 
@@ -178,16 +171,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setModeManually(mode: CaptureMode) {
         AppDiagnostics.event("ui", "manual_mode", mapOf("mode" to mode))
         handleModeChanged(mode)
-    }
-
-    fun setExperienceMode(mode: ExperienceMode) {
-        if (!BuildConfig.DEBUG && mode == ExperienceMode.DEBUG) return
-        val debugEnabled = mode == ExperienceMode.DEBUG
-        val updated = currentSettings.copy(debugModeEnabled = debugEnabled)
-        preferences.edit().putBoolean(KEY_DEBUG_MODE, debugEnabled).apply()
-        AppDiagnostics.setEnabled(debugEnabled)
-        mutableSettings.value = updated
-        updateProduction { it.copy(experience = mode) }
     }
 
     fun submitDebugHand(detected: Boolean) {
@@ -329,7 +312,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSettings(settings: AppSettings): String? {
-        val effective = if (BuildConfig.DEBUG) settings else settings.copy(debugModeEnabled = false)
+        val effective = settings.copy(debugModeEnabled = false)
         effective.validate()?.let { return it }
         preferences.edit()
             .putInt(KEY_ANALYSIS_WIDTH, effective.analysisWidth)
@@ -343,11 +326,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         webSocketClient.setMaxFrameRate(effective.maxSendFps)
         AppDiagnostics.setEnabled(effective.debugModeEnabled)
         mutableSettings.value = effective
-        updateProduction {
-            it.copy(
-                experience = if (effective.debugModeEnabled) ExperienceMode.DEBUG else ExperienceMode.PRODUCTION,
-            )
-        }
         return null
     }
 
@@ -370,7 +348,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
-        debugModeEnabled = BuildConfig.DEBUG && preferences.getBoolean(KEY_DEBUG_MODE, true),
+        // The app is production-only. Ignore legacy/restored debug preferences.
+        debugModeEnabled = false,
     ).let { if (it.validate() == null) it else AppSettings() }
 
     companion object {
