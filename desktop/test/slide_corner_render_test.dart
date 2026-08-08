@@ -11,9 +11,10 @@ import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/protocol/messages.dart';
 import 'package:thehack_overlay/ui/overlay_canvas.dart';
 
-import 'slide_corner_drawing_test.dart' show tiltedQuad, slideToCam;
+import 'slide_corner_drawing_test.dart'
+    show tiltedQuad, slideToCam, drawFrameAt;
 
-/// 「斜めから見た四隅＋ピンチで線を引く手」を通した最終描画のレンダリング検証。
+/// 「斜めから見た四隅＋2本指くっつきで線を引く手」を通した最終描画の検証。
 /// 歪み補正された位置に連続した線が描かれることをピクセルで確認し、
 /// 証拠PNGを YUBIBOARD_PROOF_DIR（未指定時はシステムtemp）へ保存する。
 void main() {
@@ -28,8 +29,11 @@ void main() {
 
     final fwd = slideToCam(tiltedQuad);
     final model = OverlayModel();
-    void feed(int i, Vec2 slide, bool pinch) {
-      final f = MockHand.at(frameId: i, tip: fwd.map(slide), pinch: pinch);
+    void feed(int i, Vec2 slide, bool drawing) {
+      final cam = fwd.map(slide);
+      final f = drawing
+          ? drawFrameAt(i, cam)
+          : MockHand.at(frameId: i, tip: cam, pinch: false);
       for (final e in engine.onFrame(f)) {
         model.apply(e);
       }
@@ -54,7 +58,7 @@ void main() {
       model.apply(e);
     }
 
-    expect(model.strokes.length, 2, reason: 'ピンチ2回=線2本');
+    expect(model.strokes.length, 2, reason: "描画2回=線2本");
 
     final key = GlobalKey();
     await tester.pumpWidget(

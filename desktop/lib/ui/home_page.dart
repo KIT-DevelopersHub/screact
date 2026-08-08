@@ -61,6 +61,10 @@ class _HomePageState extends State<HomePage> {
   /// 直前の接続端末ID（null→非null の立ち上がり検出用）。
   String? _prevClientId;
 
+  /// OSクリック注入に必要なアクセシビリティ権限の状態（macOSネイティブのみ）。
+  /// 既定 true（非対応OS/Noopでは案内カードを出さない）。
+  bool _accessibilityTrusted = true;
+
   /// 検証用に --dart-define=YUBI_PORT=8766 等で差し替え可能（既定 8765）。
   int get _port =>
       widget.port ?? const int.fromEnvironment('YUBI_PORT', defaultValue: 8765);
@@ -123,6 +127,7 @@ class _HomePageState extends State<HomePage> {
       // （macOSはLAN送信を試みた時に初めてプロンプト表示＆設定一覧に登録する）。
       triggerLocalNetworkPrompt(ip: _wifiIp, onLog: _connLog.add);
     });
+    _refreshAccessibility();
     // 検証用自動フロー: 起動時に「スマホ設置完了」を自動実行する。
     if (_autoFlow) scheduleMicrotask(_startAutoPairing);
   }
@@ -135,6 +140,19 @@ class _HomePageState extends State<HomePage> {
     _flow.dispose();
     _connLog.dispose();
     super.dispose();
+  }
+
+  /// アクセシビリティ権限（OSクリック注入に必須）の状態を取り込む。
+  Future<void> _refreshAccessibility() async {
+    final ok = await _bridge.accessibilityTrusted();
+    if (mounted) setState(() => _accessibilityTrusted = ok);
+  }
+
+  /// 権限プロンプトを出す→数百ms後に状態を再取得（許可されたらカードが消える）。
+  Future<void> _requestAccessibility() async {
+    await _bridge.requestAccessibility();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await _refreshAccessibility();
   }
 
   /// Wi-Fi IPを再取得（テザリング切替等でネットワークが変わっても更新できる）。
@@ -578,6 +596,53 @@ class _HomePageState extends State<HomePage> {
     ]);
   }
 
+  /// アクセシビリティ権限の案内カード（OSクリック注入が使えない時）。
+  Widget _accessibilityCard() {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.errorContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.error.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.touch_app_outlined, color: cs.error, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'つまむ操作でのOSクリックには「アクセシビリティ」権限が必要です。',
+                style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            'システム設定 > プライバシーとセキュリティ > アクセシビリティ で'
+            '「Screact」をオンにしてください（描画は権限なしでも使えます）。',
+            style: TextStyle(fontSize: 12, height: 1.6, color: cs.onSurface),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            FilledButton.tonalIcon(
+              onPressed: _requestAccessibility,
+              icon: const Icon(Icons.lock_open, size: 16),
+              label: const Text('権限をリクエスト'),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+                onPressed: _refreshAccessibility, child: const Text('再確認')),
+          ]),
+        ],
+      ),
+    );
+  }
+
   /// 位置合わせ完了・操作可能（オーバーレイから戻った時の待機画面）。
   Widget _readyBody() {
     return _heroColumn([
@@ -586,9 +651,11 @@ class _HomePageState extends State<HomePage> {
       const Text('操作できます',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),
-      _bigCaption('ピンチ（親指と人差し指をつまむ）でスライドに描画できます。\n'
+      _bigCaption('人差し指と中指をくっつけるとスライドに線を描けます。\n'
+          'つまむ（親指と人差し指）とOSの実クリックになります。\n'
           'オーバーレイの解除は macOS: ✏ / ⌘⇧O。'),
-      const SizedBox(height: 24),
+      const SizedBox(height: 20),
+      if (!_accessibilityTrusted) _accessibilityCard(),
       if (_overlayAvailable)
         FilledButton.icon(
           onPressed: _enterOverlay,
@@ -1201,7 +1268,7 @@ class _HomePageState extends State<HomePage> {
     if (!_phoneConnected) return 'スマホの接続待ち';
     if (_flow.showingTarget) return 'キャリブレーション中';
     if (_engine.isCalibrated && _status.mode == EngineMode.tracking) {
-      return '操作可能（ピンチで描画）';
+      return '操作可能（2本指くっつけて描画／つまむでOSクリック）';
     }
     return '位置合わせ待ち';
   }
@@ -1355,7 +1422,7 @@ class _HomePageState extends State<HomePage> {
                       const SizedBox(height: 10),
                       Text(
                         _step == 4
-                            ? 'ピンチ（親指と人差し指をつまむ）で描画できます'
+                            ? '人差し指と中指をくっつけて描画／つまむでOSクリック'
                             : '接続と位置合わせが完了すると、指先の動きがここに映ります',
                         style: TextStyle(
                             fontSize: 13, color: cs.onSurfaceVariant),

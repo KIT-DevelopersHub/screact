@@ -6,16 +6,21 @@ import 'gesture_recognizer.dart';
 import '../protocol/messages.dart';
 
 /// チーム確定仕様のジェスチャー分岐:
-/// - ポインタ移動/描画/ドラッグ = 人差し指先端（pointerMove/pressDown/pressMove/pressUp）
-/// - スクロール = 二本指の移動量（scroll）
-/// - ピンチズーム = 二本指間距離の変化（未実装。追加時は zoom kind を足し、
-///   onFrame の scrolling 分岐と同列に距離変化の分岐を挿す）
+/// - ポインタ移動 = 人差し指先端（pointerMove）※OSカーソルを動かす
+/// - インク描画 = 人差し指と中指をくっつける（drawDown/drawMove/drawUp）
+///   筆点は人差し指先端と中指先端の「中間点」。オーバーレイのインク専用。
+/// - OSクリック/ドラッグ = 親指と人差し指のピンチ（pressDown/pressMove/pressUp/click）
+///   OSの実マウスイベントとして注入する。
+/// - スクロール = 二本指を立てて動かす（scroll）
 enum InteractionKind {
   pointerMove,
-  pressDown, // ピンチ押下（描画/クリック/ドラッグの開始）
-  pressMove, // 押下中の移動（ドラッグ/描画）
+  drawDown, // 2本指くっつき開始（インク描画の開始）
+  drawMove, // くっつき中の移動（インク線）
+  drawUp, // くっつき解除（インク確定）
+  pressDown, // ピンチ押下（OSクリック/ドラッグの開始）
+  pressMove, // 押下中の移動（OSドラッグ）
   pressUp, // 押下解除
-  click, // 短いピンチ＝クリック
+  click, // 短いピンチ＝クリック（オーバーレイ表示用・OS側は down/up で表現）
   scroll,
   release, // トラッキング喪失などで安全解除
 }
@@ -52,10 +57,12 @@ class InteractionEngine {
   int _arucoStreak = 0;
   int _cornersStreak = 0;
 
-  // ピンチ状態機械
+  // ピンチ状態機械（OSクリック/ドラッグ）
   bool _pressed = false;
   Vec2? _pressStart;
   int _pressStartMs = 0;
+  // 2本指くっつき状態機械（インク描画）
+  bool _drawing = false;
   Vec2? _lastScreen;
   // スクロール状態
   Vec2? _lastScrollAnchor;
@@ -126,6 +133,12 @@ class InteractionEngine {
   }
 
   /// 1フレーム処理。安全解除も含め、UI/OSへ渡すイベント列を返す。
+  ///
+  /// 優先順位（相互排他）:
+  ///   1. スクロール（2本指を立てて移動・くっつき/ピンチなし）
+  ///   2. インク描画（人差し指＋中指がくっつく・筆点は中間点）
+  ///   3. OSクリック/ドラッグ（親指＋人差し指のピンチ）
+  ///   4. ポインタ移動（人差し指先端）
   List<InteractionEvent> onFrame(HandFrame f) {
     if (mode != EngineMode.tracking) return const [];
     if (!f.detected) return _releaseAll();
@@ -133,14 +146,15 @@ class InteractionEngine {
     if (pose == null || !f.isValid) return _releaseAll();
 
     final t = f.capturedAtMonotonicMs;
-    final screen = _screenFilter.filter(_toScreen(pose.indexTip), t);
     final events = <InteractionEvent>[];
 
-    // スクロール: 人差し指＋中指を立てて動かす（ピンチしていない時）。
-    final scrolling = !pose.pinching && pose.indexUp && pose.middleUp &&
-        pose.extendedFingers >= 2;
+    // 1) スクロール: 人差し指＋中指を立てて動かす（くっつき/ピンチしていない時）。
+    final scrolling = !pose.fingersTogether && !pose.pinching &&
+        pose.indexUp && pose.middleUp && pose.extendedFingers >= 2;
     if (scrolling) {
-      if (_pressed) events.addAll(_endPress(screen));
+      final screen = _screenFilter.filter(_toScreen(pose.indexTip), t);
+      if (_drawing) events.addAll(_endDraw(screen));
+      if (_pressed) events.addAll(_endPress(screen: screen, tMs: t));
       if (_lastScrollAnchor != null) {
         events.add(InteractionEvent(InteractionKind.scroll, screen,
             delta: screen - _lastScrollAnchor!));
@@ -151,6 +165,26 @@ class InteractionEngine {
     }
     _lastScrollAnchor = null;
 
+    // 2) インク描画: 人差し指と中指がくっついている → 中間点で線を引く。
+    if (pose.fingersTogether) {
+      if (_pressed) events.addAll(_endPress(screen: null, tMs: t)); // 排他解除
+      final screen = _screenFilter.filter(_toScreen(pose.drawPoint), t);
+      if (!_drawing) {
+        _drawing = true;
+        events.add(InteractionEvent(InteractionKind.drawDown, screen));
+      } else {
+        events.add(InteractionEvent(InteractionKind.drawMove, screen));
+      }
+      _lastScreen = screen;
+      return events;
+    } else if (_drawing) {
+      // くっつきが解けた: インクを確定（drawUp）。同フレームで下の分岐も評価する。
+      final endAt = _screenFilter.filter(_toScreen(pose.drawPoint), t);
+      events.addAll(_endDraw(endAt));
+    }
+
+    // 3) OSクリック/ドラッグ（ピンチ）／4) ポインタ移動（人差し指先端）。
+    final screen = _screenFilter.filter(_toScreen(pose.indexTip), t);
     if (pose.pinching) {
       if (!_pressed) {
         _pressed = true;
@@ -162,7 +196,7 @@ class InteractionEngine {
       }
     } else {
       if (_pressed) {
-        events.addAll(_endPress(screen, tMs: t));
+        events.addAll(_endPress(screen: screen, tMs: t));
       } else {
         events.add(InteractionEvent(InteractionKind.pointerMove, screen));
       }
@@ -171,14 +205,21 @@ class InteractionEngine {
     return events;
   }
 
-  List<InteractionEvent> _endPress(Vec2 screen, {int? tMs}) {
+  /// 描画（2本指くっつき）の終了。インクを確定する。
+  List<InteractionEvent> _endDraw(Vec2 screen) {
+    _drawing = false;
+    return [InteractionEvent(InteractionKind.drawUp, screen)];
+  }
+
+  List<InteractionEvent> _endPress({Vec2? screen, int? tMs}) {
+    final at = screen ?? _lastScreen ?? const Vec2(0, 0);
     final events = <InteractionEvent>[];
     final dur = (tMs ?? _pressStartMs) - _pressStartMs;
-    final moved = (_pressStart ?? screen).distanceTo(screen);
+    final moved = (_pressStart ?? at).distanceTo(at);
     if (dur <= _clickMaxMs && moved <= _clickMaxMove) {
-      events.add(InteractionEvent(InteractionKind.click, screen));
+      events.add(InteractionEvent(InteractionKind.click, at));
     }
-    events.add(InteractionEvent(InteractionKind.pressUp, screen));
+    events.add(InteractionEvent(InteractionKind.pressUp, at));
     _pressed = false;
     _pressStart = null;
     return events;
@@ -186,14 +227,17 @@ class InteractionEngine {
 
   List<InteractionEvent> _releaseAll() {
     final events = <InteractionEvent>[];
-    if (_pressed) {
-      events.add(InteractionEvent(
-          InteractionKind.pressUp, _lastScreen ?? const Vec2(0, 0)));
+    final at = _lastScreen ?? const Vec2(0, 0);
+    if (_drawing) {
+      events.add(InteractionEvent(InteractionKind.drawUp, at));
     }
-    events.add(InteractionEvent(
-        InteractionKind.release, _lastScreen ?? const Vec2(0, 0)));
+    if (_pressed) {
+      events.add(InteractionEvent(InteractionKind.pressUp, at));
+    }
+    events.add(InteractionEvent(InteractionKind.release, at));
     _pressed = false;
     _pressStart = null;
+    _drawing = false;
     _lastScrollAnchor = null;
     _screenFilter.reset();
     _rec.reset();

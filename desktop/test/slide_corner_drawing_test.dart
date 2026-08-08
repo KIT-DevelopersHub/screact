@@ -42,6 +42,22 @@ HandFrame frameWithPinchRatio(int frameId, double ratio) {
   );
 }
 
+/// 描画ジェスチャー（人差し指＋中指くっつき）のフレーム。両先端を [camTip] に
+/// 一致させ、筆点（中間点）が camTip と厳密に一致するようにする（歪み補正の
+/// 検証で座標がブレないため）。
+HandFrame drawFrameAt(int frameId, Vec2 camTip) {
+  final f = MockHand.at(frameId: frameId, tip: camTip, pinch: false, together: true);
+  final lm = [...f.landmarks];
+  lm[HandFrame.middleTip] = Landmark(camTip.x, camTip.y, 0); // index tip と一致
+  return HandFrame(
+    frameId: frameId,
+    capturedAtMonotonicMs: frameId * 33,
+    detected: true,
+    handedness: 'RIGHT',
+    landmarks: lm,
+  );
+}
+
 void main() {
   group('Homography.fromCorners（傾いた四隅）', () {
     test('台形の既知の手位置が期待スライド座標へ正写される', () {
@@ -112,7 +128,7 @@ void main() {
   });
 
   group('傾いた四隅でのストローク生成（エンジン→モデル）', () {
-    test('ピンチ中の軌跡が1本の連続ストロークとして歪み補正されて残る', () {
+    test('2本指くっつきの軌跡が1本の連続ストロークとして歪み補正されて残る', () {
       final engine = InteractionEngine();
       // 順不同で校正（順序不変性も同時に確認）
       expect(
@@ -124,14 +140,17 @@ void main() {
 
       final fwd = slideToCam(tiltedQuad);
       final model = OverlayModel();
-      void feed(int i, Vec2 slide, bool pinch) {
-        final f = MockHand.at(frameId: i, tip: fwd.map(slide), pinch: pinch);
+      void feed(int i, Vec2 slide, bool drawing) {
+        final cam = fwd.map(slide);
+        final f = drawing
+            ? drawFrameAt(i, cam)
+            : MockHand.at(frameId: i, tip: cam, pinch: false);
         for (final e in engine.onFrame(f)) {
           model.apply(e);
         }
       }
 
-      // 接近（ピンチなし・v=0.5固定）→ 水平線 u:0.15→0.85 → 離す
+      // 接近（描画なし・v=0.5固定）→ 水平線 u:0.15→0.85 → 離す
       for (var i = 0; i < 10; i++) {
         feed(i, Vec2(0.05 + 0.01 * i, 0.5), false);
       }
@@ -140,7 +159,7 @@ void main() {
       }
       feed(70, const Vec2(0.85, 0.5), false);
 
-      expect(model.strokes.length, 1, reason: 'ピンチ1回=ストローク1本');
+      expect(model.strokes.length, 1, reason: '描画1回=ストローク1本');
       final pts = model.strokes.single.points;
       expect(pts.length, greaterThan(10), reason: '連続した点列である');
       for (final p in pts) {
@@ -204,7 +223,11 @@ void main() {
       final fwd = slideToCam(tiltedQuad);
       for (var i = 0; i < 40; i++) {
         final slide = Vec2(0.2 + 0.5 * i / 39.0, 0.5);
-        final f = MockHand.at(frameId: i, tip: fwd.map(slide), pinch: i >= 5);
+        final cam = fwd.map(slide);
+        // i>=5 で「2本指くっつき」＝描画。
+        final f = i >= 5
+            ? drawFrameAt(i, cam)
+            : MockHand.at(frameId: i, tip: cam, pinch: false);
         send({
           'schemaVersion': 1,
           'messageType': 'hand_frame',
@@ -225,13 +248,13 @@ void main() {
 
       expect(engine.isCalibrated, isTrue);
       expect(engine.mode, EngineMode.tracking);
-      final press = events
+      final draws = events
           .where((e) =>
-              e.kind == InteractionKind.pressDown ||
-              e.kind == InteractionKind.pressMove)
+              e.kind == InteractionKind.drawDown ||
+              e.kind == InteractionKind.drawMove)
           .toList();
-      expect(press, isNotEmpty, reason: 'ピンチで描画イベントが出る');
-      for (final e in press) {
+      expect(draws, isNotEmpty, reason: '2本指くっつきで描画イベントが出る');
+      for (final e in draws) {
         expect(e.screen.y, closeTo(0.5, 1e-3), reason: '歪み補正済みの座標');
         expect(e.screen.x, inInclusiveRange(0.15, 0.75));
       }
