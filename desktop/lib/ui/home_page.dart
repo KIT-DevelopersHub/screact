@@ -194,6 +194,34 @@ class _HomePageState extends State<HomePage> {
     if (ok && mounted) setState(() => _overlayOn = true);
   }
 
+  // ---------------------------------------------------------------------------
+  // 表示状態（セットアップの進行ステップ）
+  // ---------------------------------------------------------------------------
+
+  /// 0:サーバ未開始 1:スマホ接続待ち 2:接続済み(設置待ち) 3:位置合わせ中 4:操作可能
+  int get _step {
+    if (_server == null) return 0;
+    if (!_phoneConnected) return 1;
+    if (_flow.showingTarget) return 3;
+    if (_engine.isCalibrated && _status.mode == EngineMode.tracking) return 4;
+    return 2;
+  }
+
+  (Color, IconData, String) _stepBadge() {
+    switch (_step) {
+      case 0:
+        return (const Color(0xFF8A94A6), Icons.power_settings_new, '未接続');
+      case 1:
+        return (const Color(0xFFDD8A0C), Icons.wifi_tethering, 'スマホの接続待ち');
+      case 2:
+        return (const Color(0xFF2B6CB0), Icons.smartphone, '接続済み');
+      case 3:
+        return (const Color(0xFF7C5CD6), Icons.center_focus_strong, '位置合わせ中');
+      default:
+        return (const Color(0xFF2F9E63), Icons.gesture, '操作可能');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_overlayOn) {
@@ -211,21 +239,12 @@ class _HomePageState extends State<HomePage> {
     }
     final running = _server != null;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('YubiBoard Desktop — THE WIN'),
-        actions: [
-          IconButton(
-            tooltip: 'インクを消去',
-            onPressed: _overlay.clear,
-            icon: const Icon(Icons.cleaning_services_outlined),
-          ),
-        ],
-      ),
+      appBar: _header(),
       body: Stack(
         children: [
           Row(
             children: [
-              SizedBox(width: 300, child: _controls(running)),
+              SizedBox(width: 332, child: _controls(running)),
               const VerticalDivider(width: 1),
               Expanded(child: _preview()),
             ],
@@ -239,6 +258,68 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // ヘッダー（ブランド＋状態バッジ）
+  // ---------------------------------------------------------------------------
+
+  PreferredSizeWidget _header() {
+    final cs = Theme.of(context).colorScheme;
+    final (color, icon, label) = _stepBadge();
+    return AppBar(
+      titleSpacing: 20,
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [cs.primary, const Color(0xFF4C8DD8)],
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.gesture, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 10),
+          const Text('YubiBoard',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+          const SizedBox(width: 12),
+          Text('スライドを、指先で。',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  color: cs.onSurfaceVariant)),
+        ],
+      ),
+      actions: [
+        // 現在の状態バッジ（未接続→接続待ち→接続済み→位置合わせ中→操作可能）
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'インクを消去',
+          onPressed: _overlay.clear,
+          icon: const Icon(Icons.cleaning_services_outlined),
+        ),
+        const SizedBox(width: 12),
+      ],
+    );
+  }
+
   Widget _inWindowCalibration() {
     return Stack(
       children: [
@@ -246,26 +327,30 @@ class _HomePageState extends State<HomePage> {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 16,
+          bottom: 20,
           child: Center(
-            child: Card(
-              color: Colors.black87,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'キャリブレーション中: スマホのカメラでこの画面全体を映してください',
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                    const SizedBox(width: 12),
-                    TextButton(
-                      onPressed: _flow.cancel,
-                      child: const Text('中止'),
-                    ),
-                  ],
-                ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xE6202632),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.center_focus_strong,
+                      color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'キャリブレーション中: スマホのカメラでこの画面全体を映してください',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: _flow.cancel,
+                    child: const Text('中止'),
+                  ),
+                ],
               ),
             ),
           ),
@@ -276,188 +361,436 @@ class _HomePageState extends State<HomePage> {
 
   String get _displayIp => _wifiIp ?? '(IP取得不可)';
 
-  /// Android側に打ち込む3点セット（Wi-Fi IP・ポート・6桁コード）を
-  /// 一目で読める形でまとめたカード。値はコピー可能。
-  Widget _connectionInfoCard(bool running) {
-    Widget row(String label, String? value, {bool copyable = true}) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(children: [
-          SizedBox(
-              width: 88,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 11, color: Colors.black54))),
+  // ---------------------------------------------------------------------------
+  // 左パネル: ガイド付き4ステップ
+  // ---------------------------------------------------------------------------
+
+  Widget _controls(bool running) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        _stepRow(
+          index: 1,
+          done: running,
+          current: _step == 0,
+          title: 'サーバを開始する',
+          child: _serverButton(running),
+        ),
+        _stepRow(
+          index: 2,
+          done: _phoneConnected,
+          current: _step == 1,
+          title: 'スマホに接続情報を入力',
+          child: _connectionInfoCard(running),
+        ),
+        _stepRow(
+          index: 3,
+          done: _engine.isCalibrated,
+          current: _step == 2 || _step == 3,
+          title: 'スマホを設置して位置合わせ',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _primaryButton(
+                emphasized: _step == 2,
+                onPressed: running && _phoneConnected && !_flow.showingTarget
+                    ? _onPhonePlaced
+                    : null,
+                icon: Icons.smartphone,
+                label: 'スマホ設置完了',
+              ),
+              const SizedBox(height: 6),
+              _caption(_calibrationHelpText(running)),
+            ],
+          ),
+        ),
+        _stepRow(
+          index: 4,
+          done: false,
+          current: _step == 4,
+          title: 'スライドに重ねて操作',
+          last: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _primaryButton(
+                emphasized: _step == 4,
+                onPressed: _overlayAvailable ? _enterOverlay : null,
+                icon: Icons.layers_outlined,
+                label: 'オーバーレイ表示',
+              ),
+              const SizedBox(height: 6),
+              _caption(
+                _overlayAvailable
+                    ? 'スライドの最前面にインクとポインタだけを重ねます。'
+                        '解除は macOS: メニューバーの ✏ / ⌘⇧O、Windows: Ctrl+Shift+O。'
+                    : 'このビルドではオーバーレイ窓が未接続です'
+                        '（macOS/Windowsネイティブが必要）。',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        _detailsSection(running),
+      ],
+    );
+  }
+
+  /// ステップ行: 番号サークル＋縦の接続線＋本文。
+  /// done=チェック / current=強調 / それ以外=薄表示。
+  Widget _stepRow({
+    required int index,
+    required bool done,
+    required bool current,
+    required String title,
+    required Widget child,
+    bool last = false,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final Color circleBg = done
+        ? const Color(0xFF2F9E63)
+        : current
+            ? cs.primary
+            : cs.surfaceContainerHighest;
+    final Color circleFg =
+        done || current ? Colors.white : cs.onSurfaceVariant;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Column(children: [
+            Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: circleBg, shape: BoxShape.circle),
+              child: done
+                  ? const Icon(Icons.check, size: 15, color: Colors.white)
+                  : Text('$index',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: circleFg)),
+            ),
+            if (!last)
+              Expanded(
+                child: Container(
+                  width: 2,
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    color: done
+                        ? const Color(0xFF2F9E63).withValues(alpha: 0.45)
+                        : cs.outlineVariant,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+          ]),
+          const SizedBox(width: 12),
           Expanded(
-            child: SelectableText(
-              value ?? '-',
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace'),
+            child: Padding(
+              padding: EdgeInsets.only(bottom: last ? 0 : 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: current || done ? cs.onSurface : cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  child,
+                ],
+              ),
             ),
           ),
-          if (copyable && value != null)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              iconSize: 14,
-              tooltip: 'コピー',
-              onPressed: () => Clipboard.setData(ClipboardData(text: value)),
-              icon: const Icon(Icons.copy),
+        ],
+      ),
+    );
+  }
+
+  /// 現在のステップだけ Filled で強調し、それ以外は tonal に落とす。
+  Widget _primaryButton({
+    required bool emphasized,
+    required VoidCallback? onPressed,
+    required IconData icon,
+    required String label,
+  }) {
+    return emphasized
+        ? FilledButton.icon(
+            onPressed: onPressed, icon: Icon(icon, size: 18), label: Text(label))
+        : FilledButton.tonalIcon(
+            onPressed: onPressed, icon: Icon(icon, size: 18), label: Text(label));
+  }
+
+  Widget _serverButton(bool running) {
+    return _primaryButton(
+      emphasized: _step == 0,
+      onPressed: running ? _stopServer : _startServer,
+      icon: running ? Icons.stop_circle_outlined : Icons.play_arrow_rounded,
+      label: running ? 'サーバ停止' : 'サーバ開始',
+    );
+  }
+
+  Widget _caption(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+          fontSize: 11,
+          height: 1.5,
+          color: Theme.of(context).colorScheme.onSurfaceVariant),
+    );
+  }
+
+  /// Android側に打ち込む3点セット（Wi-Fi IP・ポート・6桁コード）。
+  /// デモの主役カード: 大きく読める・その場でコピーできる。
+  Widget _connectionInfoCard(bool running) {
+    final cs = Theme.of(context).colorScheme;
+
+    Widget copyButton(String? value) => IconButton(
+          visualDensity: VisualDensity.compact,
+          iconSize: 15,
+          tooltip: 'コピー',
+          onPressed: value == null
+              ? null
+              : () => Clipboard.setData(ClipboardData(text: value)),
+          icon: const Icon(Icons.copy_rounded),
+        );
+
+    Widget row(String label, String? value, {double fontSize = 15}) {
+      return Row(children: [
+        SizedBox(
+          width: 64,
+          child: Text(label,
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+        ),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            // IPが長くても1行に収める（折返しさせない）
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: SelectableText(
+                value ?? '—',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Menlo',
+                  color: value == null ? cs.onSurfaceVariant : cs.onSurface,
+                ),
+              ),
             ),
-        ]),
-      );
+          ),
+        ),
+        copyButton(value),
+      ]);
     }
 
-    return Card(
-      color: const Color(0xFFEDF2FA),
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              const Expanded(
-                child: Text('Androidに入力する接続情報',
-                    style:
-                        TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.smartphone, size: 14, color: cs.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Androidに入力する接続情報',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: cs.primary)),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: 16,
+              tooltip: 'Wi-Fi IPを再取得（テザリング切替時など）',
+              onPressed: _refreshWifiIp,
+              icon: const Icon(Icons.refresh),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          row('IP (Wi-Fi)', _wifiIp),
+          const SizedBox(height: 2),
+          row('ポート', '$_port'),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: Divider(height: 1),
+          ),
+          Row(children: [
+            SizedBox(
+              width: 64,
+              child: Text('6桁コード',
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+            ),
+            Expanded(
+              child: SelectableText(
+                running ? (_pairingCode ?? '—') : '——————',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'Menlo',
+                  letterSpacing: 5,
+                  color: running ? cs.primary : cs.onSurfaceVariant,
+                ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                iconSize: 16,
-                tooltip: 'Wi-Fi IPを再取得（テザリング切替時など）',
-                onPressed: _refreshWifiIp,
-                icon: const Icon(Icons.refresh),
+            ),
+            copyButton(running ? _pairingCode : null),
+          ]),
+          if (!running)
+            Text('コードはサーバ開始時に発行されます',
+                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 開発者向け詳細（折りたたみ）
+  // ---------------------------------------------------------------------------
+
+  Widget _detailsSection(bool running) {
+    final cs = Theme.of(context).colorScheme;
+    return Theme(
+      // ExpansionTile の区切り線を消してカード風にまとめる。
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        ),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          leading: Icon(Icons.tune, size: 18, color: cs.onSurfaceVariant),
+          title: Text('開発者向け設定',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant)),
+          children: [
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('6桁コードを照合する', style: TextStyle(fontSize: 12)),
+              subtitle: Text('オフにするとコード無しでも接続できます',
+                  style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+              value: _enforcePairing,
+              onChanged: (v) => setState(() {
+                _enforcePairing = v;
+                _server?.enforcePairing = v; // 稼働中サーバへ即反映
+              }),
+            ),
+            _statusDetails(running),
+            const SizedBox(height: 12),
+            _sectionLabel('モード切替'),
+            Wrap(spacing: 8, children: [
+              OutlinedButton(
+                onPressed: running && _phoneConnected
+                    ? () => _server!.requestMode('calibration')
+                    : null,
+                child: const Text('位置合わせ'),
+              ),
+              OutlinedButton(
+                onPressed: running && _phoneConnected
+                    ? () => _server!.requestMode('tracking')
+                    : null,
+                child: const Text('トラッキング'),
               ),
             ]),
-            row('IP (Wi-Fi)', _wifiIp),
-            row('ポート', '$_port'),
-            row('6桁コード', running ? _pairingCode : null),
-            if (!running)
-              const Text('コードはサーバ開始時に発行されます',
-                  style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const SizedBox(height: 4),
+            _calibrationSettings(),
+            _sectionLabel('動作確認（電話なし）'),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: _toggleMock,
+                icon: Icon(_mockTimer == null ? Icons.gesture : Icons.stop,
+                    size: 18),
+                label: Text(_mockTimer == null ? 'モックの手を流す' : 'モック停止'),
+              ),
+            ),
+            const SizedBox(height: 6),
+            _caption(
+              'モックは実プロトコルと同じデータでパイプライン（位置合わせ→変換→平滑化→'
+              'ジェスチャー認識→描画）を駆動します。ピンチで線が描かれます。',
+            ),
+            const SizedBox(height: 12),
+            _connectionLogSection(),
           ],
         ),
       ),
     );
   }
 
-  Widget _controls(bool running) {
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+    );
+  }
+
+  /// 接続の内部状態（セッション・フレーム数など）の一覧。
+  Widget _statusDetails(bool running) {
+    final cs = Theme.of(context).colorScheme;
     Widget kv(String k, String v) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(children: [
-            SizedBox(width: 96, child: Text(k, style: const TextStyle(color: Colors.black54))),
-            Expanded(child: Text(v, style: const TextStyle(fontWeight: FontWeight.w600))),
+            SizedBox(
+                width: 96,
+                child: Text(k,
+                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant))),
+            Expanded(
+                child: Text(v,
+                    style: const TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w600))),
           ]),
         );
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('接続', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: running ? _stopServer : _startServer,
-          icon: Icon(running ? Icons.stop : Icons.play_arrow),
-          label: Text(running ? 'サーバ停止' : 'サーバ開始'),
-        ),
-        const SizedBox(height: 8),
-        _connectionInfoCard(running),
-        const SizedBox(height: 8),
-        SwitchListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: const Text('6桁コードを照合する', style: TextStyle(fontSize: 12)),
-          subtitle: const Text('オフにするとコード無しでも接続できます',
-              style: TextStyle(fontSize: 10, color: Colors.black54)),
-          value: _enforcePairing,
-          onChanged: (v) => setState(() {
-            _enforcePairing = v;
-            _server?.enforcePairing = v; // 稼働中サーバへ即反映
-          }),
-        ),
-        kv('待受', running ? 'ws://$_displayIp:$_port/ws/v1/input' : '停止中'),
-        kv('セッション', _status.sessionId ?? '-'),
-        kv('端末', _status.clientId ?? '-'),
-        kv('モード', _status.mode == EngineMode.tracking ? 'tracking' : 'calibration'),
-        kv('校正', _engine.isCalibrated ? '済' : '未'),
-        kv('受信フレーム', '${_status.frames} (id ${_status.lastFrameId ?? "-"})'),
-        kv('手検出', _status.handDetected ? 'あり' : 'なし'),
-        kv('OS出力', _bridge.name),
-        kv('状態', _stateLabel(running)),
-        if (_status.lastError != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text('※ ${_status.lastError}', style: const TextStyle(color: Colors.red)),
-          ),
-        const Divider(height: 24),
-        const Text('スマホの設置とキャリブレーション',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        FilledButton.icon(
-          onPressed: running && _phoneConnected && !_flow.showingTarget
-              ? _onPhonePlaced
-              : null,
-          icon: const Icon(Icons.smartphone),
-          label: const Text('スマホ設置完了'),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _calibrationHelpText(running),
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
-        ),
-        _calibrationSettings(),
-        const Divider(height: 24),
-        const Text('モード切替', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        Wrap(spacing: 8, children: [
-          OutlinedButton(
-            onPressed: running && _phoneConnected
-                ? () => _server!.requestMode('calibration')
-                : null,
-            child: const Text('位置合わせ'),
-          ),
-          OutlinedButton(
-            onPressed: running && _phoneConnected
-                ? () => _server!.requestMode('tracking')
-                : null,
-            child: const Text('トラッキング'),
-          ),
-        ]),
-        const Divider(height: 24),
-        const Text('スライドに上乗せ', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        FilledButton.icon(
-          onPressed: _overlayAvailable ? _enterOverlay : null,
-          icon: const Icon(Icons.layers_outlined),
-          label: const Text('オーバーレイ表示'),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _overlayAvailable
-              ? 'ウィンドウを透過・最前面・クリック透過にして全画面へ広げ、'
-                  'スライドの上にインクとポインタだけを重ねます。'
-                  '解除は macOS: メニューバーの ✏ アイコン / ⌘⇧O、'
-                  'Windows: Ctrl+Shift+O。'
-              : 'このビルドではオーバーレイ窓が未接続です（macOS/Windowsネイティブが必要）。',
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
-        ),
-        const Divider(height: 24),
-        const Text('動作確認（電話なし）', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        FilledButton.tonalIcon(
-          onPressed: _toggleMock,
-          icon: Icon(_mockTimer == null ? Icons.gesture : Icons.stop),
-          label: Text(_mockTimer == null ? 'モックの手を流す' : 'モック停止'),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'モックは実プロトコルと同じデータでパイプライン（位置合わせ→変換→平滑化→'
-          'ジェスチャー認識→描画）を駆動します。ピンチで線が描かれます。',
-          style: TextStyle(fontSize: 11, color: Colors.black54),
-        ),
-        const Divider(height: 24),
-        _connectionLogSection(),
-      ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          kv('待受', running ? 'ws://$_displayIp:$_port/ws/v1/input' : '停止中'),
+          kv('セッション', _status.sessionId ?? '-'),
+          kv('端末', _status.clientId ?? '-'),
+          kv('モード',
+              _status.mode == EngineMode.tracking ? 'tracking' : 'calibration'),
+          kv('校正', _engine.isCalibrated ? '済' : '未'),
+          kv('受信フレーム', '${_status.frames} (id ${_status.lastFrameId ?? "-"})'),
+          kv('手検出', _status.handDetected ? 'あり' : 'なし'),
+          kv('OS出力', _bridge.name),
+          kv('状態', _stateLabel(running)),
+          if (_status.lastError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('※ ${_status.lastError}',
+                  style: TextStyle(fontSize: 11, color: cs.error)),
+            ),
+        ],
+      ),
     );
   }
 
@@ -471,9 +804,7 @@ class _HomePageState extends State<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
-          const Expanded(
-            child: Text('接続ログ', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
+          Expanded(child: _sectionLabel('接続ログ')),
           IconButton(
             visualDensity: VisualDensity.compact,
             iconSize: 14,
@@ -481,7 +812,7 @@ class _HomePageState extends State<HomePage> {
             onPressed: entries.isEmpty
                 ? null
                 : () => Clipboard.setData(ClipboardData(text: _connLog.joined)),
-            icon: const Icon(Icons.copy),
+            icon: const Icon(Icons.copy_rounded),
           ),
         ]),
         Container(
@@ -489,22 +820,21 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: const Color(0xFF1E2530),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: SelectableText(
             entries.isEmpty ? '(サーバ開始後にここへ接続の各段階が出ます)' : recent.join('\n'),
             style: const TextStyle(
-                fontSize: 10, color: Color(0xFFB8F5C8), fontFamily: 'monospace'),
+                fontSize: 10, color: Color(0xFFB8F5C8), fontFamily: 'Menlo'),
           ),
         ),
         const SizedBox(height: 4),
-        Text(
+        _caption(
           'ログファイル: ${_connLog.filePath ?? "(未作成)"}\n'
           '見方: http request が出ない=Androidの通信がMacまで届いていない'
           '（システム設定>プライバシーとセキュリティ>ローカルネットワークの許可・'
           'Nortonファイアウォールの受信許可・テザリングの子機間通信を確認）／'
           'ws upgraded まで出て hello が無い=アプリ層／hello_error=6桁コード不一致。',
-          style: const TextStyle(fontSize: 10, color: Colors.black54),
         ),
       ],
     );
@@ -570,16 +900,15 @@ class _HomePageState extends State<HomePage> {
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       title: const Text('キャリブレーション設定',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
       childrenPadding: const EdgeInsets.only(bottom: 8),
       children: [
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8),
-          child: Text(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _caption(
             '内側率(%) = 検知点が画面端からどれだけ内側にあるか。マーカー内側率の'
             '既定はキャリブ画像のマーカー中心位置（X 12.50 / Y 22.22）。'
             '四隅内側率は slide_corners 用の補正（既定 0）。',
-            style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
         ),
         Wrap(spacing: 8, runSpacing: 8, children: [
@@ -618,7 +947,8 @@ class _HomePageState extends State<HomePage> {
           DropdownButton<CalibrationSource>(
             value: _calibConfig.source,
             isDense: true,
-            style: const TextStyle(fontSize: 12, color: Colors.black87),
+            style: TextStyle(
+                fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
             items: const [
               DropdownMenuItem(
                   value: CalibrationSource.any, child: Text('両方')),
@@ -637,20 +967,102 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 右側: ライブプレビュー
+  // ---------------------------------------------------------------------------
+
   Widget _preview() {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: const Color(0xFFFAF7F0),
+      color: const Color(0xFFF4F6FA),
       child: Stack(
         children: [
+          // 薄いドットグリッド（描画面であることを示す）
+          const Positioned.fill(
+            child: CustomPaint(painter: _DotGridPainter(Color(0xFFD6DDE8))),
+          ),
           Positioned.fill(child: OverlayCanvas(model: _overlay)),
-          const Positioned(
-            left: 12,
-            top: 8,
-            child: Text('スライド面プレビュー（正規化0..1）',
-                style: TextStyle(color: Colors.black38, fontSize: 12)),
+          // 空状態のヒント（描画が始まると消える）
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _overlay,
+              builder: (_, __) {
+                if (_overlay.strokes.isNotEmpty || _overlay.cursor != null) {
+                  return const SizedBox.shrink();
+                }
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.gesture,
+                          size: 44, color: cs.outlineVariant),
+                      const SizedBox(height: 10),
+                      Text(
+                        _step == 4
+                            ? 'ピンチ（親指と人差し指をつまむ）で描画できます'
+                            : '接続と位置合わせが完了すると、指先の動きがここに映ります',
+                        style: TextStyle(
+                            fontSize: 13, color: cs.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          // 左上のバッジ
+          Positioned(
+            left: 14,
+            top: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: _step == 4
+                        ? const Color(0xFF2F9E63)
+                        : cs.outline,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text('ライブプレビュー',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurfaceVariant)),
+              ]),
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+/// プレビュー背景の薄いドットグリッド。
+class _DotGridPainter extends CustomPainter {
+  final Color color;
+  const _DotGridPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const gap = 28.0;
+    final paint = Paint()..color = color;
+    for (var x = gap; x < size.width; x += gap) {
+      for (var y = gap; y < size.height; y += gap) {
+        canvas.drawCircle(Offset(x, y), 1.1, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DotGridPainter old) => old.color != color;
 }
