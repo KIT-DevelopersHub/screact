@@ -1,5 +1,5 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:thehack_overlay/main.dart';
 import 'package:thehack_overlay/platform/overlay_window.dart';
@@ -83,6 +83,9 @@ void main() {
       mockNative();
       await tester.pumpWidget(const YubiBoardApp());
       await tester.pump();
+      // 既定は1ボタン画面。従来パネルは隠しトグルで開発者向け画面へ。
+      await tester.tap(find.byIcon(Icons.tune));
+      await tester.pump();
       // パネルが長くなったためリスト内までスクロールして確認する。
       await tester.scrollUntilVisible(
           find.text('オーバーレイ表示'), 80,
@@ -104,6 +107,8 @@ void main() {
     testWidgets('ボタン押下で enterOverlay がネイティブへ飛ぶ', (tester) async {
       final calls = mockNative();
       await tester.pumpWidget(const YubiBoardApp());
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.tune));
       await tester.pump();
       await tester.scrollUntilVisible(
           find.text('オーバーレイ表示'), 80,

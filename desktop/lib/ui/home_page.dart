@@ -8,12 +8,15 @@ import '../core/interaction_engine.dart';
 import '../core/mock_hand.dart';
 import '../core/pointer_state.dart';
 import '../net/connection_log.dart';
+import '../net/discovery.dart';
 import '../net/input_server.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
+import 'device_picker.dart';
 import 'overlay_canvas.dart';
+import 'pairing_controller.dart';
 
 /// 共通の操作面＋オーバーレイのライブプレビュー。macOSではこれ自体がアプリの
 /// 出力（アプリ内描画）。Windowsでは同じ状態がネイティブのOS注入/透過窓を駆動する。
@@ -48,9 +51,23 @@ class _HomePageState extends State<HomePage> {
   bool _overlayAvailable = false;
   bool _autoFlowFired = false;
 
+  /// ゼロコンフィグ・ペアリング（UDP発見）の進行管理。
+  late final PairingController _pairing;
+
+  /// 開発者向け画面（従来の4ステップパネル）。既定は非表示・⌘D か
+  /// 右下の隠しボタンで切替。
+  bool _devMode = false;
+
+  /// 直前の接続端末ID（null→非null の立ち上がり検出用）。
+  String? _prevClientId;
+
   /// 検証用に --dart-define=YUBI_PORT=8766 等で差し替え可能（既定 8765）。
   int get _port =>
       widget.port ?? const int.fromEnvironment('YUBI_PORT', defaultValue: 8765);
+
+  /// UDP発見の宛先ポート（検証用に --dart-define=YUBI_DISCOVERY_PORT で差替）。
+  int get _discoveryPort => const int.fromEnvironment('YUBI_DISCOVERY_PORT',
+      defaultValue: kDiscoveryPort);
 
   /// スマホと接続済みか（hello 受領済み）。設置完了ボタン等の活性条件。
   bool get _phoneConnected => _status.clientId != null;
@@ -81,13 +98,27 @@ class _HomePageState extends State<HomePage> {
     _connLog.addListener(() {
       if (mounted) setState(() {});
     });
+    _pairing = PairingController(
+      discoveryFactory: () => DesktopDiscovery(
+        token: _pairingCode ?? '',
+        wsPort: _server?.boundPort ?? _port,
+        ip: _wifiIp,
+        discoveryPort: _discoveryPort,
+        onLog: _connLog.add,
+      ),
+    );
+    _pairing.addListener(() {
+      if (mounted) setState(() {});
+    });
     _refreshWifiIp();
-    if (_autoFlow) scheduleMicrotask(_startServer);
+    // 検証用自動フロー: 起動時に「スマホ設置完了」を自動実行する。
+    if (_autoFlow) scheduleMicrotask(_startAutoPairing);
   }
 
   @override
   void dispose() {
     _mockTimer?.cancel();
+    _pairing.dispose();
     _server?.stop();
     _flow.dispose();
     _connLog.dispose();
@@ -134,14 +165,47 @@ class _HomePageState extends State<HomePage> {
 
   void _onServerStatus(ServerStatus st) {
     if (!mounted) return;
+    final justConnected = st.clientId != null && _prevClientId == null;
+    _prevClientId = st.clientId;
     setState(() => _status = st);
     // 四隅受信→位置合わせ成功なら、キャリブ画像を自動クローズ。
     _flow.onEngineEpoch(_engine.calibrationCount);
-    // 検証用自動フロー: クライアント接続後に「スマホ設置完了」を自動実行。
-    if (_autoFlow && !_autoFlowFired && st.clientId != null) {
+    if (!justConnected) return;
+    // ゼロコンフィグ・フロー: スマホ接続（hello受領）で発見を終了し、
+    // そのままArUco表示（画面認識）へ自動遷移する。
+    if (_pairing.active) {
+      _pairing.onConnected();
+      scheduleMicrotask(() => _startCalibrationDisplay(
+          intoOverlay: _overlayAvailable && !_autoFlow));
+      return;
+    }
+    // 検証用自動フロー（発見を介さない直接WS接続でも位置合わせを自動開始）。
+    if (_autoFlow && !_autoFlowFired) {
       _autoFlowFired = true;
       _startCalibrationDisplay(intoOverlay: false);
     }
+  }
+
+  /// 「スマホ設置完了」（ゼロコンフィグの1ボタン）: サーバを起動し、
+  /// UDPブロードキャストで待受中のAndroidを探す。1台なら自動選択・複数なら
+  /// AirDrop風の選択UI。選択端末がWS接続してきたらArUco表示→位置合わせ→
+  /// 自動でオーバーレイ開始。
+  Future<void> _startAutoPairing() async {
+    await _startServer();
+    // 既にスマホが接続済み（再キャリブ等）なら発見をスキップして
+    // そのまま画面認識へ。
+    if (_phoneConnected) {
+      await _startCalibrationDisplay(
+          intoOverlay: _overlayAvailable && !_autoFlow);
+      return;
+    }
+    await _pairing.start();
+  }
+
+  /// 発見の中止（検索中のキャンセル）。サーバも止めて初期状態に戻す。
+  Future<void> _cancelAutoPairing() async {
+    _pairing.cancel();
+    await _stopServer();
   }
 
   /// 「スマホ設置完了」: キャリブ画像を最前面（オーバーレイ）に全画面表示し、
@@ -238,6 +302,23 @@ class _HomePageState extends State<HomePage> {
       );
     }
     final running = _server != null;
+    // ⌘D で開発者向け画面（従来の4ステップパネル）と1ボタン画面を切替。
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true):
+            _toggleDevMode,
+      },
+      child: Focus(
+        autofocus: true,
+        child: _devMode ? _devScaffold(running) : _simpleScaffold(),
+      ),
+    );
+  }
+
+  void _toggleDevMode() => setState(() => _devMode = !_devMode);
+
+  /// 開発者向け画面（従来UI: 4ステップパネル＋接続情報カード＋プレビュー）。
+  Widget _devScaffold(bool running) {
     return Scaffold(
       appBar: _header(),
       body: Stack(
@@ -256,6 +337,236 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ゼロコンフィグの1ボタン画面（既定のホーム）
+  // ---------------------------------------------------------------------------
+
+  Widget _simpleScaffold() {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: Center(child: _pairingBody())),
+          // ブランド（左上・控えめ）
+          Positioned(
+            left: 20,
+            top: 16,
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [cs.primary, const Color(0xFF4C8DD8)],
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.gesture, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 10),
+              const Text('Screact',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+            ]),
+          ),
+          // 開発者向けへの隠し導線（右下・薄表示。⌘D でも切替可能）
+          Positioned(
+            right: 10,
+            bottom: 10,
+            child: Opacity(
+              opacity: 0.35,
+              child: IconButton(
+                tooltip: '開発者向け（⌘D）',
+                onPressed: _toggleDevMode,
+                icon: const Icon(Icons.tune, size: 18),
+              ),
+            ),
+          ),
+          if (_flow.showingTarget && !_overlayOn)
+            Positioned.fill(child: _inWindowCalibration()),
+        ],
+      ),
+    );
+  }
+
+  /// フェーズごとの中央コンテンツ。
+  Widget _pairingBody() {
+    // 位置合わせ完了後（オーバーレイから戻った時など）は操作状態を表示。
+    if (_step == 4) return _readyBody();
+    switch (_pairing.phase) {
+      case PairingPhase.searching:
+        return _searchingBody();
+      case PairingPhase.selecting:
+        return _selectingBody();
+      case PairingPhase.waitingConnect:
+        return _waitingConnectBody();
+      case PairingPhase.timeout:
+        return _timeoutBody();
+      case PairingPhase.idle:
+        // 接続済みでキャリブ表示待ちの一瞬も idle になる。ターゲット表示中は
+        // _inWindowCalibration / オーバーレイが最前面に出るのでここは初期画面。
+        return _idleBody();
+    }
+  }
+
+  Widget _heroColumn(List<Widget> children) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _bigCaption(String text) {
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+          fontSize: 13,
+          height: 1.7,
+          color: Theme.of(context).colorScheme.onSurfaceVariant),
+    );
+  }
+
+  /// 初期画面: 「スマホ設置完了」ボタンのみ。
+  Widget _idleBody() {
+    final cs = Theme.of(context).colorScheme;
+    return _heroColumn([
+      Container(
+        width: 84,
+        height: 84,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [cs.primary, const Color(0xFF4C8DD8)],
+          ),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: const Icon(Icons.smartphone, color: Colors.white, size: 42),
+      ),
+      const SizedBox(height: 26),
+      const Text('スマホを設置したら、はじめましょう',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _bigCaption('画面全体と手元が映る位置にスマホを固定して、下のボタンを押してください。\n'
+          'スマホは自動で見つかります（スマホ側で「画面認識開始」を押しておく）。'),
+      const SizedBox(height: 28),
+      FilledButton.icon(
+        onPressed: _startAutoPairing,
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(280, 58),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        ),
+        icon: const Icon(Icons.smartphone),
+        label: const Text('スマホ設置完了'),
+      ),
+    ]);
+  }
+
+  /// 検索中: ブロードキャストで応答待ち。
+  Widget _searchingBody() {
+    return _heroColumn([
+      const SizedBox(
+          width: 52, height: 52, child: CircularProgressIndicator(strokeWidth: 3)),
+      const SizedBox(height: 26),
+      const Text('スマホを探しています…',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _bigCaption('同じWi-Fiに接続したスマホで「画面認識開始」を押してください。'),
+      const SizedBox(height: 22),
+      TextButton(onPressed: _cancelAutoPairing, child: const Text('キャンセル')),
+    ]);
+  }
+
+  /// 複数台検出: AirDrop風の選択UI。
+  Widget _selectingBody() {
+    return _heroColumn([
+      const Text('スマホが複数見つかりました',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      _bigCaption('画面認識に使うスマホを1台選んでください。'),
+      const SizedBox(height: 24),
+      DevicePickerGrid(
+        devices: _pairing.devices,
+        onSelect: _pairing.selectDevice,
+      ),
+      const SizedBox(height: 20),
+      TextButton(onPressed: _cancelAutoPairing, child: const Text('キャンセル')),
+    ]);
+  }
+
+  /// 選択済み: WebSocket 接続待ち。
+  Widget _waitingConnectBody() {
+    final name = _pairing.selected?.deviceName ?? 'スマホ';
+    return _heroColumn([
+      const SizedBox(
+          width: 52, height: 52, child: CircularProgressIndicator(strokeWidth: 3)),
+      const SizedBox(height: 26),
+      Text('「$name」と接続しています…',
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _bigCaption('接続でき次第、画面認識（位置合わせ）へ自動で進みます。'),
+      const SizedBox(height: 22),
+      TextButton(onPressed: _cancelAutoPairing, child: const Text('キャンセル')),
+    ]);
+  }
+
+  /// 応答ゼロのタイムアウト: 再試行＋手動接続への逃げ道。
+  Widget _timeoutBody() {
+    final cs = Theme.of(context).colorScheme;
+    return _heroColumn([
+      Icon(Icons.wifi_off, size: 52, color: cs.onSurfaceVariant),
+      const SizedBox(height: 22),
+      const Text('スマホが見つかりませんでした',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _bigCaption('スマホがPCと同じWi-Fiにいるか・スマホ側で「画面認識開始」を'
+          '押しているかを確認してください。\n'
+          'テザリング等で自動検出が使えない場合は手動接続もできます。'),
+      const SizedBox(height: 24),
+      FilledButton.icon(
+        onPressed: _startAutoPairing,
+        style: FilledButton.styleFrom(minimumSize: const Size(220, 50)),
+        icon: const Icon(Icons.refresh),
+        label: const Text('もう一度探す'),
+      ),
+      const SizedBox(height: 10),
+      TextButton(
+        onPressed: () => setState(() => _devMode = true),
+        child: const Text('手動で接続する（IP・6桁コード）'),
+      ),
+    ]);
+  }
+
+  /// 位置合わせ完了・操作可能（オーバーレイから戻った時の待機画面）。
+  Widget _readyBody() {
+    return _heroColumn([
+      const Icon(Icons.gesture, size: 52, color: Color(0xFF2F9E63)),
+      const SizedBox(height: 22),
+      const Text('操作できます',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _bigCaption('ピンチ（親指と人差し指をつまむ）でスライドに描画できます。\n'
+          'オーバーレイの解除は macOS: ✏ / ⌘⇧O。'),
+      const SizedBox(height: 24),
+      if (_overlayAvailable)
+        FilledButton.icon(
+          onPressed: _enterOverlay,
+          style: FilledButton.styleFrom(minimumSize: const Size(220, 50)),
+          icon: const Icon(Icons.layers_outlined),
+          label: const Text('オーバーレイ表示'),
+        ),
+      const SizedBox(height: 10),
+      TextButton(
+        onPressed: () async {
+          await _stopServer();
+          setState(() {});
+        },
+        child: const Text('最初からやり直す'),
+      ),
+    ]);
   }
 
   // ---------------------------------------------------------------------------
@@ -293,6 +604,13 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       actions: [
+        // 1ボタン画面へ戻る（このヘッダーは開発者向け画面でのみ使う）
+        TextButton.icon(
+          onPressed: _toggleDevMode,
+          icon: const Icon(Icons.arrow_back, size: 14),
+          label: const Text('かんたん画面へ戻る'),
+        ),
+        const SizedBox(width: 8),
         // 現在の状態バッジ（未接続→接続待ち→接続済み→位置合わせ中→操作可能）
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

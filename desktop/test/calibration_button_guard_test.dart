@@ -76,6 +76,10 @@ void main() {
     final port = 20000 + Random().nextInt(20000);
     await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
     await tester.pump();
+    // 既定はゼロコンフィグの1ボタン画面。従来パネルは開発者向け画面にあるので
+    // 右下の隠しトグルで切り替えてから検証する。
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pump();
     final placed = buttonFinder('スマホ設置完了');
 
     // 1. サーバ停止中: 無効
@@ -138,6 +142,9 @@ void main() {
     mockNative(enterSucceeds: true);
     final port = 20000 + Random().nextInt(20000);
     await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
+    await tester.pump();
+    // 従来パネルは開発者向け画面へ（隠しトグルで切替）。
+    await tester.tap(find.byIcon(Icons.tune));
     await tester.pump();
 
     // モード切替は「開発者向け設定」の折りたたみ配下に移動したため先に展開する。
