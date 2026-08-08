@@ -23,6 +23,13 @@ void main() {
       final sel = DiscoverySelect.tryParse(j);
       if (sel != null) {
         selects.add(sel);
+        // 実機Android同様、select には毎回 ACK を返す（PCの再送が止まる）。
+        sock.send(
+          utf8.encode(jsonEncode(
+              DiscoverySelectAck(deviceId: sel.deviceId).toJson())),
+          dg.address,
+          dg.port,
+        );
         return;
       }
       if (DiscoveryOffer.tryParse(j) != null) {

@@ -113,6 +113,29 @@ class DiscoverySelect {
   }
 }
 
+/// Android→Desktop(ユニキャスト): select の受領確認。UDPの select は落ちる
+/// ことがあるため、Desktop はこの ACK を受信するまで select を再送する
+/// （実機テストで「PCは認識・Androidは待ちのまま」となった片方向不達の対策）。
+class DiscoverySelectAck {
+  final String deviceId;
+  const DiscoverySelectAck({required this.deviceId});
+
+  Map<String, dynamic> toJson() => {
+        'app': kDiscoveryApp,
+        'schemaVersion': kDiscoverySchemaVersion,
+        'messageType': 'discovery_select_ack',
+        'deviceId': deviceId,
+      };
+
+  static DiscoverySelectAck? tryParse(Map<String, dynamic> j) {
+    if (j['app'] != kDiscoveryApp) return null;
+    if (j['messageType'] != 'discovery_select_ack') return null;
+    final id = j['deviceId'] as String?;
+    if (id == null || id.isEmpty) return null;
+    return DiscoverySelectAck(deviceId: id);
+  }
+}
+
 /// 受信データグラムを JSON Map にする（Screact のものだけ通す）。
 Map<String, dynamic>? decodeDiscoveryDatagram(List<int> data) {
   try {
@@ -163,12 +186,20 @@ class DesktopDiscovery extends ChangeNotifier {
   final Duration deviceTtl;
   final void Function(String)? onLog;
 
+  /// select の再送間隔と最大送信回数（ACK 受信までリピート）。
+  final Duration selectResendInterval;
+  final int selectMaxAttempts;
+
   /// 送信先（null なら 255.255.255.255＋サブネットブロードキャストを自動選定。
   /// テストでは ['127.0.0.1'] 等に差し替える）。
   final List<String>? broadcastAddresses;
 
   RawDatagramSocket? _socket;
   Timer? _offerTimer;
+  Timer? _selectTimer;
+  DiscoveredDevice? _selectTarget;
+  int _selectAttempts = 0;
+  bool _selectAcked = false;
   final Map<String, DiscoveredDevice> _devices = {};
 
   DesktopDiscovery({
@@ -178,11 +209,19 @@ class DesktopDiscovery extends ChangeNotifier {
     this.discoveryPort = kDiscoveryPort,
     this.offerInterval = const Duration(seconds: 1),
     this.deviceTtl = const Duration(seconds: 6),
+    this.selectResendInterval = const Duration(milliseconds: 300),
+    this.selectMaxAttempts = 20,
     this.broadcastAddresses,
     this.onLog,
   });
 
   bool get running => _socket != null;
+
+  /// 選択した端末から select の ACK を受信済みか（到達確認）。
+  bool get selectAcked => _selectAcked;
+
+  /// これまでに select を送信した回数（テスト/診断用）。
+  int get selectAttempts => _selectAttempts;
   List<DiscoveredDevice> get devices => _devices.values.toList()
     ..sort((a, b) => a.deviceName.compareTo(b.deviceName));
 
@@ -225,6 +264,11 @@ class DesktopDiscovery extends ChangeNotifier {
     if (dg == null) return;
     final j = decodeDiscoveryDatagram(dg.data);
     if (j == null) return;
+    final ack = DiscoverySelectAck.tryParse(j);
+    if (ack != null) {
+      _onSelectAck(ack);
+      return;
+    }
     final res = DiscoveryResponse.tryParse(j);
     if (res == null) return;
     final existing = _devices[res.deviceId];
@@ -263,34 +307,79 @@ class DesktopDiscovery extends ChangeNotifier {
     if (_devices.length != before) notifyListeners();
   }
 
-  /// 選択した端末へ接続許可をユニキャスト送信（UDPなので少数回リピート）。
+  /// 選択した端末へ接続許可（select）をユニキャスト送信する。
   /// 以後の offer 送信は止める（未選択端末は待機に戻る）。
+  ///
+  /// UDPの select は落ちうる（実機で「PCは認識・Androidは待ちのまま」と
+  /// なった原因経路）ため、Android からの discovery_select_ack を受信する
+  /// まで [selectResendInterval] 間隔で最大 [selectMaxAttempts] 回再送する。
+  /// WS接続成立（hello受領）で呼び出し側が stop() すれば再送も止まる。
   void select(DiscoveredDevice device) {
     final s = _socket;
     if (s == null) return;
     _offerTimer?.cancel();
     _offerTimer = null;
+    _selectTimer?.cancel();
+    _selectTarget = device;
+    _selectAttempts = 0;
+    _selectAcked = false;
+    _log('接続許可(select)を送信: ${device.deviceName} '
+        '(${device.address.address}:${device.port}) — ACK受信まで再送します');
+    _sendSelect(device);
+    _selectTimer = Timer.periodic(selectResendInterval, (_) {
+      if (_selectAcked) {
+        _selectTimer?.cancel();
+        _selectTimer = null;
+        return;
+      }
+      if (_selectAttempts >= selectMaxAttempts) {
+        _selectTimer?.cancel();
+        _selectTimer = null;
+        _log('selectのACKなし（$_selectAttempts回送信）— スマホ側に届いていない'
+            '可能性があります。Wi-Fiのアイソレーション設定を確認してください');
+        return;
+      }
+      _sendSelect(device);
+    });
+  }
+
+  void _sendSelect(DiscoveredDevice device) {
     final bytes = utf8.encode(jsonEncode(DiscoverySelect(
       deviceId: device.deviceId,
       ip: ip,
       wsPort: wsPort,
       token: token,
     ).toJson()));
-    _log('接続許可を送信: ${device.deviceName} (${device.address.address}:${device.port})');
-    for (var i = 0; i < 3; i++) {
-      Timer(Duration(milliseconds: 120 * i), () {
-        try {
-          _socket?.send(bytes, device.address, device.port);
-        } catch (e) {
-          _log('select送信失敗: $e');
-        }
-      });
+    try {
+      _socket?.send(bytes, device.address, device.port);
+      _selectAttempts++;
+      // 1回目と以後5回ごとにログ（再送のたびに流れると読みにくい）。
+      if (_selectAttempts == 1 || _selectAttempts % 5 == 0) {
+        _log('select送信 ($_selectAttempts回目) → '
+            '${device.address.address}:${device.port}');
+      }
+    } catch (e) {
+      _log('select送信失敗: $e');
     }
+  }
+
+  void _onSelectAck(DiscoverySelectAck ack) {
+    final target = _selectTarget;
+    if (target == null || ack.deviceId != target.deviceId) return;
+    if (_selectAcked) return;
+    _selectAcked = true;
+    _selectTimer?.cancel();
+    _selectTimer = null;
+    _log('selectのACKを受信: ${target.deviceName} — スマホに到達確認。'
+        'WebSocket接続を待ちます');
   }
 
   void stop() {
     _offerTimer?.cancel();
     _offerTimer = null;
+    _selectTimer?.cancel();
+    _selectTimer = null;
+    _selectTarget = null;
     _socket?.close();
     _socket = null;
     _devices.clear();

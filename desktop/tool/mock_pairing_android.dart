@@ -69,6 +69,17 @@ Future<void> main(List<String> args) async {
       case 'discovery_select':
         final id = j['deviceId'];
         stdout.writeln('selected: $id (token=${j['token']} wsPort=${j['wsPort']})');
+        // 実機同様に select には毎回 ACK を返す（PC は ACK 受信まで再送する）。
+        sock.send(
+          utf8.encode(jsonEncode({
+            'app': 'screact',
+            'schemaVersion': 1,
+            'messageType': 'discovery_select_ack',
+            'deviceId': id,
+          })),
+          dg.address,
+          dg.port,
+        );
         if (respondOnly || connecting) return;
         connecting = true;
         _connectAndDrive(

@@ -40,6 +40,26 @@ void main() {
       expect(DiscoverySelect.tryParse({...j, 'selected': false}), isNull);
     });
 
+    test('select_ack の round trip（Android側と同じフィールド構成）', () {
+      const ack = DiscoverySelectAck(deviceId: 'android-abc');
+      final j = jsonDecode(jsonEncode(ack.toJson())) as Map<String, dynamic>;
+      expect(j['app'], 'screact');
+      expect(j['messageType'], 'discovery_select_ack');
+      expect(DiscoverySelectAck.tryParse(j)!.deviceId, 'android-abc');
+      // Android(kotlinx.serialization)がencodeDefaultsで出す形をそのまま受ける
+      final kotlinShape = jsonDecode(
+        '{"app":"screact","schemaVersion":1,'
+        '"messageType":"discovery_select_ack","deviceId":"android-abc"}',
+      ) as Map<String, dynamic>;
+      expect(DiscoverySelectAck.tryParse(kotlinShape)!.deviceId, 'android-abc');
+      // deviceId 欠落は不許可
+      expect(
+        DiscoverySelectAck.tryParse(
+            {'app': 'screact', 'messageType': 'discovery_select_ack'}),
+        isNull,
+      );
+    });
+
     test('他アプリのJSON・壊れたデータは無視する', () {
       expect(decodeDiscoveryDatagram(utf8.encode('{"app":"other"}')), isNull);
       expect(decodeDiscoveryDatagram(utf8.encode('not json')), isNull);
@@ -138,6 +158,92 @@ void main() {
           .first;
       expect(sel.token, '222222');
       expect(sel.wsPort, 9999);
+      discovery.stop();
+      responder.close();
+    });
+
+    test('select は ACK を受信するまで再送し、ACK で再送が止まる', () async {
+      // 3回目の select で初めて ACK を返す応答者（1〜2回目のロストを模擬）。
+      const ackAfter = 3;
+      var selectCount = 0;
+      final received = <Map<String, dynamic>>[];
+      final sock = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      sock.listen((e) {
+        if (e != RawSocketEvent.read) return;
+        final dg = sock.receive();
+        if (dg == null) return;
+        final j = decodeDiscoveryDatagram(dg.data);
+        if (j == null) return;
+        received.add(j);
+        if (DiscoveryOffer.tryParse(j) != null) {
+          sock.send(
+            utf8.encode(jsonEncode(const DiscoveryResponse(
+                    deviceId: 'dev-a', deviceName: 'name-a', model: 'm')
+                .toJson())),
+            dg.address,
+            dg.port,
+          );
+        }
+        final sel = DiscoverySelect.tryParse(j);
+        if (sel != null) {
+          selectCount++;
+          if (selectCount >= ackAfter) {
+            sock.send(
+              utf8.encode(jsonEncode(
+                  DiscoverySelectAck(deviceId: sel.deviceId).toJson())),
+              dg.address,
+              dg.port,
+            );
+          }
+        }
+      });
+      final discovery = DesktopDiscovery(
+        token: '444444',
+        wsPort: 8765,
+        discoveryPort: sock.port,
+        broadcastAddresses: ['127.0.0.1'],
+        offerInterval: const Duration(milliseconds: 80),
+        selectResendInterval: const Duration(milliseconds: 40),
+        selectMaxAttempts: 30,
+      );
+      await discovery.start();
+      await waitUntil(() => discovery.devices.length == 1);
+      discovery.select(discovery.devices.first);
+      await waitUntil(() => discovery.selectAcked);
+      expect(discovery.selectAttempts, greaterThanOrEqualTo(ackAfter));
+      // ACK 後は再送が止まる（回数が増えない）。
+      final attemptsAtAck = discovery.selectAttempts;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(discovery.selectAttempts, attemptsAtAck);
+      expect(discovery.selectAttempts, lessThan(30));
+      discovery.stop();
+      sock.close();
+    });
+
+    test('ACK が無ければ最大回数まで再送して打ち切る', () async {
+      final (responder, received) = await startResponder(['dev-a']);
+      final discovery = DesktopDiscovery(
+        token: '555555',
+        wsPort: 8765,
+        discoveryPort: responder.port,
+        broadcastAddresses: ['127.0.0.1'],
+        offerInterval: const Duration(milliseconds: 80),
+        selectResendInterval: const Duration(milliseconds: 30),
+        selectMaxAttempts: 4,
+      );
+      await discovery.start();
+      await waitUntil(() => discovery.devices.length == 1);
+      discovery.select(discovery.devices.first);
+      // 打ち切り（最大4回）まで待つ。
+      await waitUntil(() => discovery.selectAttempts >= 4);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(discovery.selectAttempts, 4);
+      expect(discovery.selectAcked, isFalse);
+      final selects = received
+          .map(DiscoverySelect.tryParse)
+          .whereType<DiscoverySelect>()
+          .length;
+      expect(selects, 4);
       discovery.stop();
       responder.close();
     });
