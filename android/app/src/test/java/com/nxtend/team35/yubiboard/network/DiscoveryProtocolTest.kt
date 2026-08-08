@@ -52,6 +52,18 @@ class DiscoveryProtocolTest {
     }
 
     @Test
+    fun `select_ack のエンコードがデスクトップ側のtryParseと同じ形になる`() {
+        val encoded = DiscoveryCodec.encode(DiscoverySelectAck(deviceId = "android-abc"))
+        // desktop/lib/net/discovery.dart の DiscoverySelectAck.tryParse が要求する形
+        assertTrue(encoded.contains("\"app\":\"screact\""))
+        assertTrue(encoded.contains("\"messageType\":\"discovery_select_ack\""))
+        assertTrue(encoded.contains("\"deviceId\":\"android-abc\""))
+        val decoded = DiscoveryCodec.parse(encoded)
+        assertTrue(decoded is DiscoverySelectAck)
+        assertEquals("android-abc", (decoded as DiscoverySelectAck).deviceId)
+    }
+
+    @Test
     fun `他アプリのJSONや壊れたデータは無視する`() {
         assertNull(DiscoveryCodec.parse("""{"app":"other","messageType":"discovery_offer"}"""))
         assertNull(DiscoveryCodec.parse("not json"))

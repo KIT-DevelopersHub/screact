@@ -53,6 +53,19 @@ data class DiscoverySelect(
     val token: String,
 ) : DiscoveryMessage
 
+/**
+ * Android→Desktop(ユニキャスト): select の受領確認。UDP の select は落ちる
+ * ことがあるため、Desktop は ACK を受信するまで select を再送する。
+ * Android は select を受信するたび（重複分にも）ACK を返す。
+ */
+@Serializable
+data class DiscoverySelectAck(
+    val app: String = DISCOVERY_APP,
+    val schemaVersion: Int = DISCOVERY_SCHEMA_VERSION,
+    val messageType: String = "discovery_select_ack",
+    val deviceId: String,
+) : DiscoveryMessage
+
 object DiscoveryCodec {
     // encodeDefaults: app/messageType 等のデフォルト値フィールドも必ず出力する
     // （デスクトップ側は app=="screact" を必須マーカーとして照合する）。
@@ -73,11 +86,15 @@ object DiscoveryCodec {
                 runCatching { json.decodeFromString<DiscoveryResponse>(text) }.getOrNull()
             "discovery_select" ->
                 runCatching { json.decodeFromString<DiscoverySelect>(text) }.getOrNull()
+            "discovery_select_ack" ->
+                runCatching { json.decodeFromString<DiscoverySelectAck>(text) }.getOrNull()
             else -> null
         }
     }
 
     fun encode(message: DiscoveryResponse): String = json.encodeToString(DiscoveryResponse.serializer(), message)
+
+    fun encode(message: DiscoverySelectAck): String = json.encodeToString(DiscoverySelectAck.serializer(), message)
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNullSafe(): String? =
         if (isString) content else null

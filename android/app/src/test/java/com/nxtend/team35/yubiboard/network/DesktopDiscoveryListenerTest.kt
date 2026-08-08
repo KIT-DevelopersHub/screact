@@ -30,7 +30,7 @@ class DesktopDiscoveryListenerTest {
     }
 
     @Test
-    fun `offer に応答し select で onSelected が呼ばれ待受が止まる`() {
+    fun `offer に応答し select で ACK返信とonSelected が行われ待受は継続する`() {
         val latch = CountDownLatch(1)
         var selectedHost: String? = null
         var selectedPort = 0
@@ -68,11 +68,71 @@ class DesktopDiscoveryListenerTest {
                 """{"app":"screact","messageType":"discovery_select","deviceId":"android-test",
                     "selected":true,"wsPort":8765,"token":"123456"}""",
             )
+            // select には ACK がユニキャスト返信される（Desktopは ACK 受信まで再送する）
+            val ack = DiscoveryCodec.parse(receive(desktop))
+            assertTrue(ack is DiscoverySelectAck)
+            assertEquals("android-test", (ack as DiscoverySelectAck).deviceId)
             assertTrue("select後にonSelectedが呼ばれる", latch.await(5, TimeUnit.SECONDS))
             assertEquals("127.0.0.1", selectedHost)
             assertEquals(8765, selectedPort)
             assertEquals("123456", selectedToken)
+            // 待受は継続する（重複 select への ACK 返信のため。終了は stop() で行う）
+            assertTrue(listener.isRunning)
+            listener.stop()
             assertEquals(false, listener.isRunning)
+        } finally {
+            desktop.close()
+            listener.stop()
+        }
+    }
+
+    @Test
+    fun `重複 select には毎回ACKを返し onSelected は1回だけ`() {
+        var selectedCount = 0
+        val latch = CountDownLatch(1)
+        val listener = DesktopDiscoveryListener(
+            deviceId = "android-test",
+            deviceName = "TestPhone",
+            model = "TestModel",
+            onSelected = { _, _, _ ->
+                selectedCount++
+                latch.countDown()
+            },
+            port = 0,
+        )
+        listener.start()
+        val port = requireNotNull(listener.boundPort)
+        val desktop = desktopSocket()
+        try {
+            val select =
+                """{"app":"screact","messageType":"discovery_select","deviceId":"android-test",
+                    "selected":true,"wsPort":8765,"token":"123456"}"""
+            repeat(3) { send(desktop, port, select) }
+            // 3回の select すべてに ACK が返る
+            repeat(3) {
+                val ack = DiscoveryCodec.parse(receive(desktop))
+                assertTrue(ack is DiscoverySelectAck)
+            }
+            assertTrue(latch.await(5, TimeUnit.SECONDS))
+            // 少し待っても onSelected は1回のまま
+            Thread.sleep(300)
+            assertEquals(1, selectedCount)
+            // 選択後は offer に応答しない（ACK専任モード）
+            send(
+                desktop,
+                port,
+                """{"app":"screact","messageType":"discovery_offer","wsPort":8765,"token":"123456"}""",
+            )
+            val quiet = DatagramPacket(ByteArray(4096), 4096)
+            desktop.soTimeout = 500
+            var replied = false
+            try {
+                desktop.receive(quiet)
+                replied = true
+            } catch (_: SocketTimeoutException) {
+                // 応答なし＝期待どおり
+            }
+            assertEquals(false, replied)
         } finally {
             desktop.close()
             listener.stop()

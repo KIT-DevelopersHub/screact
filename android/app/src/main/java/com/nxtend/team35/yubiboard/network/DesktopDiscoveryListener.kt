@@ -9,9 +9,14 @@ import kotlin.concurrent.thread
 /**
  * 「画面認識開始」押下後の待受け。UDP :8766 で Desktop の discovery_offer を
  * 待ち、応答(discovery_response)を送信元へユニキャスト返信する。Desktop に
- * 選ばれる（discovery_select 受信）と onSelected(host, wsPort, token) を1回
- * 呼んで待受を終了する。host は select の送信元アドレスを優先する
- * （offer の ip フィールドは参考値）。
+ * 選ばれる（discovery_select 受信）と ACK(discovery_select_ack) を返信した
+ * うえで onSelected(host, wsPort, token) を1回呼ぶ。host は select の送信元
+ * アドレスを優先する（offer の ip フィールドは参考値）。
+ *
+ * select 受信後も待受は止めない: Desktop は ACK を受信するまで select を
+ * 再送するため、重複 select に ACK を返し続ける必要がある（最初の ACK が
+ * 落ちた場合の到達保証）。待受の終了は呼び出し側（ViewModel）が WebSocket
+ * 確立後などに stop() で行う。
  *
  * WifiManager.MulticastLock はブロードキャスト受信をフィルタする端末向け。
  * 呼び出し側（ViewModel）が acquire/release 可能な形で渡す（テストでは null）。
@@ -65,6 +70,7 @@ class DesktopDiscoveryListener(
     private fun loop(socket: DatagramSocket) {
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         var respondedOnce = false
+        var selectedOnce = false
         while (running) {
             val packet = DatagramPacket(buffer, buffer.size)
             try {
@@ -76,6 +82,7 @@ class DesktopDiscoveryListener(
             val text = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
             when (val message = DiscoveryCodec.parse(text)) {
                 is DiscoveryOffer -> {
+                    if (selectedOnce) continue // 選択済み: 以後の offer には応答しない
                     if (!respondedOnce) {
                         respondedOnce = true
                         AppDiagnostics.event(
@@ -98,18 +105,34 @@ class DesktopDiscoveryListener(
                 is DiscoverySelect -> {
                     if (message.deviceId != deviceId || !message.selected) continue
                     val host = packet.address?.hostAddress ?: message.ip ?: continue
+                    // 到達保証: select を受けるたび（再送された重複分にも）ACK を
+                    // ユニキャスト返信する。Desktop は ACK 受信まで select を再送する。
+                    val ack = DiscoveryCodec.encode(DiscoverySelectAck(deviceId = deviceId))
+                        .toByteArray(Charsets.UTF_8)
+                    runCatching {
+                        socket.send(DatagramPacket(ack, ack.size, packet.address, packet.port))
+                        AppDiagnostics.event(
+                            "discovery",
+                            "select_ack_sent",
+                            mapOf("to" to packet.address?.hostAddress, "duplicate" to selectedOnce),
+                        )
+                    }.onFailure {
+                        AppDiagnostics.event("discovery", "select_ack_send_failed", mapOf("message" to it.message))
+                    }
+                    if (selectedOnce) continue // 自動接続の開始は最初の1回だけ
+                    selectedOnce = true
                     AppDiagnostics.event(
                         "discovery",
                         "selected",
                         mapOf("host" to host, "wsPort" to message.wsPort),
                     )
                     onLog("PCに選択されました。自動接続します")
-                    stop()
+                    // 待受はここでは止めない（重複 select への ACK 返信を続ける）。
+                    // 終了は ViewModel が WebSocket 確立/切断時に stop() する。
                     onSelected(host, message.wsPort, message.token)
-                    return
                 }
 
-                is DiscoveryResponse, null -> Unit // 他端末の応答・無関係なデータは無視
+                is DiscoveryResponse, is DiscoverySelectAck, null -> Unit // 他端末の応答等は無視
             }
         }
     }

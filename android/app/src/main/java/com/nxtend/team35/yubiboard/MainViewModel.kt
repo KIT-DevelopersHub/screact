@@ -118,7 +118,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun onDesktopSelected(host: String, wsPort: Int, token: String) {
-        stopDiscovery()
+        // 待受はここでは止めない: Desktop は ACK を受信するまで select を再送する
+        // ため、リスナーを生かして重複 select に ACK を返し続ける（到達保証）。
+        // WebSocket が確立/終了したら handleConnectionChanged 側で stop する。
         updateProduction { it.copy(pairing = PairingUiState.IDLE) }
         connect(host, wsPort.toString(), token)?.let { error ->
             mutableLog.postValue(error)
@@ -291,6 +293,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleConnectionChanged(snapshot: ConnectionSnapshot) {
+        // 接続の決着（確立 or 終了）でUDP待受を確実に終了する。select直後は
+        // 重複selectへのACK返信のためにリスナーを生かしている（onDesktopSelected参照）。
+        if (snapshot.status in setOf(
+                ConnectionStatus.CONNECTED,
+                ConnectionStatus.DISCONNECTED,
+                ConnectionStatus.ERROR,
+            )
+        ) {
+            stopDiscovery()
+        }
         mutableConnection.postValue(snapshot)
         updateProduction { current ->
             val resetCaptureState = snapshot.status !in setOf(ConnectionStatus.CONNECTED)
