@@ -140,6 +140,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: HomePage(port: port)));
     await tester.pump();
 
+    // モード切替は「開発者向け設定」の折りたたみ配下に移動したため先に展開する。
+    await jumpUntil(tester, find.text('開発者向け設定'));
+    await tester.tap(find.text('開発者向け設定'));
+    await settle(tester); // 展開アニメーション（実時間）を待つ
+
     final calib = find.ancestor(
       of: find.text('位置合わせ'),
       matching: find.byWidgetPredicate((w) => w is OutlinedButton),

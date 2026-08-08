@@ -14,6 +14,16 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     overlayMode = OverlayModeController(window: self, flutterViewController: flutterViewController)
 
+    // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
+    // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、
+    //   FlutterViewController 差し替えで xib の初期サイズも失われるため）。
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.title = "Screact"
+      self.setContentSize(NSSize(width: 1160, height: 740))
+      self.center()
+    }
+
     super.awakeFromNib()
   }
 }
@@ -135,7 +145,7 @@ final class OverlayModeController: NSObject {
     if let button = item.button {
       // deployment target 10.14 のため SF Symbol は使わずテキストで表示
       button.title = "✏"
-      button.toolTip = "YubiBoard オーバーレイ中（クリックで解除メニュー）"
+      button.toolTip = "Screact オーバーレイ中（クリックで解除メニュー）"
     }
     let menu = NSMenu()
     let exit = NSMenuItem(

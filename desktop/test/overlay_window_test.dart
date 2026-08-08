@@ -92,13 +92,13 @@ void main() {
       // ホットキー相当: ネイティブから overlayEntered
       await pushNativeCall('overlayEntered');
       await tester.pump();
-      expect(find.text('接続'), findsNothing);
+      expect(find.text('Screact'), findsNothing);
       expect(find.text('オーバーレイ表示'), findsNothing);
 
       // メニューバー相当: ネイティブから overlayExited
       await pushNativeCall('overlayExited');
       await tester.pump();
-      expect(find.text('接続'), findsOneWidget);
+      expect(find.text('Screact'), findsOneWidget);
     });
 
     testWidgets('ボタン押下で enterOverlay がネイティブへ飛ぶ', (tester) async {
@@ -108,11 +108,13 @@ void main() {
       await tester.scrollUntilVisible(
           find.text('オーバーレイ表示'), 80,
           scrollable: find.byType(Scrollable).first);
+      await tester.ensureVisible(find.text('オーバーレイ表示'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('オーバーレイ表示'));
       await tester.pump();
       expect(calls, contains('enterOverlay'));
       // オーバーレイモードに切り替わり、パネルは消えている
-      expect(find.text('接続'), findsNothing);
+      expect(find.text('Screact'), findsNothing);
     });
   });
 }
