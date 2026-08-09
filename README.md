@@ -1,178 +1,225 @@
-# Screact（旧称YubiBoard）
+# Screact（旧称 YubiBoard）
 
-Android端末の背面カメラで利用者の手を撮影し、検出した手指骨格データをPCへ送信することで、PC画面上でのポインター操作や描画操作を実現するシステムです。
+Screactは、Android端末の背面カメラで手を認識し、PCを非接触で操作するシステムです。スマホからカメラ映像そのものは送らず、検出した手指の21点座標と位置合わせ情報だけをPCへ送信します。
+
+PC側では座標変換・平滑化・ジェスチャー認識を行い、透明なネイティブオーバーレイへの描画や、ポインター・クリック・ドラッグ・スクロールへ変換します。
 
 > [!NOTE]
-> 正式名称は「Screact」です（開発初期の仮称は YubiBoard。パッケージIDなど内部識別子には旧称が残ります）。
+> 正式名称は「Screact」です。開発初期の仮称は「YubiBoard」で、パッケージIDや一部の内部識別子には旧称が残っています。
 
-## 想定利用フロー
+## 現在のプロダクト
 
-1. PCアプリを起動して接続待機にする。
-2. Androidアプリを起動する。初回はIP・ポート・6桁コードで接続し、2回目以降は保存済みの信頼済み接続情報で自動接続する。
-3. スマホをPC画面全体と手が映る位置へ配置・固定する。
-4. PC画面で`配置OK`を押し、PCが画面四隅へArUcoマーカーを表示する。
-5. Androidが4マーカーを有効5フレーム安定認識し、PCがホモグラフィを確定する。
-6. Androidが手追跡へ移り21点骨格を連続送信する。
-7. PCが骨格を平滑化し、指形状・ジェスチャー認識、ホモグラフィ変換、描画・OS入力を行う。
-
-PCアプリを起動し直した場合は位置合わせをやり直す。同じPCプロセス中の一時的な通信断だけ、確認済み位置合わせを再利用する。
+- Androidアプリ
+  - Kotlin / Jetpack Composeによる本番UI
+  - CameraXの背面カメラ映像からMediaPipeで手指21点を検出
+  - OpenCV ArUcoでPC画面の四隅を認識
+  - UDPによるPC自動検出と、IP・ポート・6桁コードによる手動接続
+  - 水彩背景とキャラクターを使った、横画面・スクロール不要のガイドUI
+- デスクトップアプリ
+  - Flutterによる接続・位置合わせ・操作状態・設定の本番UI
+  - ホモグラフィ変換、One-Euro平滑化、ジェスチャー認識
+  - 校正完了後に透明・クリック透過のネイティブオーバーレイへ自動移行
+  - 認識感度、平滑化、位置合わせ条件を実行時に調整
+  - macOSでCGEventによる実ポインター・クリック・ドラッグ・スクロール入力
 
 ## システム構成
 
-本システムは、Androidアプリとデスクトップアプリで構成します。
+```mermaid
+flowchart LR
+    D["Desktop Flutter<br/>接続・位置合わせ・認識"] -- "UDP :8766<br/>discovery_offer" --> A["Android<br/>CameraX + MediaPipe + ArUco"]
+    A -- "WebSocket :8765<br/>認証・位置合わせ・21点座標" --> D
+    D --> V["透明オーバーレイ<br/>描画"]
+    D --> O["OS入力<br/>ポインター・クリック・スクロール"]
+```
 
-### Androidアプリ
+| 経路 | 既定値 | 用途 |
+|---|---:|---|
+| UDP | `8766` | PCのIP・WebSocketポート・6桁コードをAndroidへ知らせる自動発見専用 |
+| WebSocket over TCP | `8765` / `/ws/v1/input` | 認証、セッション、位置合わせ、手指骨格、制御メッセージ |
 
-Android端末の背面カメラを使用し、主に以下の処理を行います。
+UDPで手指データは送りません。接続成立後の実データはWebSocketだけを使用します。
 
-- カメラ画像の取得
-- ArUcoマーカーの検出
-- MediaPipeによる21点の手指骨格検知
-- 検出結果のJSON変換
-- WebSocketによるPCへのデータ送信
-- 接続状態や検出状態のデバッグ表示
+詳細は[ゼロコンフィグ・ペアリング仕様](./docs/sequence-zero-config-pairing.md)を参照してください。
+
+## 利用手順
+
+### 1. 接続
+
+1. PCとAndroid端末を同じWi-Fi／LANへ接続する。
+2. 両方のアプリを起動し、Androidでカメラ使用を許可する。
+3. Androidで「画面認識開始」を押し、PC検出待ちにする。
+4. PCで「始める」を押す。
+5. PCがUDPで接続情報を広告し、Androidが自動的にPCのWebSocketへ接続する。
+
+自動検出できない場合は、Androidの「手動で接続する（IP・6桁コード）」を開き、PC画面に表示されたLAN内IP、ポート、6桁コードを入力してください。`127.0.0.1`は通常のWi-Fi接続には使用しません。
+
+### 2. 位置合わせ
+
+1. Androidの背面カメラにPC画面全体と手が映るよう、スマホを固定する。
+2. PCで「位置合わせ開始」を押す。
+3. PCが全画面表示する4個のArUcoマーカーをAndroidが検出する。
+4. 有効な座標が5フレーム安定すると、PCがホモグラフィを確定する。
+5. Androidが手追跡へ切り替わり、PCは透明オーバーレイへ自動移行する。
+
+PCアプリを終了すると位置合わせ結果は失われます。同じPCプロセス内の一時的な通信断では、確認済みの位置合わせを再利用できます。
+
+### 3. オーバーレイ
+
+透明オーバーレイは他のアプリやスライドの上へ描画を重ねる標準の操作画面です。旧来の白いアプリ内描画キャンバスは使用しません。
+
+オーバーレイを解除する方法:
+
+- macOS: メニューバーの鉛筆アイコン、または `⌘⇧O`
+- Windows: `Ctrl+Shift+O`
+
+解除後はScreactの操作パネルから「オーバーレイを再表示」または「インクを消去」を選べます。スマホ切断時やPC側のサーバ停止時は、オーバーレイも自動的に解除されます。
+
+> [!IMPORTANT]
+> macOS版Screact自体をmacOSのネイティブフルスクリーンにすると、透明オーバーレイへの移行は拒否されます。Screactは通常ウィンドウで使用してください。他アプリのフルスクリーン画面上への表示には対応しています。
+
+## ジェスチャー
+
+ジェスチャーの判定はPC側で行います。
+
+| 手の動き | 操作 |
+|---|---|
+| 人差し指を動かす | ポインター移動 |
+| 親指と人差し指をつまむ | クリック |
+| つまんだまま動かす | ドラッグ |
+| 人差し指と中指の先をくっつけて動かす | 透明オーバーレイへ描画 |
+| 人差し指と中指を立てて動かす | 縦横スクロール |
+
+手を見失った場合は、押下中・描画中の状態を安全に解除します。現在、手による拡大・縮小ジェスチャーは実装していません。
+
+## 必要環境
+
+### Android
+
+- Android 7.0（API 24）以上
+- 背面カメラ
+- Android Studio、Android SDK 36、JDK 17
+- 実機へのインストール時はAndroid Platform Tools（`adb`）とUSBデバッグ
+
+アプリが使用する権限はカメラとネットワーク関連です。マイク、位置情報、ストレージ権限は要求しません。画面は操作中にスリープしない設定です。
+
+### デスクトップ
+
+- Flutter（Dart SDK `^3.7.2`に対応する版）
+- macOS: フル版Xcode
+- Windows: Visual StudioのDesktop development with C++環境
+- PCとAndroidが相互通信できる同一LAN
+
+macOSでは、初回接続時にローカルネットワークへのアクセスを許可してください。実ポインター・クリック・スクロールを使用するには、システム設定の「プライバシーとセキュリティ」→「アクセシビリティ」でScreactを許可します。
+
+## クイックスタート
 
 ### デスクトップアプリ
 
-Androidアプリから受信したデータを使用し、主に以下の処理を行います。
+macOS:
 
-- Android端末との接続管理
-- 画面位置合わせ
-- カメラ座標から画面座標への変換
-- 座標の平滑化
-- ジェスチャー認識
-- ポインター操作
-- クリック、ドラッグ、スクロール、拡大・縮小
-- 文字や線の描画
-- ログ保存とデバッグ表示
+```bash
+cd desktop
+flutter pub get
+flutter run -d macos
+```
+
+`xcode-select`がCommand Line Toolsを向いている場合は、フル版Xcodeを明示できます。
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer flutter run -d macos
+```
+
+Windows:
+
+```powershell
+cd desktop
+flutter pub get
+flutter run -d windows
+```
+
+### Androidアプリ
+
+macOS／Linux:
+
+```bash
+cd android
+bash ./gradlew testDebugUnitTest lintDebug assembleDebug
+adb devices
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.nxtend.team35.yubiboard/.MainActivity
+```
+
+Windowsでは`gradlew.bat`を使用します。Android Studioで開く場合は、リポジトリ全体ではなく`android/`をプロジェクトルートとして選択してください。
+
+## 検証
+
+デスクトップ:
+
+```bash
+cd desktop
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer flutter build macos --debug
+```
+
+Android:
+
+```bash
+cd android
+bash ./gradlew testDebugUnitTest lintDebug assembleDebug
+bash ./gradlew connectedDebugAndroidTest
+```
+
+`connectedDebugAndroidTest`には、USBデバッグを有効にしたAndroid実機またはエミュレーターが必要です。
 
 ## ディレクトリ構成
 
 ```text
 2026-Team-35/
-├─ .git/
-├─ .github/               # GitHub Actionsなど、プロジェクト共通
-├─ .gitignore
-├─ README.md              # プロジェクト全体のREADME
-├─ docs/                  # 要件定義書など
-│
-├─ desktop/               # PC・デスクトップアプリ
-│  └─ ...
-│
-└─ android/               # Android Studioで開くプロジェクトルート
-   ├─ app/
-   ├─ gradle/
-   ├─ build.gradle.kts
-   ├─ settings.gradle.kts
-   ├─ gradlew
-   └─ gradlew.bat
+├─ README.md
+├─ docs/                  # 全体仕様、通信シーケンス、Android／Desktop仕様
+├─ android/               # Kotlin + Jetpack Compose Androidアプリ
+│  ├─ app/
+│  ├─ gradle/
+│  └─ build.gradle.kts
+└─ desktop/               # Flutterデスクトップアプリ
+   ├─ assets/
+   ├─ lib/
+   ├─ macos/
+   ├─ windows/
+   └─ test/
 ```
 
-## 開発時の注意
+`android/`と`desktop/`は同じGitリポジトリで管理しています。各ディレクトリ内で別の`git init`を実行しないでください。
 
-### Gitの操作
+## 実装状況
 
-Gitの操作は、原則としてリポジトリのルートディレクトリで行います。
+- [x] Android本番UI、カメラプレビュー、手指21点追跡
+- [x] ArUcoマーカー検出と画面位置合わせ
+- [x] UDPによるPC自動検出と手動接続フォールバック
+- [x] WebSocket認証、信頼済み接続、自動再接続
+- [x] Android・実デスクトップアプリ間の統合
+- [x] Flutterデスクトップ本番UIと実行時設定
+- [x] macOS／Windowsの透明・クリック透過オーバーレイ
+- [x] macOSのネイティブOS入力
+- [x] 単体、Widget、接続、位置合わせ、回帰テスト
+- [ ] WindowsのネイティブOS入力
+- [ ] 複数Android端末の事前選択
 
-```text
-2026-Team-35/
-```
+## 既知の制約
 
-`android/`と`desktop/`は同じGitリポジトリで管理するため、それぞれのディレクトリ内で`git init`を実行しないでください。
-
-### Androidアプリの開き方
-
-Android Studioでは、リポジトリ全体ではなく、次のディレクトリをプロジェクトとして開きます。
-
-```text
-2026-Team-35/android/
-```
-
-### デスクトップアプリの開き方
-
-デスクトップアプリの開発環境では、次のディレクトリをプロジェクトルートとして使用します。
-
-```text
-2026-Team-35/desktop/
-```
-
-## 初期実装の進行順序
-
-初期実装は、以下の順序で進めます。
-
-1. Androidアプリを実機で起動する
-2. Android端末の背面カメラ映像を表示する
-3. 手の21点ランドマークを検出・表示する
-4. 骨格データをJSON形式へ変換する
-5. WebSocketでPCへデータを送信する
-6. PC側で受信した骨格データを表示する
-7. ArUcoマーカーによる画面位置合わせを実装する
-8. 指先座標をPC画面座標へ変換する
-9. ポインター・描画・ジェスチャー操作を実装する
-10. ログ保存と統合テストを行う
-
-## 想定する通信
-
-初期実装では、Android端末とPCを同一LANへ接続し、WebSocketを使用してJSON形式のデータを送受信します。
-
-AndroidアプリからPCへ送信する主なデータは以下です。
-
-- 接続開始情報
-- 初回ペアリングまたは信頼済み再接続情報
-- 手指骨格の21点座標
-- 手を検出できなかったことを示す情報
-- ArUcoマーカーの検出座標
-- フレーム番号
-- データ取得時刻
-- 接続維持情報
-
-カメラ映像そのものは、原則としてPCへ常時送信しません。
-
-## 開発環境
-
-### Android
-
-- Android Studio
-- Kotlin
-- CameraX
-- MediaPipe Tasks Vision Hand Landmarker
-- WebSocket
-- JSON
-
-### デスクトップ
-
-使用技術は、デスクトップアプリの構成決定後に追記します。
+- 自動検出はUDPブロードキャストを使用するため、VPN、ゲストWi-Fi、AP isolation、OSファイアウォール、macOSのローカルネットワーク設定によって失敗する場合があります。その場合は手動接続を使用してください。
+- PCは同時に1台のAndroidだけを受け付けます。複数端末が待機している場合は、最初にWebSocket接続した端末が選ばれます。
+- Windowsでは透明オーバーレイを利用できますが、ポインター・クリック・スクロールのネイティブOS入力はまだ接続されていません。
+- 6桁コードは同一LAN内での試作向けペアリングです。高機密用途の認証方式としては設計されていません。
 
 ## ドキュメント
 
-要件定義書や現行仕様書などのプロジェクト資料は、`docs/`ディレクトリで管理します。
-
-```text
-docs/
-├─ README.md                     # 文書索引と編集ルール
-├─ system/                       # システム全体の要件
-├─ android/                      # Androidの要件・仕様・計画・手順
-└─ desktop/                      # デスクトップアプリの要件・仕様・計画
-```
-
-文書一覧は[`docs/README.md`](./docs/README.md)を参照してください。
-
-## 現在の状態
-
-AndroidアプリのMVP実装、自動検証、Android実機デバッグ・チュートリアル全項目の実施が完了しています。Android実機とモックPC間ではUSB／LAN接続、手検出、位置合わせ、障害処理、自動再接続、10分連続動作を確認済みです。実PCアプリとの統合が次の対象です。
-
-信頼済み情報によるアプリ起動時の自動接続と、PCの`配置OK`を起点にする位置合わせはAndroidとモックPCへ実装済みです。現行AndroidのAs-Builtは[`docs/android/android-current-spec.md`](./docs/android/android-current-spec.md)を参照してください。
-
-- [x] ディレクトリ構成の整理
-- [x] Androidプロジェクトの作成
-- [x] Android実機でのアプリ起動
-- [x] CameraXによるカメラプレビュー実装
-- [x] MediaPipeによる手指骨格検知実装
-- [x] ArUcoマーカー検出・安定化実装
-- [x] WebSocketクライアント・モックサーバー実装
-- [x] 再接続・動作設定・デバッグ表示実装
-- [ ] デスクトップアプリの初期構築
-- [x] Android・モックPC間のUSB接続確認
-- [x] Android実機デバッグ・チュートリアル完了
-- [x] 10分連続動作・通信断からの自動復帰確認
-- [ ] Android・実PCアプリ間の統合確認
+- [文書索引](./docs/README.md)
+- [ゼロコンフィグ・ペアリング仕様](./docs/sequence-zero-config-pairing.md)
+- [位置合わせシーケンス](./docs/sequence-calibration-flow.md)
+- [Android現行仕様](./docs/android/android-current-spec.md)
+- [Androidプロトコル仕様](./docs/android/android-protocol-v1.md)
+- [Android実機デバッグ手順](./docs/android/android-debug-tutorial.md)
+- [システム要件](./docs/system/system-requirements.md)
