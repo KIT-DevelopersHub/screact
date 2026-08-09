@@ -31,9 +31,6 @@ Androidスマホの背面カメラをPC画面へ向けると、MediaPipeが手�
 
 専用センサーや電子ペンは必要ありません。手元にあるAndroidスマホとPCを同じネットワークへ接続するだけで、いつもの画面を、人の動きに反応する画面へ変えられます。
 
-> [!NOTE]
-> 正式名称は「Screact」です。開発初期の仮称は「YubiBoard」で、パッケージIDなど一部の内部識別子には旧称が残っています。
-
 ## 解決したいこと
 
 授業や発表で使う画面は、多くの場合「表示するだけ」です。画面へ書き込む、スライドを送る、PCを操作するたびに端末の前へ戻ると、説明やコミュニケーションの流れが止まってしまいます。
@@ -65,9 +62,13 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
 
 校正後は透明・クリック透過のネイティブオーバーレイへ自動移行します。旧来の白いアプリ内キャンバスではなく、ブラウザ、PDF、スライドなど、普段使っているアプリの上へそのまま描画できます。
 
+### 5. 起動からScreactらしい体験
+
+Android版は、Screactのロゴアニメーションを使ったスプラッシュと、片目のゴーストを描いたアダプティブ／従来形式のアプリアイコンを備えています。接続前から操作中まで、プロダクトの世界観を統一しています。
+
 ## 画面遷移
 
-実際の通信やジェスチャー操作で画面を進めるのではなく、現行アプリが持つ各UI状態を直接表示して撮影しました。デスクトップはmacOS版Screactのアプリウィンドウ、AndroidはPixel 8 Pro上の本番Compose UIです。Androidの左側はカメラ領域で、撮影時は黒く表示しています。
+実際の通信やジェスチャー操作で画面を進めるのではなく、現行アプリが持つ各UI状態を直接表示して撮影しました。デスクトップはmacOS版Screactのアプリウィンドウ、AndroidはPixel 8 Pro上の本番Compose UIです。Androidの左側には、PC画面へ向けた背面カメラの実映像を表示しています。
 
 <table>
   <tr>
@@ -82,7 +83,7 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
       <br><sub>接続情報を確認し、「始める」を選択</sub>
     </td>
     <td>
-      <img src="./docs/assets/readme/android/android-start.png" alt="Android画面認識開始画面">
+      <img src="./docs/assets/readme/android/android-start.jpg" alt="Android画面認識開始画面">
       <br><sub>スマホを固定して画面認識を開始</sub>
     </td>
   </tr>
@@ -93,7 +94,7 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
       <br><sub>UDPで接続情報と6桁コードを広告</sub>
     </td>
     <td>
-      <img src="./docs/assets/readme/android/android-discovery.png" alt="Android自動検出待受画面">
+      <img src="./docs/assets/readme/android/android-discovery.jpg" alt="Android自動検出待受画面">
       <br><sub>PCからの接続情報を待機</sub>
     </td>
   </tr>
@@ -104,7 +105,7 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
       <br><sub>接続後、位置合わせを開始</sub>
     </td>
     <td>
-      <img src="./docs/assets/readme/android/android-placement.png" alt="Androidスマホ設置画面">
+      <img src="./docs/assets/readme/android/android-placement.jpg" alt="Androidスマホ設置画面">
       <br><sub>PC画面の四隅が映る位置へ固定</sub>
     </td>
   </tr>
@@ -115,7 +116,7 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
       <br><sub>画面四隅へArUcoマーカーを表示</sub>
     </td>
     <td>
-      <img src="./docs/assets/readme/android/android-calibration.png" alt="Androidマーカー検出画面">
+      <img src="./docs/assets/readme/android/android-calibration.jpg" alt="Androidマーカー検出画面">
       <br><sub>4個のマーカーを検出して座標を補正</sub>
     </td>
   </tr>
@@ -126,7 +127,7 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
       <br><sub>透明オーバーレイの再表示・インク消去</sub>
     </td>
     <td>
-      <img src="./docs/assets/readme/android/android-tracking.png" alt="Android手検出中画面">
+      <img src="./docs/assets/readme/android/android-tracking.jpg" alt="Android手検出中画面">
       <br><sub>手を追跡し、PCへ座標と状態を送信</sub>
     </td>
   </tr>
@@ -136,20 +137,28 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
 
 <table>
   <tr>
+    <th width="50%">Androidスプラッシュ</th>
+    <th width="50%">Androidアプリアイコン</th>
+  </tr>
+  <tr>
+    <td><img src="./docs/assets/readme/android/android-splash.jpg" alt="Android起動スプラッシュ"></td>
+    <td align="center"><img src="./docs/assets/readme/android/android-app-icon.png" width="192" alt="Screact Androidアプリアイコン"></td>
+  </tr>
+  <tr>
     <th width="50%">デスクトップ設定</th>
     <th width="50%">Android手動接続</th>
   </tr>
   <tr>
     <td><img src="./docs/assets/readme/desktop/06-settings.jpg" alt="デスクトップ設定画面"></td>
-    <td><img src="./docs/assets/readme/android/android-manual-connection.png" alt="Android手動接続画面"></td>
+    <td><img src="./docs/assets/readme/android/android-manual-connection.jpg" alt="Android手動接続画面"></td>
   </tr>
   <tr>
     <th>Android操作待機</th>
     <th>Android再接続</th>
   </tr>
   <tr>
-    <td><img src="./docs/assets/readme/android/android-ready.png" alt="Android操作可能画面"></td>
-    <td><img src="./docs/assets/readme/android/android-reconnecting.png" alt="Android再接続画面"></td>
+    <td><img src="./docs/assets/readme/android/android-ready.jpg" alt="Android操作可能画面"></td>
+    <td><img src="./docs/assets/readme/android/android-reconnecting.jpg" alt="Android再接続画面"></td>
   </tr>
 </table>
 
@@ -176,9 +185,6 @@ Androidスマホ、PC、映したい画面があれば利用できます。PCが
 - Windows: `Ctrl+Shift+O`
 
 解除後は操作パネルから「オーバーレイを再表示」または「インクを消去」を選べます。スマホ切断時やPC側の接続停止時にも自動解除されます。
-
-> [!IMPORTANT]
-> macOS版Screact自身は、通常ウィンドウで使用してください。Screact自身がmacOSのネイティブフルスクリーンに入っている場合、クラッシュ防止のためオーバーレイへの移行を拒否します。他アプリのフルスクリーン画面上への表示には対応しています。
 
 ## 操作の仕組み
 
@@ -336,6 +342,7 @@ bash ./gradlew connectedDebugAndroidTest
 ## 実装状況
 
 - [x] Android本番UI、カメラプレビュー、手指21点追跡
+- [x] Androidアニメーションスプラッシュとゴーストアプリアイコン
 - [x] ArUcoマーカー検出と画面位置合わせ
 - [x] UDPによるPC自動検出と手動接続フォールバック
 - [x] WebSocket認証、信頼済み接続、自動再接続
@@ -354,6 +361,7 @@ bash ./gradlew connectedDebugAndroidTest
 - 位置合わせ結果はPCアプリ終了時に失われます。同じPCプロセス内の一時的な通信断では再利用できます。
 - Windowsでは透明オーバーレイを利用できますが、ポインター・クリック・スクロールのネイティブOS入力はまだ接続されていません。
 - 6桁コードとWebSocketは、信頼できる同一LAN内での試作利用を前提としています。
+- macOS版Screact自身がネイティブフルスクリーンの場合、オーバーレイへの移行を拒否します。Screactは通常ウィンドウで起動してください。
 
 ## ドキュメント
 
