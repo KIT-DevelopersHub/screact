@@ -13,6 +13,7 @@ import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
+import 'calibration_target.dart';
 import 'overlay_canvas.dart';
 
 /// 共通の操作面＋オーバーレイのライブプレビュー。macOSではこれ自体がアプリの
@@ -159,15 +160,21 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
-  /// キャリブ画像の全画面表示（白背景＋ArUcoターゲットを画面いっぱいに引き伸ばす。
-  /// マーカー中心位置の比率が設定のインセット既定値と一致する）。
+  /// キャリブ用 ArUco ターゲットの全画面表示。
+  ///
+  /// 従来は画像を [BoxFit.fill] で引き伸ばしていたため、16:9 以外のディスプレイでは
+  /// マーカーが歪み・4隅が画面の角から離れてズレていた。現在は実際の表示領域から
+  /// 各マーカーを正方形のまま4隅へ固定マージンで吸着配置し、算出したマーカー中心
+  /// インセットを [CalibrationConfig] へ反映して、描画位置と位置合わせの座標系を
+  /// アスペクト比に依存せず常に一致させる（リサイズにも追従）。
   Widget _calibrationTarget() {
-    return Container(
-      color: Colors.white,
-      alignment: Alignment.center,
-      child: SizedBox.expand(
-        child: Image.asset(_targetAsset, fit: BoxFit.fill),
-      ),
+    return CalibrationTargetView(
+      assetName: _targetAsset,
+      onInsets: (insetX, insetY) {
+        _calibConfig
+          ..markerInsetX = insetX
+          ..markerInsetY = insetY;
+      },
     );
   }
 
