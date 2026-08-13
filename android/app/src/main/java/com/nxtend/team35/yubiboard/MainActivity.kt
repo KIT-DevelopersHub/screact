@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var cameraStatus by mutableStateOf("カメラを起動中")
+    private var usingFrontCamera by mutableStateOf(false)
     private var cameraPermissionGranted by mutableStateOf(false)
     private var cameraPermissionPermanentlyDenied by mutableStateOf(false)
     private var cameraStarted = false
@@ -282,6 +283,8 @@ class MainActivity : ComponentActivity() {
                         onExportDiagnostics = {
                             diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
                         },
+                        usingFrontCamera = usingFrontCamera,
+                        onToggleCamera = ::toggleCameraLens,
                     )
                 } else {
                     ProductionScreen(
@@ -294,6 +297,14 @@ class MainActivity : ComponentActivity() {
                             Box(Modifier.fillMaxSize()) {
                                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
                                 AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
+                                CameraFlipButton(
+                                    usingFrontCamera = usingFrontCamera,
+                                    onClick = ::toggleCameraLens,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .safeDrawingPadding()
+                                        .padding(12.dp),
+                                )
                             }
                         },
                         onRequestCameraPermission = {
@@ -363,6 +374,23 @@ class MainActivity : ComponentActivity() {
         cameraSession.start(profile, allowFallback = !profile.debugOnly)
     }
 
+    private fun toggleCameraLens() {
+        if (!cameraStarted) {
+            transientMessage = "カメラ起動後に切り替えられます"
+            return
+        }
+        val switched = cameraSession.toggleLensFacing()
+        if (!switched) {
+            transientMessage = "反対側のカメラが見つかりません"
+            return
+        }
+        usingFrontCamera = cameraSession.isFrontFacing
+        previewView.contentDescription =
+            if (usingFrontCamera) "前面カメラのプレビュー" else "背面カメラのプレビュー"
+        transientMessage =
+            if (usingFrontCamera) "前面カメラに切り替えました" else "背面カメラに切り替えました"
+    }
+
     private fun openAppSettings() {
         startActivity(
             Intent(
@@ -428,6 +456,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** 前面/背面カメラを切り替えるオーバーレイボタン。現在の向きに応じてラベルを反転する。 */
+@Composable
+private fun CameraFlipButton(
+    usingFrontCamera: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(onClick = onClick, modifier = modifier) {
+        Text(if (usingFrontCamera) "背面カメラへ" else "前面カメラへ")
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun YubiBoardScreen(
@@ -450,6 +490,8 @@ private fun YubiBoardScreen(
     onFakeMarkers: () -> Unit,
     onClearDiagnostics: () -> Unit,
     onExportDiagnostics: () -> Unit,
+    usingFrontCamera: Boolean,
+    onToggleCamera: () -> Unit,
 ) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showDiagnostics by rememberSaveable { mutableStateOf(false) }
@@ -465,6 +507,14 @@ private fun YubiBoardScreen(
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
         AndroidView(factory = { debugOverlay }, modifier = Modifier.fillMaxSize())
+        CameraFlipButton(
+            usingFrontCamera = usingFrontCamera,
+            onClick = onToggleCamera,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .safeDrawingPadding()
+                .padding(12.dp),
+        )
 
         FlowRow(
             modifier = Modifier.safeDrawingPadding().padding(12.dp).fillMaxWidth(),
