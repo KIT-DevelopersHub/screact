@@ -35,7 +35,54 @@ def make_message(frame_id: int, captured_at_ms: int, detected: bool = True) -> d
     }
 
 
+def make_two_hand_message(frame_id: int, captured_at_ms: int) -> dict:
+    def hand(track_id: int, offset: float) -> dict:
+        return {
+            "trackId": track_id,
+            "coordinateSpace": "normalized_camera",
+            "landmarkFormat": "mediapipe_hand_21",
+            "landmarks": [
+                [offset + (index % 5) * 0.04, 0.2 + (index // 5) * 0.12, -0.01 * index]
+                for index in range(21)
+            ],
+        }
+
+    hands = [hand(7, 0.15), hand(12, 0.65)]
+    return {
+        "receivedAtUtc": f"2026-08-05T08:00:00.{frame_id:03d}Z",
+        "message": {
+            "schemaVersion": 1,
+            "messageType": "hand_frame",
+            "sessionId": "session-test",
+            "frameId": frame_id,
+            "capturedAtMonotonicMs": captured_at_ms,
+            "hands": hands,
+            "hand": {"detected": True, "landmarks": hands[0]["landmarks"]},
+        },
+    }
+
+
 class RenderHandVideoTest(unittest.TestCase):
+    def test_parse_two_hands_preserves_sorted_track_ids(self) -> None:
+        message = make_two_hand_message(1, 1000)
+        message["message"]["hands"].reverse()
+
+        frame = render_hand_video.parse_logged_frame(message)
+
+        self.assertIsNotNone(frame)
+        assert frame is not None
+        self.assertEqual([7, 12], [hand.track_id for hand in frame.hands])
+        self.assertEqual(21, len(frame.hands[0].landmarks))
+
+    def test_render_two_hands_uses_two_track_colors(self) -> None:
+        frame = render_hand_video.parse_logged_frame(make_two_hand_message(1, 1000))
+        assert frame is not None
+
+        pixels = render_hand_video.render_rgb_frame(frame, 160, 120)
+
+        self.assertIn(bytes(render_hand_video.TRACK_COLORS[0]), pixels)
+        self.assertIn(bytes(render_hand_video.TRACK_COLORS[1]), pixels)
+
     def test_parse_logged_frame_preserves_out_of_range_coordinates(self) -> None:
         message = make_message(1, 1000)
         message["message"]["hand"]["landmarks"][8][0] = 1.2

@@ -69,6 +69,43 @@ function Test-MessageProperty {
     return $null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)
 }
 
+function Test-FiniteNumber {
+    param([object]$Value)
+    try {
+        $number = [double]$Value
+        return -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number)
+    } catch {
+        return $false
+    }
+}
+
+function Add-HandValidationErrors {
+    param([object]$Hand, [string]$Prefix, [object]$Errors)
+    if ($null -eq $Hand) { $Errors.Add("$Prefix is required"); return }
+    if ([int]$Hand.trackId -le 0) { $Errors.Add("$Prefix.trackId must be a positive integer") }
+    if ($Hand.coordinateSpace -ne 'normalized_camera') { $Errors.Add("$Prefix.coordinateSpace is invalid") }
+    if ($Hand.landmarkFormat -ne 'mediapipe_hand_21') { $Errors.Add("$Prefix.landmarkFormat is invalid") }
+    if ($Hand.landmarks.Count -ne 21) { $Errors.Add("$Prefix must contain 21 landmarks"); return }
+    for ($index = 0; $index -lt $Hand.landmarks.Count; $index++) {
+        $point = $Hand.landmarks[$index]
+        if ($point.Count -ne 3) { $Errors.Add("$Prefix.landmarks[$index] must contain x,y,z"); continue }
+        if (-not (Test-FiniteNumber $point[0]) -or -not (Test-FiniteNumber $point[1]) -or
+            -not (Test-FiniteNumber $point[2])) {
+            $Errors.Add("$Prefix.landmarks[$index] must be finite")
+            continue
+        }
+        if ([double]$point[0] -lt 0 -or [double]$point[0] -gt 1 -or
+            [double]$point[1] -lt 0 -or [double]$point[1] -gt 1) {
+            $Errors.Add("$Prefix.landmarks[$index] x/y is outside normalized range")
+        }
+    }
+    if ($null -ne $Hand.handednessScore -and
+        (-not (Test-FiniteNumber $Hand.handednessScore) -or
+            [double]$Hand.handednessScore -lt 0 -or [double]$Hand.handednessScore -gt 1)) {
+        $Errors.Add("$Prefix.handednessScore must be between 0 and 1")
+    }
+}
+
 function Read-ExactBytes {
     param(
         [System.IO.Stream]$Stream,
@@ -278,9 +315,30 @@ function Test-ClientMessage {
             } elseif ($hasPairing -and $Message.pairingToken -notmatch '^[0-9]{6}$') {
                 $errors.Add('hello.pairingToken must be six digits')
             }
+            if ($Message.interactionProfile -eq 'two_users_two_active_hands') {
+                if ([int]$Message.maxHands -ne 2) { $errors.Add('hello.maxHands must be 2') }
+                foreach ($capability in @('hand_landmarks_21', 'multi_hand_landmarks_21', 'stable_hand_track_id')) {
+                    if ($capability -notin @($Message.capabilities)) {
+                        $errors.Add("hello.capabilities must include $capability")
+                    }
+                }
+            }
         }
         'hand_frame' {
             if ($Message.sessionId -ne $ActiveSession) { $errors.Add('hand_frame.sessionId does not match') }
+            if ($null -eq $Message.PSObject.Properties['hands']) {
+                $errors.Add('hand_frame.hands is required')
+            } else {
+                $hands = @($Message.hands)
+                if ($hands.Count -gt 2) { $errors.Add('hand_frame.hands must contain at most 2 hands') }
+                $ids = @($hands | ForEach-Object { [int]$_.trackId })
+                if (@($ids | Select-Object -Unique).Count -ne $ids.Count) {
+                    $errors.Add('hand_frame.hands contains duplicate trackId')
+                }
+                for ($handIndex = 0; $handIndex -lt $hands.Count; $handIndex++) {
+                    Add-HandValidationErrors -Hand $hands[$handIndex] -Prefix "hand_frame.hands[$handIndex]" -Errors $errors
+                }
+            }
             if ($null -eq $Message.hand.detected) { $errors.Add('hand_frame.hand.detected is required') }
             if ($Message.hand.detected) {
                 if ($Message.hand.landmarks.Count -ne 21) { $errors.Add('detected hand must contain 21 landmarks') }
@@ -293,6 +351,19 @@ function Test-ClientMessage {
                 }
             } elseif ($null -ne $Message.hand.landmarks) {
                 $errors.Add('missing hand must omit landmarks')
+            }
+            if ($null -ne $Message.PSObject.Properties['hands']) {
+                $hands = @($Message.hands)
+                if ($hands.Count -eq 0 -and $Message.hand.detected) {
+                    $errors.Add('legacy hand must be undetected when hands is empty')
+                } elseif ($hands.Count -gt 0) {
+                    $primary = $hands | Sort-Object { [int]$_.trackId } | Select-Object -First 1
+                    if (-not $Message.hand.detected -or
+                        ($Message.hand.landmarks | ConvertTo-Json -Compress -Depth 5) -ne
+                            ($primary.landmarks | ConvertTo-Json -Compress -Depth 5)) {
+                        $errors.Add('legacy hand must copy the lowest trackId hand')
+                    }
+                }
             }
         }
         'calibration_markers' {
@@ -317,6 +388,8 @@ function Write-ServerSummary {
     if (-not (Test-Path -LiteralPath $summaryFile)) { return }
     $rows = @(Import-Csv -LiteralPath $summaryFile)
     $handFrames = ($rows | Measure-Object -Property handFrames -Sum).Sum
+    $twoHandFrames = ($rows | Measure-Object -Property twoHandFrames -Sum).Sum
+    $maxHandsSeen = ($rows | Measure-Object -Property maxHandsSeen -Maximum).Maximum
     $invalidItems = ($rows | Measure-Object -Property invalidItems -Sum).Sum
     $bytes = ($rows | Measure-Object -Property receivedBytes -Sum).Sum
     @(
@@ -325,6 +398,8 @@ function Write-ServerSummary {
         "- Scenario: $Scenario"
         "- Connections: $($rows.Count)"
         "- Hand frames: $handFrames"
+        "- Two-hand frames: $twoHandFrames"
+        "- Maximum simultaneous hands: $maxHandsSeen"
         "- Validation errors: $invalidItems"
         "- Received bytes: $bytes"
         "- Generated at: $([DateTime]::UtcNow.ToString('o'))"
@@ -383,6 +458,9 @@ try {
         $connectionStartedAt = $null
         $frameCount = 0
         $missingCount = 0
+        $twoHandFrameCount = 0
+        $maxHandsSeen = 0
+        $seenTrackIds = [System.Collections.Generic.HashSet[int]]::new()
         $markerCount = 0
         $heartbeatCount = 0
         $invalidCount = 0
@@ -398,6 +476,9 @@ try {
             $sessionId = 'session-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
             $frameCount = 0
             $missingCount = 0
+            $twoHandFrameCount = 0
+            $maxHandsSeen = 0
+            $seenTrackIds = [System.Collections.Generic.HashSet[int]]::new()
             $markerCount = 0
             $heartbeatCount = 0
             $invalidCount = 0
@@ -432,6 +513,7 @@ try {
                 if ($validationErrors.Count -gt 0) {
                     $invalidCount += $validationErrors.Count
                     Write-DebugEvent -Name 'validation_error' -Data @{ messageType = $message.messageType; errors = $validationErrors }
+                    continue
                 }
                 Write-DebugEvent -Name 'message_received' -Data @{ messageType = $message.messageType; bytes = $frame.Payload.Length; frameId = $message.frameId }
                 switch ($message.messageType) {
@@ -490,6 +572,9 @@ try {
                             surface = [ordered]@{ surfaceId = 'mock-display'; widthPx = 1920; heightPx = 1080 }
                             calibrationRequired = $calibrationRequired
                         }
+                        if ($message.interactionProfile -eq 'two_users_two_active_hands') {
+                            $ack.acceptedInteractionProfile = 'two_users_two_active_hands'
+                        }
                         if ($null -ne $issuedResumeToken) { $ack.resumeToken = $issuedResumeToken }
                         Send-WebSocketText -Stream $stream -Text ($ack | ConvertTo-Json -Compress)
                         Write-Host "Handshake accepted: $sessionId"
@@ -520,6 +605,12 @@ try {
                     'hand_frame' {
                         Write-HandFrame -Message $message
                         $frameCount++
+                        $handCount = @($message.hands).Count
+                        if ($handCount -eq 2) { $twoHandFrameCount++ }
+                        $maxHandsSeen = [Math]::Max($maxHandsSeen, $handCount)
+                        foreach ($handItem in @($message.hands)) {
+                            [void]$seenTrackIds.Add([int]$handItem.trackId)
+                        }
                         if (-not $message.hand.detected) { $missingCount++ }
                         if ($null -ne $lastFrameId -and [long]$message.frameId -gt [long]$lastFrameId + 1) {
                             $gapCount += [long]$message.frameId - [long]$lastFrameId - 1
@@ -532,7 +623,7 @@ try {
                             } else {
                                 ''
                             }
-                            Write-Host "hand_frame #$($message.frameId): detected=$($message.hand.detected), received=$frameCount$indexTip"
+                            Write-Host "hand_frame #$($message.frameId): hands=$handCount, trackIds=$(@($message.hands.trackId) -join ','), received=$frameCount$indexTip"
                         }
                     }
                     'calibration_markers' {
@@ -605,6 +696,9 @@ try {
                     sessionId = $sessionId
                     durationSeconds = [Math]::Round($duration, 3)
                     handFrames = $frameCount
+                    twoHandFrames = $twoHandFrameCount
+                    maxHandsSeen = $maxHandsSeen
+                    trackIds = (@($seenTrackIds) | Sort-Object) -join ','
                     missingFrames = $missingCount
                     calibrationMessages = $markerCount
                     heartbeats = $heartbeatCount
