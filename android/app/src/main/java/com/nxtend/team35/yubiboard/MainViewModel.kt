@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
 import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
@@ -32,6 +33,9 @@ import com.nxtend.team35.yubiboard.vision.LandmarkPoint
 import com.nxtend.team35.yubiboard.vision.NormalizedPoint
 import com.nxtend.team35.yubiboard.vision.TrackedHand
 import java.util.UUID
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val handTrackAssigner = HandTrackAssigner()
@@ -50,6 +54,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableProductionState = MutableLiveData(productionSnapshot)
     private val mutableCalibrationReset = MutableLiveData<Long>()
     private val mutableHandResult = MutableLiveData<HandDetectionResult>()
+    private var syntheticHandStreamJob: Job? = null
+    @Volatile
+    private var syntheticHandOverrideUntilMs = 0L
 
     val connection: LiveData<ConnectionSnapshot> = mutableConnection
     val mode: LiveData<CaptureMode> = mutableMode
@@ -137,6 +144,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun submitHand(result: HandDetectionResult) {
+        if (BuildConfig.DEBUG && SystemClock.uptimeMillis() < syntheticHandOverrideUntilMs) return
+        publishHand(result)
+    }
+
+    private fun publishHand(result: HandDetectionResult) {
         webSocketClient.submitHand(result)
         mutableHandResult.postValue(result)
         updateProduction { current ->
@@ -190,6 +202,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setExperienceMode(mode: ExperienceMode) {
         if (!BuildConfig.DEBUG && mode == ExperienceMode.DEBUG) return
         val debugEnabled = mode == ExperienceMode.DEBUG
+        if (!debugEnabled) stopDebugHandStream()
         val updated = currentSettings.copy(debugModeEnabled = debugEnabled)
         preferences.edit().putBoolean(KEY_DEBUG_MODE, debugEnabled).apply()
         AppDiagnostics.setEnabled(debugEnabled)
@@ -200,6 +213,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun submitDebugHands(count: Int) {
         check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
         require(count in 0..2)
+        syntheticHandStreamJob?.cancel()
+        syntheticHandOverrideUntilMs = SystemClock.uptimeMillis() + SINGLE_SYNTHETIC_HOLD_MS
+        AppDiagnostics.event("debug", "synthetic_hands", mapOf("count" to count))
+        publishHand(createDebugHandResult(count))
+    }
+
+    fun startDebugHandStream(count: Int = 2, durationMs: Long = SYNTHETIC_STREAM_DURATION_MS) {
+        check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
+        require(count in 0..2)
+        require(durationMs > 0)
+        syntheticHandStreamJob?.cancel()
+        val endAtMs = SystemClock.uptimeMillis() + durationMs
+        syntheticHandOverrideUntilMs = endAtMs
+        AppDiagnostics.event(
+            "debug",
+            "synthetic_hand_stream",
+            mapOf("count" to count, "durationMs" to durationMs),
+        )
+        syntheticHandStreamJob = viewModelScope.launch {
+            try {
+                while (SystemClock.uptimeMillis() < endAtMs) {
+                    publishHand(createDebugHandResult(count))
+                    delay(SYNTHETIC_STREAM_INTERVAL_MS)
+                }
+            } finally {
+                if (syntheticHandOverrideUntilMs == endAtMs) syntheticHandOverrideUntilMs = 0L
+            }
+        }
+    }
+
+    private fun stopDebugHandStream() {
+        syntheticHandStreamJob?.cancel()
+        syntheticHandStreamJob = null
+        syntheticHandOverrideUntilMs = 0L
+    }
+
+    private fun createDebugHandResult(count: Int): HandDetectionResult {
         val hands = List(count) { handIndex ->
             val baseX = if (handIndex == 0) 0.22f else 0.62f
             TrackedHand(
@@ -215,14 +265,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 handednessScore = 0.99f,
             )
         }
-        AppDiagnostics.event("debug", "synthetic_hands", mapOf("count" to count))
-        submitHand(
-            HandDetectionResult(
-                capturedAtMonotonicMs = SystemClock.uptimeMillis(),
-                sourceWidth = currentSettings.analysisWidth,
-                sourceHeight = currentSettings.analysisHeight,
-                hands = hands,
-            ),
+        return HandDetectionResult(
+            capturedAtMonotonicMs = SystemClock.uptimeMillis(),
+            sourceWidth = currentSettings.analysisWidth,
+            sourceHeight = currentSettings.analysisHeight,
+            hands = hands,
         )
     }
 
@@ -368,6 +415,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putBoolean(KEY_DEBUG_MODE, effective.debugModeEnabled)
             .apply()
         webSocketClient.setMaxFrameRate(effective.maxSendFps)
+        if (!effective.debugModeEnabled) stopDebugHandStream()
         AppDiagnostics.setEnabled(effective.debugModeEnabled)
         mutableSettings.value = effective
         updateProduction {
@@ -401,6 +449,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ).let { if (it.validate() == null) it else AppSettings() }
 
     companion object {
+        private const val SINGLE_SYNTHETIC_HOLD_MS = 250L
+        private const val SYNTHETIC_STREAM_DURATION_MS = 3_000L
+        private const val SYNTHETIC_STREAM_INTERVAL_MS = 50L
         private const val PREFERENCES = "yubiboard_connection"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_ANALYSIS_WIDTH = "analysis_width"

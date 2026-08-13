@@ -310,6 +310,7 @@ class MainActivity : ComponentActivity() {
                     DiagnosticsDialog(
                         onDismiss = { showDiagnostics = false },
                         onFakeHands = viewModel::submitDebugHands,
+                        onFakeHandStream = { viewModel.startDebugHandStream() },
                         onFakeMarkers = viewModel::submitDebugCalibration,
                         onClear = AppDiagnostics::clear,
                         onExport = {
@@ -573,6 +574,7 @@ private fun YubiBoardScreen(
         DiagnosticsDialog(
             onDismiss = { showDiagnostics = false },
             onFakeHands = onFakeHands,
+            onFakeHandStream = { onFakeHands(2) },
             onFakeMarkers = onFakeMarkers,
             onClear = onClearDiagnostics,
             onExport = onExportDiagnostics,
@@ -853,6 +855,7 @@ private fun ConfidenceField(label: String, value: String, onValueChange: (String
 private fun DiagnosticsDialog(
     onDismiss: () -> Unit,
     onFakeHands: (Int) -> Unit,
+    onFakeHandStream: () -> Unit,
     onFakeMarkers: () -> Unit,
     onClear: () -> Unit,
     onExport: () -> Unit,
@@ -880,6 +883,7 @@ private fun DiagnosticsDialog(
                     Button(onClick = { onFakeHands(0); refresh() }) { Text("疑似0手") }
                     Button(onClick = { onFakeHands(1); refresh() }) { Text("疑似1手") }
                     Button(onClick = { onFakeHands(2); refresh() }) { Text("疑似2手") }
+                    Button(onClick = { onFakeHandStream(); refresh() }) { Text("疑似2手連続") }
                     Button(onClick = { onFakeMarkers(); refresh() }) { Text("疑似4マーカー") }
                 }
                 Surface(

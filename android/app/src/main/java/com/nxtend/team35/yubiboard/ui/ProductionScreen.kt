@@ -240,7 +240,7 @@ private fun ProductionGuidePanel(
                         onValueChange = onHostChange,
                         label = { Text("PCのIPまたはホスト名") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("connection_host"),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
@@ -249,7 +249,7 @@ private fun ProductionGuidePanel(
                             label = { Text("ポート") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).testTag("connection_port"),
                         )
                         OutlinedTextField(
                             value = token,
@@ -257,7 +257,7 @@ private fun ProductionGuidePanel(
                             label = { Text("6桁コード") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             singleLine = true,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).testTag("connection_token"),
                         )
                     }
                     if (!formError.isNullOrBlank()) {
