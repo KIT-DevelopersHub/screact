@@ -150,7 +150,7 @@ flowchart TB
 
 ## 5. 画面仕様
 
-画面は単一ActivityのJetpack Compose UIで構成し、本番画面とデバッグ画面をExperience Modeで分ける。debug APKは初回デバッグで両画面を切替可能、release APKは本番固定である。切替時にカメラと接続を破棄しない。
+画面は単一ActivityのJetpack Compose UIで構成し、本番とデバッグで`ProductionScreen`を共用する。debug APKでは本番レイアウト上に診断導線と最大2手の全骨格を重ね、release APKは本番表示に固定する。切替時にカメラと接続を破棄しない。
 
 ```mermaid
 flowchart TB
@@ -249,7 +249,7 @@ flowchart LR
 
 ## 9. 手指ランドマーク検出
 
-MediaPipe Hand Landmarkerを`LIVE_STREAM`モードで使用し、最大1手を検出する。モデル`hand_landmarker.task`はAPKのassetsへ同梱する。
+MediaPipe Hand Landmarkerを`LIVE_STREAM`モードで使用し、最大2手を検出する。Androidが手のひら中心距離から一時`trackId`を割り当て、300ms以内の短時間欠落ではIDを維持する。モデル`hand_landmarker.task`はAPKのassetsへ同梱する。
 
 ```mermaid
 flowchart TD
