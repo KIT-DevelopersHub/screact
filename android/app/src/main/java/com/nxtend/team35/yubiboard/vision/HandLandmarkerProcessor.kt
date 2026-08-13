@@ -14,6 +14,7 @@ import java.util.ArrayDeque
 
 class HandLandmarkerProcessor(
     context: Context,
+    private val trackAssigner: HandTrackAssigner,
     private val onResult: (HandDetectionResult) -> Unit,
     private val onError: (Throwable) -> Unit,
     minDetectionConfidence: Float = DEFAULT_CONFIDENCE,
@@ -34,7 +35,7 @@ class HandLandmarkerProcessor(
                 .setMinHandDetectionConfidence(minDetectionConfidence)
                 .setMinHandPresenceConfidence(minPresenceConfidence)
                 .setMinTrackingConfidence(minTrackingConfidence)
-                .setNumHands(1)
+                .setNumHands(HandTrackAssigner.MAX_HANDS)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setResultListener(::handleResult)
                 .setErrorListener(onError)
@@ -65,11 +66,25 @@ class HandLandmarkerProcessor(
             frameTimes.removeFirst()
         }
 
-        val landmarks = result.landmarks().firstOrNull()?.map { point ->
-            LandmarkPoint(point.x(), point.y(), point.z())
-        }.orEmpty()
-        val category = result.handedness().firstOrNull()?.firstOrNull()
-        val detected = landmarks.size == HAND_LANDMARK_COUNT
+        val candidates = result.landmarks().mapIndexedNotNull { index, rawLandmarks ->
+            val landmarks = rawLandmarks.map { point ->
+                LandmarkPoint(point.x(), point.y(), point.z())
+            }
+            if (landmarks.size != HAND_LANDMARK_COUNT ||
+                landmarks.any { !it.x.isFinite() || !it.y.isFinite() || !it.z.isFinite() }
+            ) {
+                null
+            } else {
+                val category = result.handedness().getOrNull(index)?.firstOrNull()
+                HandCandidate(
+                    landmarks = landmarks,
+                    handedness = category?.categoryName()?.uppercase(),
+                    handednessScore = category?.score(),
+                )
+            }
+        }
+        val hands = trackAssigner.assign(candidates, result.timestampMs())
+        val detected = hands.isNotEmpty()
         AppDiagnostics.increment("hand.results")
         if (detected) AppDiagnostics.increment("hand.detected") else AppDiagnostics.increment("hand.missing")
         AppDiagnostics.gauge("hand.fps", frameTimes.size * 1000f / FPS_WINDOW_MS)
@@ -84,13 +99,14 @@ class HandLandmarkerProcessor(
             name = "hand_result",
             fields = mapOf(
                 "detected" to detected,
-                "handedness" to category?.categoryName()?.uppercase(),
-                "score" to category?.score(),
+                "handCount" to hands.size,
+                "trackIds" to hands.joinToString(",") { it.trackId.toString() },
                 "fps" to frameTimes.size * 1000f / FPS_WINDOW_MS,
                 "inferenceMs" to (now - result.timestampMs()).coerceAtLeast(0),
                 "trackingState" to trackingState,
-                "indexTip" to landmarks.getOrNull(8)?.let { "${it.x},${it.y},${it.z}" },
-                "landmarks" to landmarks.joinToString(";") { "${it.x},${it.y},${it.z}" },
+                "indexTips" to hands.joinToString("|") { hand ->
+                    hand.landmarks.getOrNull(8)?.let { "${hand.trackId}:${it.x},${it.y},${it.z}" }.orEmpty()
+                },
             ),
         )
         onResult(
@@ -98,11 +114,8 @@ class HandLandmarkerProcessor(
                 capturedAtMonotonicMs = result.timestampMs(),
                 sourceWidth = input.width,
                 sourceHeight = input.height,
-                detected = detected,
+                hands = hands,
                 trackingState = trackingState,
-                landmarks = landmarks,
-                handedness = category?.categoryName()?.uppercase(),
-                handednessScore = category?.score(),
                 inferenceTimeMs = (now - result.timestampMs()).coerceAtLeast(0),
                 framesPerSecond = frameTimes.size * 1000f / FPS_WINDOW_MS,
             ),

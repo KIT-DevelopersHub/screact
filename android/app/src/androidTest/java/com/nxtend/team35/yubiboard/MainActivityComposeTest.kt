@@ -13,7 +13,7 @@ class MainActivityComposeTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun primaryConnectionActionAndRuntimeModeSettingAreVisible() {
+    fun productionLayoutIsSharedByProductionAndDebugModes() {
         // OEM backup/restore may preserve the last experience preference after reinstalling.
         if (composeRule.onAllNodesWithText("デバッグへ戻る").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
@@ -21,8 +21,9 @@ class MainActivityComposeTest {
             composeRule.onNodeWithText("デバッグへ戻る").performClick()
         }
 
-        composeRule.onNodeWithText("PCへ接続").assertIsDisplayed()
-        composeRule.onNodeWithText("設定").performClick()
+        composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
+        composeRule.onNodeWithText("DEBUG・最大2手の全骨格を表示中").assertIsDisplayed()
+        composeRule.onNodeWithText("詳細設定").performClick()
 
         composeRule.onNodeWithText("デバッグモード").assertIsDisplayed()
         composeRule.onNodeWithText("適用").assertIsDisplayed()

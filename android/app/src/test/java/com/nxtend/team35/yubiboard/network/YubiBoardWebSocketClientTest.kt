@@ -4,6 +4,7 @@ import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
+import com.nxtend.team35.yubiboard.vision.TrackedHand
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.NormalizedPoint
@@ -293,7 +294,11 @@ class YubiBoardWebSocketClientTest {
             Thread.sleep(150)
             client.submitHand(
                 sampleHand().copy(
-                    landmarks = List(21) { LandmarkPoint(-0.2f, 1.3f, -0.01f) },
+                    hands = listOf(
+                        sampleHand().hands.single().copy(
+                            landmarks = List(21) { LandmarkPoint(-0.2f, 1.3f, -0.01f) },
+                        ),
+                    ),
                 ),
             )
             assertTrue(handReceived.await(2, TimeUnit.SECONDS))
@@ -524,10 +529,14 @@ class YubiBoardWebSocketClientTest {
         capturedAtMonotonicMs = 100,
         sourceWidth = 640,
         sourceHeight = 480,
-        detected = true,
-        landmarks = List(21) { LandmarkPoint(0.5f, 0.5f, 0f) },
-        handedness = "RIGHT",
-        handednessScore = 0.9f,
+        hands = listOf(
+            TrackedHand(
+                trackId = 1,
+                landmarks = List(21) { LandmarkPoint(0.5f, 0.5f, 0f) },
+                handedness = "RIGHT",
+                handednessScore = 0.9f,
+            ),
+        ),
     )
 
     private fun sampleCalibration(): MarkerDetectionResult {

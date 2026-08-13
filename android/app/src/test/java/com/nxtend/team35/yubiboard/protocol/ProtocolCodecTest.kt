@@ -1,6 +1,7 @@
 package com.nxtend.team35.yubiboard.protocol
 
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -22,6 +23,10 @@ class ProtocolCodecTest {
         assertEquals(1, root.getValue("schemaVersion").jsonPrimitive.content.toInt())
         assertEquals("hello", root.getValue("messageType").jsonPrimitive.content)
         assertTrue(encoded.contains("hand_landmarks_21"))
+        assertTrue(encoded.contains("multi_hand_landmarks_21"))
+        assertTrue(encoded.contains("stable_hand_track_id"))
+        assertTrue(encoded.contains("\"maxHands\":2"))
+        assertTrue(encoded.contains("\"interactionProfile\":\"two_users_two_active_hands\""))
         assertTrue(encoded.contains("calibration_status"))
         assertTrue(encoded.contains("hello_error"))
         assertTrue(encoded.contains("trusted_reconnect"))
@@ -71,6 +76,14 @@ class ProtocolCodecTest {
                 frameId = 7,
                 capturedAtMonotonicMs = 1234,
                 source = SourceInfo(640, 480),
+                hands = listOf(
+                    TrackedHandPayload(
+                        trackId = 7,
+                        handedness = "RIGHT",
+                        handednessScore = 0.98f,
+                        landmarks = landmarks,
+                    ),
+                ),
                 hand = HandPayload(
                     detected = true,
                     handedness = "RIGHT",
@@ -92,6 +105,7 @@ class ProtocolCodecTest {
                 sessionId = "session-test",
                 frameId = 8,
                 capturedAtMonotonicMs = 1267,
+                hands = emptyList(),
                 hand = HandPayload(detected = false),
             ),
         )
@@ -126,6 +140,35 @@ class ProtocolCodecTest {
         ) as HelloAckMessage
 
         assertEquals("issued-token", decoded.resumeToken)
+    }
+
+    @Test
+    fun `two hands share one frame and legacy hand copies the lowest track id`() {
+        fun landmarks(x: Float) = List(21) { listOf(x, 0.5f, -0.01f) }
+        val left = TrackedHandPayload(trackId = 7, landmarks = landmarks(0.2f))
+        val right = TrackedHandPayload(trackId = 12, landmarks = landmarks(0.8f))
+        val encoded = ProtocolCodec.encode(
+            HandFrameMessage(
+                sessionId = "session-test",
+                frameId = 9,
+                capturedAtMonotonicMs = 1300,
+                hands = listOf(left, right),
+                hand = HandPayload(detected = true, landmarks = left.landmarks),
+            ),
+        )
+        val root = ProtocolCodec.json.parseToJsonElement(encoded).jsonObject
+
+        assertEquals(2, root.getValue("hands").jsonArray.size)
+        assertTrue(root.getValue("hand").toString().contains("[0.2,0.5,-0.01]"))
+    }
+
+    @Test
+    fun `hello acknowledgement exposes accepted interaction profile`() {
+        val decoded = ProtocolCodec.decodeServerMessage(
+            """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"s1","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":false,"acceptedInteractionProfile":"two_users_two_active_hands"}""",
+        ) as HelloAckMessage
+
+        assertEquals("two_users_two_active_hands", decoded.acceptedInteractionProfile)
     }
 
     @Test

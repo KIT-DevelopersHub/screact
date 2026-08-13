@@ -14,11 +14,14 @@ data class HelloMessage(
     val clientVersion: String,
     val pairingToken: String? = null,
     val resumeToken: String? = null,
-    val interactionProfile: String = "single_user_single_active_hand",
+    val interactionProfile: String = TWO_HAND_INTERACTION_PROFILE,
+    val maxHands: Int = 2,
     val coordinateSpace: String = "normalized_camera",
     val capabilities: List<String> = listOf(
         "aruco_calibration",
         "hand_landmarks_21",
+        "multi_hand_landmarks_21",
+        "stable_hand_track_id",
         "calibration_status",
         "hello_error",
         "trusted_reconnect",
@@ -57,6 +60,16 @@ data class HandPayload(
 )
 
 @Serializable
+data class TrackedHandPayload(
+    val trackId: Int,
+    val handedness: String? = null,
+    val handednessScore: Float? = null,
+    val coordinateSpace: String = "normalized_camera",
+    val landmarkFormat: String = "mediapipe_hand_21",
+    val landmarks: List<List<Float>>,
+)
+
+@Serializable
 data class HandFrameMessage(
     val schemaVersion: Int = SCHEMA_VERSION,
     val messageType: String = "hand_frame",
@@ -64,6 +77,7 @@ data class HandFrameMessage(
     val frameId: Long,
     val capturedAtMonotonicMs: Long,
     val source: SourceInfo? = null,
+    val hands: List<TrackedHandPayload>,
     val hand: HandPayload,
 )
 
@@ -109,7 +123,10 @@ data class HelloAckMessage(
     val surface: SurfaceInfo,
     val calibrationRequired: Boolean,
     val resumeToken: String? = null,
+    val acceptedInteractionProfile: String? = null,
 ) : ServerMessage
+
+const val TWO_HAND_INTERACTION_PROFILE = "two_users_two_active_hands"
 
 @Serializable
 data class ControlMessage(

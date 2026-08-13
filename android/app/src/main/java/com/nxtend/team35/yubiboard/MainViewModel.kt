@@ -25,13 +25,16 @@ import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.ui.calibrationUiStateAfterFrame
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
+import com.nxtend.team35.yubiboard.vision.HandTrackAssigner
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
 import com.nxtend.team35.yubiboard.vision.NormalizedPoint
+import com.nxtend.team35.yubiboard.vision.TrackedHand
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    val handTrackAssigner = HandTrackAssigner()
     private val preferences = application.getSharedPreferences(PREFERENCES, 0)
     private val mutableConnection = MutableLiveData(ConnectionSnapshot(ConnectionStatus.DISCONNECTED))
     private val mutableMode = MutableLiveData(CaptureMode.TRACKING)
@@ -46,6 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val mutableProductionState = MutableLiveData(productionSnapshot)
     private val mutableCalibrationReset = MutableLiveData<Long>()
+    private val mutableHandResult = MutableLiveData<HandDetectionResult>()
 
     val connection: LiveData<ConnectionSnapshot> = mutableConnection
     val mode: LiveData<CaptureMode> = mutableMode
@@ -53,6 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val settings: LiveData<AppSettings> = mutableSettings
     val productionState: LiveData<ProductionUiState> = mutableProductionState
     val calibrationReset: LiveData<Long> = mutableCalibrationReset
+    val handResult: LiveData<HandDetectionResult> = mutableHandResult
     val currentSettings: AppSettings get() = mutableSettings.value ?: AppSettings()
 
     private val trustedConnectionStore = TrustedConnectionStore(
@@ -74,6 +79,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onTrustedConnectionIssued = ::handleTrustedConnectionIssued,
         onTrustedConnectionInvalid = ::handleTrustedConnectionInvalid,
         onCalibrationReuseQueued = ::handleCalibrationReuseQueued,
+        onInteractionProfileChanged = ::handleInteractionProfileChanged,
         onLog = mutableLog::postValue,
     )
     private val trustedConnectionCoordinator = TrustedConnectionCoordinator(
@@ -132,6 +138,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun submitHand(result: HandDetectionResult) {
         webSocketClient.submitHand(result)
+        mutableHandResult.postValue(result)
         updateProduction { current ->
             if (current.captureMode != CaptureMode.TRACKING) return@updateProduction current
             val nextTracking = when (result.trackingState) {
@@ -190,25 +197,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateProduction { it.copy(experience = mode) }
     }
 
-    fun submitDebugHand(detected: Boolean) {
+    fun submitDebugHands(count: Int) {
         check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
-        val landmarks = if (detected) List(21) { index ->
-            LandmarkPoint(
-                x = 0.3f + (index % 5) * 0.08f,
-                y = 0.25f + (index / 5) * 0.12f,
-                z = -index * 0.001f,
+        require(count in 0..2)
+        val hands = List(count) { handIndex ->
+            val baseX = if (handIndex == 0) 0.22f else 0.62f
+            TrackedHand(
+                trackId = handIndex + 1,
+                landmarks = List(21) { index ->
+                    LandmarkPoint(
+                        x = baseX + (index % 5) * 0.04f,
+                        y = 0.25f + (index / 5) * 0.10f,
+                        z = -index * 0.001f,
+                    )
+                },
+                handedness = if (handIndex == 0) "LEFT" else "RIGHT",
+                handednessScore = 0.99f,
             )
-        } else emptyList()
-        AppDiagnostics.event("debug", "synthetic_hand", mapOf("detected" to detected))
+        }
+        AppDiagnostics.event("debug", "synthetic_hands", mapOf("count" to count))
         submitHand(
             HandDetectionResult(
                 capturedAtMonotonicMs = SystemClock.uptimeMillis(),
                 sourceWidth = currentSettings.analysisWidth,
                 sourceHeight = currentSettings.analysisHeight,
-                detected = detected,
-                landmarks = landmarks,
-                handedness = if (detected) "RIGHT" else null,
-                handednessScore = if (detected) 0.99f else null,
+                hands = hands,
             ),
         )
     }
@@ -320,6 +333,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleCalibrationReuseQueued() {
         updateProduction { it.copy(calibration = CalibrationUiState.WaitingForPc) }
+    }
+
+    private fun handleInteractionProfileChanged(twoHandsAccepted: Boolean) {
+        val notice = if (twoHandsAccepted) {
+            null
+        } else {
+            "PCは1手互換モードです"
+        }
+        updateProduction { it.copy(notice = notice) }
+        AppDiagnostics.event(
+            "network",
+            "interaction_profile",
+            mapOf("twoHandsAccepted" to twoHandsAccepted),
+        )
     }
 
     @Synchronized

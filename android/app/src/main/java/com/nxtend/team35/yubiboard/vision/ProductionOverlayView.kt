@@ -47,10 +47,12 @@ class ProductionOverlayView @JvmOverloads constructor(
         super.onDraw(canvas)
         markers?.let { drawMarkers(canvas, it); return }
         val current = hand ?: return
-        val point = current.landmarks.getOrNull(8) ?: return
-        val mapped = map(point.x, point.y, current.sourceWidth, current.sourceHeight)
-        canvas.drawCircle(mapped.first, mapped.second, 18f, pointerPaint)
-        canvas.drawCircle(mapped.first, mapped.second, 7f, pointerPaint)
+        current.hands.forEach { hand ->
+            val point = hand.landmarks.getOrNull(8) ?: return@forEach
+            val mapped = map(point.x, point.y, current.sourceWidth, current.sourceHeight)
+            canvas.drawCircle(mapped.first, mapped.second, 18f, pointerPaint)
+            canvas.drawCircle(mapped.first, mapped.second, 7f, pointerPaint)
+        }
     }
 
     private fun drawMarkers(canvas: Canvas, result: MarkerDetectionResult) {

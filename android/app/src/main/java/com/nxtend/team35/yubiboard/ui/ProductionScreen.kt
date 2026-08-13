@@ -69,6 +69,9 @@ fun ProductionScreen(
     onChangeConnectionSettings: () -> Unit,
     onForgetTrustedPc: () -> Unit,
     onOpenDebug: () -> Unit,
+    onExitDebug: () -> Unit = {},
+    onOpenDebugSettings: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var host by rememberSaveable { mutableStateOf(savedHost.ifBlank { "127.0.0.1" }) }
@@ -107,6 +110,9 @@ fun ProductionScreen(
                     onChangeConnectionSettings = onChangeConnectionSettings,
                     onShowHelp = { showHelp = true },
                     onOpenDebug = onOpenDebug,
+                    onExitDebug = onExitDebug,
+                    onOpenDebugSettings = onOpenDebugSettings,
+                    onOpenDiagnostics = onOpenDiagnostics,
                     modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
                 )
             }
@@ -133,6 +139,9 @@ fun ProductionScreen(
                     onChangeConnectionSettings = onChangeConnectionSettings,
                     onShowHelp = { showHelp = true },
                     onOpenDebug = onOpenDebug,
+                    onExitDebug = onExitDebug,
+                    onOpenDebugSettings = onOpenDebugSettings,
+                    onOpenDiagnostics = onOpenDiagnostics,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
@@ -179,6 +188,9 @@ private fun ProductionGuidePanel(
     onChangeConnectionSettings: () -> Unit,
     onShowHelp: () -> Unit,
     onOpenDebug: () -> Unit,
+    onExitDebug: () -> Unit,
+    onOpenDebugSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     modifier: Modifier,
 ) {
     Surface(modifier = modifier, tonalElevation = 4.dp) {
@@ -285,6 +297,20 @@ private fun ProductionGuidePanel(
                 }
             }
             if (state.notice != null) Text(state.notice)
+            if (BuildConfig.DEBUG && state.experience == ExperienceMode.DEBUG) {
+                Text("DEBUG・最大2手の全骨格を表示中", fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = onOpenDebugSettings, modifier = Modifier.weight(1f)) {
+                        Text("詳細設定")
+                    }
+                    OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.weight(1f)) {
+                        Text("診断")
+                    }
+                }
+                TextButton(onClick = onExitDebug, modifier = Modifier.align(Alignment.End)) {
+                    Text("本番モードへ戻る")
+                }
+            }
             if (BuildConfig.DEBUG && state.experience == ExperienceMode.PRODUCTION) {
                 TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.End)) {
                     Text("デバッグへ戻る")
