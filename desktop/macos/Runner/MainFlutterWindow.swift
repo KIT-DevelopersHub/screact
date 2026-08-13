@@ -4,6 +4,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var overlayMode: OverlayModeController?
+  private var desktopInput: DesktopInputController?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -13,6 +14,9 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     overlayMode = OverlayModeController(window: self, flutterViewController: flutterViewController)
+    // OSクリック/ドラッグ/スクロールの実注入（CGEvent）。channel: desktop_input。
+    desktopInput = DesktopInputController(
+      messenger: flutterViewController.engine.binaryMessenger)
 
     // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
     // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、
@@ -42,6 +46,11 @@ final class OverlayModeController: NSObject {
   private var savedStyleMask: NSWindow.StyleMask = []
   private var savedLevel: NSWindow.Level = .normal
   private var savedCollectionBehavior: NSWindow.CollectionBehavior = []
+  private var savedIsOpaque = true
+  private var savedBackgroundColor: NSColor?
+  private var savedHasShadow = true
+  private var savedIgnoresMouseEvents = false
+  private var savedFlutterBackgroundColor: NSColor?
   private var statusItem: NSStatusItem?
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandlerRef: EventHandlerRef?
@@ -94,14 +103,26 @@ final class OverlayModeController: NSObject {
     savedStyleMask = window.styleMask
     savedLevel = window.level
     savedCollectionBehavior = window.collectionBehavior
+    savedIsOpaque = window.isOpaque
+    savedBackgroundColor = window.backgroundColor
+    savedHasShadow = window.hasShadow
+    savedIgnoresMouseEvents = window.ignoresMouseEvents
+    savedFlutterBackgroundColor = flutterViewController?.backgroundColor
 
     window.styleMask = [.borderless]
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
-    window.level = .screenSaver
+    // 全Space・他アプリのフルスクリーンより手前に居続ける。
+    // level は screenSaver より上の CGShieldingWindowLevel 級（最大級）。
+    window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
     window.ignoresMouseEvents = true
-    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    // canJoinAllSpaces: 全デスクトップに出る / fullScreenAuxiliary: 他アプリの
+    // フルスクリーン上にも重ねる / stationary: Space切替アニメで動かさない /
+    // ignoresCycle: Cmd+` のウィンドウ循環に含めない。
+    window.collectionBehavior = [
+      .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
+    ]
     flutterViewController?.backgroundColor = .clear
     if let screen = window.screen ?? NSScreen.main {
       window.setFrame(screen.frame, display: true)
@@ -117,13 +138,13 @@ final class OverlayModeController: NSObject {
     removeStatusItem()
 
     window.styleMask = savedStyleMask
-    window.isOpaque = true
-    window.backgroundColor = .windowBackgroundColor
-    window.hasShadow = true
+    window.isOpaque = savedIsOpaque
+    window.backgroundColor = savedBackgroundColor
+    window.hasShadow = savedHasShadow
     window.level = savedLevel
-    window.ignoresMouseEvents = false
+    window.ignoresMouseEvents = savedIgnoresMouseEvents
     window.collectionBehavior = savedCollectionBehavior
-    flutterViewController?.backgroundColor = .windowBackgroundColor
+    flutterViewController?.backgroundColor = savedFlutterBackgroundColor
     if let f = savedFrame { window.setFrame(f, display: true) }
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)

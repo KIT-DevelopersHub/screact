@@ -21,6 +21,29 @@ flowchart LR
 
 `trackId`はAndroidで付ける。ネットワーク間引き前の検出結果を使えるため、PCで再推定するより安定する。処理量は最大2手の全組合せだけで、MediaPipe推論に比べて無視できる。人物IDや左右IDではない。
 
+## 実運用フロー（UI・接続・位置合わせ）
+
+```mermaid
+sequenceDiagram
+    participant A as Android
+    participant U as UDP :8766
+    participant P as PC
+    participant W as WebSocket :8765
+    A->>U: 「画面認識開始」でoffer待受
+    P-->>U: discovery_offer(wsPort, 6桁token)
+    A->>W: Androidから接続してhello
+    W-->>A: hello_ack(calibrationRequired)
+    A->>W: calibration_markers（4点が安定した時だけ）
+    W-->>A: calibration_status / set_mode(tracking)
+    A->>W: hands[0..2]を持つhand_frame
+```
+
+- 正規経路はUDPによる発見後、AndroidからWebSocketを開始する。UDPには骨格を流さない。
+- UDPが遮断される環境だけ、最新UI内の「手動で接続する（IP・6桁コード）」を使う。
+- `hello_ack.calibrationRequired=true`ならAndroidは自動的にArUco位置合わせへ移り、完了後に手追跡へ戻る。
+- 本番UI・ロゴ・スプラッシュ・接続案内はデザイン実装を正とし、2手処理は画面構成を変更しない。
+- debug APKだけカメラ上へ全21点骨格を表示する。疑似2手は実機スモークテストから起動し、本番UIへ診断操作を追加しない。
+
 ## 接続時
 
 ```json
@@ -109,6 +132,7 @@ flowchart LR
 - 通常移動と300ms以内の欠落ではIDを維持。終了済みIDは同一アプリプロセスで再利用しない。
 - フレーム内の一部だけが不正でも、PCとモックサーバーはフレーム全体を破棄する。
 - 2手は同じ時刻・source・frameIdを共有し、手ごとに別送しない。
-- Android完了はモックで2手各21点を連続10件以上、異なるID、検証エラー0、2色骨格MP4生成。最終統合は実Androidで同条件を確認する。
+- Android完了はモックと実機の両方で2手各21点を連続10件以上、異なるID、検証エラー0、2色骨格MP4生成を確認する。
+- 統合完了は`UDP発見 → WebSocket → 自動位置合わせ → tracking → 実手2骨格`を本番UIのまま通す。
 
 「2人」は利用シナリオであり、人物識別、1人の両手複合ジェスチャー、2本のOSカーソルは今回の対象外。

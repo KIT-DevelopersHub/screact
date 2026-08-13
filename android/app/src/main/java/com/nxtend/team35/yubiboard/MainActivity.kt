@@ -10,9 +10,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Size
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -80,9 +85,9 @@ import com.nxtend.team35.yubiboard.vision.DebugOverlayView
 import com.nxtend.team35.yubiboard.vision.HandLandmarkerProcessor
 import com.nxtend.team35.yubiboard.vision.ProductionOverlayView
 import com.nxtend.team35.yubiboard.ui.CameraUiState
-import com.nxtend.team35.yubiboard.ui.ExperienceMode
 import com.nxtend.team35.yubiboard.ui.ProductionScreen
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
+import com.nxtend.team35.yubiboard.ui.SplashScreen
 import com.nxtend.team35.yubiboard.ui.ProductionStateLab
 
 class MainActivity : ComponentActivity() {
@@ -154,6 +159,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -251,26 +257,26 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             YubiBoardTheme {
-                val settings by viewModel.settings.observeAsState(initialSettings)
+                // スプラッシュは本番 UI の前段の装飾。裏で ProductionScreen を先に
+                // 組んでおき、GIF が終わってフェードアウトした瞬間にカメラが出ている
+                // ようにする（黒画面やチラつきを避ける）。
+                var showSplash by rememberSaveable { mutableStateOf(true) }
                 val productionState by viewModel.productionState.observeAsState(ProductionUiState())
-                var showDebugSettings by rememberSaveable { mutableStateOf(false) }
-                var showDiagnostics by rememberSaveable { mutableStateOf(false) }
-                var showStateLab by rememberSaveable { mutableStateOf(false) }
-                val debugEnabled = settings.debugModeEnabled && BuildConfig.DEBUG
-                ProductionScreen(
-                    state = productionState,
-                    savedHost = viewModel.savedHost,
-                    savedPort = viewModel.savedPort,
-                    hasTrustedPc = viewModel.hasTrustedPc,
-                    cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
-                    previewContent = {
-                        Box(Modifier.fillMaxSize()) {
-                            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                            if (debugEnabled) {
-                                AndroidView(factory = { debugOverlay }, modifier = Modifier.fillMaxSize())
-                            } else {
-                                AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
-                            }
+                Box(Modifier.fillMaxSize().background(Color(0xFF101010))) {
+                    ProductionScreen(
+                        state = productionState,
+                        savedHost = viewModel.savedHost,
+                        savedPort = viewModel.savedPort,
+                        hasTrustedPc = viewModel.hasTrustedPc,
+                        cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
+                        previewContent = {
+                            Box(Modifier.fillMaxSize()) {
+                                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                                if (BuildConfig.DEBUG) {
+                                    AndroidView(factory = { debugOverlay }, modifier = Modifier.fillMaxSize())
+                                } else {
+                                    AndroidView(factory = { productionOverlay }, modifier = Modifier.fillMaxSize())
+                                }
                                 CameraFlipButton(
                                     usingFrontCamera = usingFrontCamera,
                                     onClick = ::toggleCameraLens,
@@ -279,48 +285,29 @@ class MainActivity : ComponentActivity() {
                                         .safeDrawingPadding()
                                         .padding(12.dp),
                                 )
-                        }
-                    },
-                    onRequestCameraPermission = {
-                        permissionLauncher.launch(Manifest.permission.CAMERA)
-                    },
-                    onOpenSystemSettings = ::openAppSettings,
-                    onRetryCamera = ::startCamera,
-                    onConnect = viewModel::connect,
-                    onCancelConnection = viewModel::disconnect,
-                    onDisconnect = viewModel::disconnect,
-                    onRetryNow = viewModel::retryNow,
-                    onChangeConnectionSettings = viewModel::changeConnectionSettings,
-                    onForgetTrustedPc = viewModel::forgetTrustedPc,
-                    onOpenDebug = { viewModel.setExperienceMode(ExperienceMode.DEBUG) },
-                    onExitDebug = { viewModel.setExperienceMode(ExperienceMode.PRODUCTION) },
-                    onOpenDebugSettings = { showDebugSettings = true },
-                    onOpenDiagnostics = { showDiagnostics = true },
-                )
-                if (showDebugSettings && debugEnabled) {
-                    SettingsDialog(
-                        settings = settings,
-                        onDismiss = { showDebugSettings = false },
-                        onApply = { candidate ->
-                            applySettings(candidate).also { if (it == null) showDebugSettings = false }
+                            }
                         },
-                    )
-                }
-                if (showDiagnostics && debugEnabled) {
-                    DiagnosticsDialog(
-                        onDismiss = { showDiagnostics = false },
-                        onFakeHands = viewModel::submitDebugHands,
-                        onFakeHandStream = { viewModel.startDebugHandStream() },
-                        onFakeMarkers = viewModel::submitDebugCalibration,
-                        onClear = AppDiagnostics::clear,
-                        onExport = {
-                            diagnosticsExportLauncher.launch("yubiboard-diagnostics.jsonl")
+                        onRequestCameraPermission = {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
                         },
-                        onOpenStateLab = { showDiagnostics = false; showStateLab = true },
+                        onOpenSystemSettings = ::openAppSettings,
+                        onRetryCamera = ::startCamera,
+                        onConnect = viewModel::connect,
+                        onStartAutoPairing = viewModel::startAutoPairing,
+                        onCancelAutoPairing = viewModel::cancelAutoPairing,
+                        onCancelConnection = viewModel::disconnect,
+                        onDisconnect = viewModel::disconnect,
+                        onRetryNow = viewModel::retryNow,
+                        onChangeConnectionSettings = viewModel::changeConnectionSettings,
+                        onForgetTrustedPc = viewModel::forgetTrustedPc,
                     )
-                }
-                if (showStateLab && debugEnabled) {
-                    ProductionStateLab(onDismiss = { showStateLab = false })
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = EnterTransition.None,
+                        exit = fadeOut(animationSpec = tween(durationMillis = 450)),
+                    ) {
+                        SplashScreen(onFinished = { showSplash = false })
+                    }
                 }
             }
         }
@@ -342,6 +329,11 @@ class MainActivity : ComponentActivity() {
             cameraPermissionPermanentlyDenied = false
             startCamera()
         }
+    }
+
+    override fun onStop() {
+        viewModel.onAppBackgrounded()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -366,12 +358,7 @@ class MainActivity : ComponentActivity() {
         cameraStatus = "手を探索中"
         cameraStarted = false
         viewModel.updateCameraState(CameraUiState.STARTING)
-        val settings = viewModel.currentSettings
-        val profile = if (settings.debugModeEnabled && BuildConfig.DEBUG) {
-            CameraProfile.from(Size(settings.analysisWidth, settings.analysisHeight))
-        } else {
-            CameraProfile.HD_720
-        }
+        val profile = CameraProfile.HD_720
         cameraSession.start(profile, allowFallback = !profile.debugOnly)
     }
 
@@ -390,6 +377,11 @@ class MainActivity : ComponentActivity() {
             if (usingFrontCamera) "前面カメラのプレビュー" else "背面カメラのプレビュー"
         transientMessage =
             if (usingFrontCamera) "前面カメラに切り替えました" else "背面カメラに切り替えました"
+    }
+
+    internal fun startSyntheticTwoHandStreamForTest() {
+        check(BuildConfig.DEBUG) { "Synthetic hand input is available only in debug builds" }
+        viewModel.startDebugHandStream()
     }
 
     private fun openAppSettings() {

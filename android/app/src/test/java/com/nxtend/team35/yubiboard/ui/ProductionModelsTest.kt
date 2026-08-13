@@ -53,6 +53,132 @@ class ProductionModelsTest {
     }
 
     @Test
+    fun `discovery waiting is visible only while disconnected`() {
+        val waiting = ProductionUiState(
+            camera = CameraUiState.READY,
+            pairing = PairingUiState.WAITING,
+        )
+
+        assertEquals(ProductionStage.DISCOVERY_WAITING, waiting.stage())
+        assertEquals(ProductionVisualState.DISCOVERY_WAITING, waiting.visualState())
+        assertEquals(
+            ProductionStage.CONNECTING,
+            waiting.copy(
+                connection = ConnectionSnapshot(ConnectionStatus.CONNECTING),
+            ).stage(),
+        )
+        assertEquals(
+            ProductionStage.READY,
+            waiting.copy(
+                connection = ConnectionSnapshot(ConnectionStatus.CONNECTED),
+            ).stage(),
+        )
+    }
+
+    @Test
+    fun `ready visuals distinguish an active hand from idle tracking`() {
+        val base = ProductionUiState(
+            camera = CameraUiState.READY,
+            connection = ConnectionSnapshot(ConnectionStatus.CONNECTED),
+            captureMode = CaptureMode.TRACKING,
+        )
+
+        listOf(
+            TrackingUiState.INACTIVE,
+            TrackingUiState.READY_NO_HAND,
+        ).forEach { tracking ->
+            assertEquals(ProductionVisualState.READY_IDLE, base.copy(tracking = tracking).visualState())
+        }
+        listOf(
+            TrackingUiState.CANDIDATE,
+            TrackingUiState.TRACKING,
+            TrackingUiState.TEMPORARILY_LOST,
+            TrackingUiState.LONG_LOST,
+        ).forEach { tracking ->
+            assertEquals(ProductionVisualState.READY_ACTIVE, base.copy(tracking = tracking).visualState())
+        }
+    }
+
+    @Test
+    fun `only placement-like calibration states use the placement visual`() {
+        val base = ProductionUiState(
+            camera = CameraUiState.READY,
+            connection = ConnectionSnapshot(ConnectionStatus.CONNECTED),
+            captureMode = CaptureMode.CALIBRATION,
+        )
+
+        assertEquals(
+            ProductionVisualState.PLACEMENT,
+            base.copy(calibration = CalibrationUiState.PlacementWaiting).visualState(),
+        )
+        listOf(
+            CalibrationUiState.Inactive,
+            CalibrationUiState.FindingMarkers(2),
+            CalibrationUiState.Stabilizing(3, 5),
+            CalibrationUiState.WaitingForPc,
+            CalibrationUiState.RetryRequired(CalibrationRetryReason.UNSTABLE),
+            CalibrationUiState.Complete,
+        ).forEach { calibration ->
+            assertEquals(
+                ProductionVisualState.CALIBRATION_PROGRESS,
+                base.copy(calibration = calibration).visualState(),
+            )
+        }
+    }
+
+    @Test
+    fun `connection stages keep form progress and reconnect visuals separate`() {
+        val base = ProductionUiState(camera = CameraUiState.READY)
+
+        assertEquals(ProductionVisualState.CONNECTION_FORM, base.visualState())
+        assertEquals(
+            ProductionVisualState.CONNECTION_FORM,
+            base.copy(connection = ConnectionSnapshot(ConnectionStatus.ERROR)).visualState(),
+        )
+        listOf(ConnectionStatus.CONNECTING, ConnectionStatus.AWAITING_ACK).forEach { status ->
+            assertEquals(
+                ProductionVisualState.CONNECTION_PROGRESS,
+                base.copy(connection = ConnectionSnapshot(status, automatic = status == ConnectionStatus.AWAITING_ACK))
+                    .visualState(),
+            )
+        }
+        assertEquals(
+            ProductionVisualState.RECONNECTING,
+            base.copy(connection = ConnectionSnapshot(ConnectionStatus.RECONNECTING)).visualState(),
+        )
+    }
+
+    @Test
+    fun `camera and connection priority also controls visual state`() {
+        val active = ProductionUiState(
+            camera = CameraUiState.READY,
+            connection = ConnectionSnapshot(ConnectionStatus.CONNECTED),
+            tracking = TrackingUiState.TRACKING,
+        )
+
+        assertEquals(ProductionVisualState.READY_ACTIVE, active.visualState())
+        assertEquals(
+            ProductionVisualState.RECONNECTING,
+            active.copy(connection = ConnectionSnapshot(ConnectionStatus.RECONNECTING)).visualState(),
+        )
+        assertEquals(
+            ProductionVisualState.CALIBRATION_PROGRESS,
+            active.copy(
+                captureMode = CaptureMode.CALIBRATION,
+                calibration = CalibrationUiState.FindingMarkers(1),
+            ).visualState(),
+        )
+        assertEquals(
+            ProductionVisualState.CAMERA_ERROR,
+            active.copy(camera = CameraUiState.ERROR).visualState(),
+        )
+        assertEquals(
+            ProductionVisualState.CAMERA_PERMISSION,
+            active.copy(camera = CameraUiState.PERMISSION_DENIED).visualState(),
+        )
+    }
+
+    @Test
     fun `calibration progresses from placement through markers and pc confirmation`() {
         val empty = MarkerDetectionResult(1, 1280, 720, emptyList(), stable = false)
         val oneMarker = empty.copy(markers = listOf(sampleMarker(10)))

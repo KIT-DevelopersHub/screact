@@ -1,10 +1,14 @@
 package com.nxtend.team35.yubiboard
 
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasNoScrollAction
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -13,19 +17,22 @@ class MainActivityComposeTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun productionLayoutIsSharedByProductionAndDebugModes() {
-        // OEM backup/restore may preserve the last experience preference after reinstalling.
-        if (composeRule.onAllNodesWithText("デバッグへ戻る").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
-            composeRule.onNodeWithText("接続する").assertIsDisplayed()
-            composeRule.onNodeWithText("デバッグへ戻る").performClick()
+    fun appAlwaysUsesProductionUiWithoutDebugControlsOrScrolling() {
+        composeRule.onNodeWithTag("production_camera_preview").assertIsDisplayed()
+        composeRule.onNodeWithTag("production_guide_content").assert(hasNoScrollAction())
+        assertDebugControlsAbsent()
+
+        composeRule.onNodeWithTag("production_help_button").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("設定・ヘルプ").assertIsDisplayed()
+        assertDebugControlsAbsent()
+    }
+
+    private fun assertDebugControlsAbsent() {
+        listOf("デバッグへ戻る", "デバッグ画面を開く", "デバッグモード").forEach { label ->
+            assertTrue(
+                "$label が本番UIに残っています",
+                composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty(),
+            )
         }
-
-        composeRule.onNodeWithText("PCに接続").assertIsDisplayed()
-        composeRule.onNodeWithText("DEBUG・最大2手の全骨格を表示中").assertIsDisplayed()
-        composeRule.onNodeWithText("詳細設定").performClick()
-
-        composeRule.onNodeWithText("デバッグモード").assertIsDisplayed()
-        composeRule.onNodeWithText("適用").assertIsDisplayed()
     }
 }

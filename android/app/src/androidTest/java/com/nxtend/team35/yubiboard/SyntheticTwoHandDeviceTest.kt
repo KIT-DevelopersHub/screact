@@ -2,6 +2,7 @@ package com.nxtend.team35.yubiboard
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -34,13 +35,14 @@ class SyntheticTwoHandDeviceTest {
         )
 
         composeRule.waitUntil(timeoutMillis = 20_000) {
-            composeRule.onAllNodesWithText("接続する").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("PCから切断").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("show_manual_connection").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithText("操作できます！").fetchSemanticsNodes().isNotEmpty()
         }
-        val alreadyConnected = composeRule.onAllNodesWithText("PCから切断")
+        val alreadyConnected = composeRule.onAllNodesWithText("操作できます！")
             .fetchSemanticsNodes()
             .isNotEmpty()
         if (!alreadyConnected) {
+            composeRule.onNodeWithTag("show_manual_connection").performClick()
             composeRule.onNodeWithTag("connection_host").performTextReplacement(host)
             composeRule.onNodeWithTag("connection_port").performTextReplacement(port)
             composeRule.onNodeWithTag("connection_token").performTextReplacement(token)
@@ -48,13 +50,10 @@ class SyntheticTwoHandDeviceTest {
         }
 
         composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodesWithText("PCから切断").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("操作できます！").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("PCから切断").assertIsDisplayed()
-        composeRule.onNodeWithText("診断").performClick()
-        composeRule.onNodeWithText("デバッグ診断").assertIsDisplayed()
-
-        composeRule.onNodeWithText("疑似2手連続").performClick()
+        composeRule.onNodeWithText("操作できます！").assertIsDisplayed()
+        composeRule.activity.startSyntheticTwoHandStreamForTest()
         composeRule.waitForIdle()
         Thread.sleep(3_500)
     }

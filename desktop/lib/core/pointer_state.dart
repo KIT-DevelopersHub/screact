@@ -25,14 +25,16 @@ class OverlayModel extends ChangeNotifier {
       case InteractionKind.pointerMove:
         cursor = e.screen;
         pressed = false;
+        _active = null;
         break;
-      case InteractionKind.pressDown:
+      // インク描画（人差し指＋中指のくっつき・中間点）。
+      case InteractionKind.drawDown:
         cursor = e.screen;
         pressed = true;
         _active = InkStroke([e.screen]);
         strokes.add(_active!);
         break;
-      case InteractionKind.pressMove:
+      case InteractionKind.drawMove:
         cursor = e.screen;
         final a = _active;
         if (a != null &&
@@ -41,12 +43,21 @@ class OverlayModel extends ChangeNotifier {
           a.points.add(e.screen);
         }
         break;
+      case InteractionKind.drawUp:
+        pressed = false;
+        _active = null;
+        break;
+      // OSクリック/ドラッグ（ピンチ）はインクを引かない。カーソルの押下表示のみ。
+      case InteractionKind.pressDown:
+      case InteractionKind.pressMove:
+        cursor = e.screen;
+        pressed = true;
+        break;
       case InteractionKind.click:
         cursor = e.screen;
         break;
       case InteractionKind.pressUp:
         pressed = false;
-        _active = null;
         break;
       case InteractionKind.scroll:
         cursor = e.screen;
