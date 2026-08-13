@@ -33,8 +33,56 @@ class CameraSession(
     @Volatile
     private var frameConsumer: (ImageProxy) -> Unit = { it.close() }
 
+    /** 現在のレンズ向き。既定は従来どおり背面。 */
+    @Volatile
+    private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
+
+    /** 直近のバインドで使ったプロファイル群。レンズ切替時に同じ解像度で再バインドするため保持する。 */
+    private var lastProfiles: List<CameraProfile> = listOf(CameraProfile.HD_720)
+
+    /** 現在前面カメラを使っているか（UIの表示反映用）。 */
+    val isFrontFacing: Boolean
+        get() = lensFacing == CameraSelector.LENS_FACING_FRONT
+
     fun setFrameConsumer(consumer: (ImageProxy) -> Unit) {
         frameConsumer = consumer
+    }
+
+    private fun selectorFor(facing: Int): CameraSelector =
+        CameraSelector.Builder().requireLensFacing(facing).build()
+
+    /**
+     * 前面/背面を切り替えて再バインドする。
+     * 反対側のカメラが無い端末では現状を維持し false を返す。
+     */
+    fun toggleLensFacing(): Boolean {
+        val target = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        return setLensFacing(target)
+    }
+
+    /**
+     * レンズ向きを指定して再バインドする。未起動時は向きだけ記録し、次回 start で反映する。
+     * 指定レンズが無ければ現状維持で false を返す。
+     */
+    fun setLensFacing(facing: Int): Boolean {
+        if (facing == lensFacing) return true
+        val current = provider ?: run {
+            lensFacing = facing
+            return true
+        }
+        val available = runCatching { current.hasCamera(selectorFor(facing)) }.getOrDefault(false)
+        if (!available) {
+            AppDiagnostics.event("camera", "lens_unavailable", mapOf("facing" to facing))
+            return false
+        }
+        lensFacing = facing
+        AppDiagnostics.event("camera", "lens_switched", mapOf("facing" to facing))
+        runCatching { bindFirstSupported(current, lastProfiles) }.onFailure(::reportError)
+        return true
     }
 
     fun start(targetSize: Size) = start(CameraProfile.from(targetSize), allowFallback = true)
@@ -49,6 +97,7 @@ class CameraSession(
         } else {
             listOf(preferredProfile)
         }
+        lastProfiles = profiles
         AppDiagnostics.event(
             "camera",
             "start_requested",
@@ -127,7 +176,7 @@ class CameraSession(
         provider.unbindAll()
         provider.bindToLifecycle(
             lifecycleOwner,
-            CameraSelector.DEFAULT_BACK_CAMERA,
+            selectorFor(lensFacing),
             groupBuilder.build(),
         )
         AppDiagnostics.gauge("camera.requested_resolution", "${profile.width}x${profile.height}")
