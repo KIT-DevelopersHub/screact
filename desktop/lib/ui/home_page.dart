@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/calibration_config.dart';
+import '../core/geom.dart';
 import '../core/interaction_engine.dart';
+import '../core/multi_hand_engine.dart';
 import '../core/pointer_state.dart';
+import '../protocol/input_frame.dart';
 import '../net/connection_log.dart';
 import '../net/discovery.dart';
 import '../net/input_server.dart';
@@ -55,7 +58,7 @@ class _HomePageState extends State<HomePage> {
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _calibConfig = CalibrationConfig.forCalibrationTarget();
-  late final _engine = InteractionEngine(config: _calibConfig);
+  late final _engine = MultiHandEngine(config: _calibConfig);
   final _overlay = OverlayModel();
   late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
@@ -201,7 +204,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleServerEvents(List<InteractionEvent> events) {
-    if (!_disposed) _applyEvents(events);
+    // 主トラック（最小trackId）のイベントをOS入力へ。単一手では従来どおり。
+    if (_disposed) return;
+    for (final event in events) {
+      _bridge.applyEvent(event);
+    }
+  }
+
+  void _handleTrackEvents(Map<int, List<InteractionEvent>> byTrack) {
+    // 各トラックのカーソル/描画をオーバーレイへ（最大2手を別色で表示）。
+    if (!_disposed) _overlay.applyTrackEvents(byTrack);
+  }
+
+  void _handleFrame(InputFrame frame) {
+    if (_disposed) return;
+    // カメラ正規化の骨格を、カーソルと同じ画面座標へ写して重ねる。
+    final byTrack = <int, List<Vec2>>{};
+    for (final track in frame.tracks) {
+      byTrack[track.trackId] = [
+        for (final lm in track.landmarks) _engine.mapToScreen(lm.xy),
+      ];
+    }
+    _overlay.showSkeletons(byTrack);
   }
 
   DesktopDiscovery _createDiscovery() {
@@ -267,15 +291,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _applyEvents(List<InteractionEvent> events) {
-    for (final event in events) {
-      // 標準出力は透明オーバーレイ。draw* はOverlayCanvasへ、pointer/press/
-      // scrollは同時にOS入力へ渡す（DesktopBridge側がdraw*だけ除外する）。
-      _overlay.apply(event);
-      _bridge.applyEvent(event);
-    }
-  }
-
   /// WebSocket待受の成功後だけUDP offerを広告する。
   /// 待受失敗時に検索だけが残る状態を作らない。
   Future<void> _startPairing() async {
@@ -301,6 +316,8 @@ class _HomePageState extends State<HomePage> {
       engine: _engine,
       port: _port,
       onEvents: _handleServerEvents,
+      onTrackEvents: _handleTrackEvents,
+      onFrame: _handleFrame,
       onStatus: _onServerStatus,
       pairingCode: _pairingCode,
       enforcePairing: _enforcePairing,

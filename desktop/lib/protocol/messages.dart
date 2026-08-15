@@ -4,6 +4,7 @@ import '../core/geom.dart';
 /// PCはWebSocketサーバとして Android から hello / hand_frame / calibration_markers /
 /// heartbeat を受け、hello_ack / control_message を返す。未知フィールドは無視する。
 const int kSchemaVersion = 1;
+const String kTwoHandInteractionProfile = 'two_users_two_active_hands';
 
 /// 受信: hello（接続開始）。
 class Hello {
@@ -38,12 +39,14 @@ class HelloAck {
   final int widthPx;
   final int heightPx;
   final bool calibrationRequired;
+  final String? acceptedInteractionProfile;
   const HelloAck({
     required this.sessionId,
     required this.surfaceId,
     required this.widthPx,
     required this.heightPx,
     required this.calibrationRequired,
+    this.acceptedInteractionProfile,
   });
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +59,8 @@ class HelloAck {
           'heightPx': heightPx,
         },
         'calibrationRequired': calibrationRequired,
+        if (acceptedInteractionProfile != null)
+          'acceptedInteractionProfile': acceptedInteractionProfile,
       };
 }
 
@@ -166,6 +171,30 @@ class HandFrame {
       landmarks: lms,
     );
   }
+}
+
+/// hand_frame の `hands[]` 内の1トラック（Androidが付けた trackId 付き）。
+/// 位置合わせ・平滑化・ジェスチャー判定は PC 側が `(sessionId, trackId)` ごとに
+/// 分離して行う（統合シート two_users_two_active_hands）。
+class HandTrack {
+  final int trackId;
+  final String? handedness;
+  final List<Landmark> landmarks; // 検証済み21点（0..20）
+  const HandTrack({
+    required this.trackId,
+    required this.landmarks,
+    this.handedness,
+  });
+
+  /// 既存のジェスチャー/操作エンジン（単一手 [HandFrame] を処理）へ渡すための変換。
+  /// フレームの時刻/frameId を共有し、検出済み扱いにする。
+  HandFrame toHandFrame(int frameId, int capturedAtMonotonicMs) => HandFrame(
+        frameId: frameId,
+        capturedAtMonotonicMs: capturedAtMonotonicMs,
+        detected: true,
+        handedness: handedness,
+        landmarks: landmarks,
+      );
 }
 
 /// ArUcoマーカー1つ（正規化座標）。

@@ -7,6 +7,7 @@ import 'package:thehack_overlay/core/geom.dart';
 import 'package:thehack_overlay/core/gesture_recognizer.dart';
 import 'package:thehack_overlay/core/homography.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
+import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/net/input_server.dart';
@@ -196,7 +197,7 @@ void main() {
       final events = <InteractionEvent>[];
       final engine = InteractionEngine();
       final server = InputServer(
-        engine: engine,
+        engine: MultiHandEngine(calibrationEngine: engine),
         port: 0, // 空きポート（ユーザーの起動中アプリ8765と衝突させない）
         onEvents: events.addAll,
         onStatus: (_) {},
@@ -208,11 +209,11 @@ void main() {
         'ws://localhost:${server.boundPort}/ws/v1/input',
       );
       addTearDown(ws.close);
-      final ack = Completer<void>();
+      final ack = Completer<String>();
       ws.listen((data) {
         final j = jsonDecode(data as String) as Map<String, dynamic>;
         if (j['messageType'] == 'hello_ack' && !ack.isCompleted) {
-          ack.complete();
+          ack.complete(j['sessionId'] as String);
         }
       });
 
@@ -222,11 +223,12 @@ void main() {
         'messageType': 'hello',
         'deviceId': 'test-client',
       });
-      await ack.future.timeout(const Duration(seconds: 5));
+      final session = await ack.future.timeout(const Duration(seconds: 5));
 
       send({
         'schemaVersion': 1,
         'messageType': 'slide_corners',
+        'sessionId': session,
         'capturedAtMonotonicMs': 0,
         'corners': [
           [tiltedQuad[2].x, tiltedQuad[2].y],
@@ -248,6 +250,7 @@ void main() {
         send({
           'schemaVersion': 1,
           'messageType': 'hand_frame',
+          'sessionId': session,
           'frameId': f.frameId,
           'capturedAtMonotonicMs': f.capturedAtMonotonicMs,
           'hand': {

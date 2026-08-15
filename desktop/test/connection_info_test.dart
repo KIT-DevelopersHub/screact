@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:thehack_overlay/core/interaction_engine.dart';
+import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/net/input_server.dart';
 import 'package:thehack_overlay/net/wifi_ip.dart';
 
@@ -79,7 +79,7 @@ void main() {
       void Function(ServerStatus)? onStatus,
     }) async {
       final server = InputServer(
-        engine: InteractionEngine(),
+        engine: MultiHandEngine(),
         port: 0,
         onEvents: (_) {},
         onStatus: onStatus ?? (_) {},
@@ -306,7 +306,7 @@ void main() {
     test('接続ログに段階（listen→request→upgrade→hello→hello_error）が残る', () async {
       final logs = <String>[];
       final server = InputServer(
-        engine: InteractionEngine(),
+        engine: MultiHandEngine(),
         port: 0,
         onEvents: (_) {},
         onStatus: (_) {},

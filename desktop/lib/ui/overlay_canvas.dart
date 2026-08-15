@@ -1,13 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../core/geom.dart';
+import '../core/hand_skeleton.dart';
 import '../core/pointer_state.dart';
 
-/// オーバーレイ描画: インクストローク＋現在のカーソル。正規化(0..1)座標を
-/// 描画サイズへスケールするので、どの解像度/モニタでも同じ見た目になる。
+/// オーバーレイ描画: 各トラックの骨格＋カーソル＋インクストローク。
+/// 正規化(0..1)座標を描画サイズへスケールするので、どの解像度/モニタでも同じ
+/// 見た目になる。最大2トラックを別色で同時に描く。
 class OverlayCanvas extends StatelessWidget {
   final OverlayModel model;
   const OverlayCanvas({super.key, required this.model});
+
+  /// 表示モデルが割り当てた色スロット→表示色。
+  static Color colorForSlot(int colorSlot) =>
+      _palette[colorSlot % _palette.length];
+
+  static const List<Color> _palette = [
+    Color(0xFF2B6CB0), // 青
+    Color(0xFFD53F8C), // マゼンタ
+    Color(0xFF2F855A), // 緑（保険）
+    Color(0xFFB7791F), // 琥珀（保険）
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -29,19 +42,19 @@ class _OverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final ink = Paint()
-      ..color = const Color(0xFF2B6CB0)
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
+    // インク（トラック別の色）。
     for (final stroke in model.strokes) {
+      final color = OverlayCanvas.colorForSlot(stroke.colorSlot);
+      final ink = Paint()
+        ..color = color
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
       final pts = stroke.points;
       if (pts.isEmpty) continue;
       if (pts.length == 1) {
-        // 1点だけのストローク（タップ）は点として残す。
         canvas.drawCircle(
-            _p(pts.first, size), ink.strokeWidth / 2, Paint()..color = ink.color);
+            _p(pts.first, size), ink.strokeWidth / 2, Paint()..color = color);
         continue;
       }
       // 中点スムージング: 各点を制御点に、隣接中点を終点にした2次ベジェで
@@ -59,22 +72,55 @@ class _OverlayPainter extends CustomPainter {
       canvas.drawPath(path, ink);
     }
 
-    final c = model.cursor;
-    if (c != null) {
-      final o = _p(c, size);
-      final fill = Paint()
-        ..style = PaintingStyle.fill
-        ..color = model.pressed ? const Color(0xFFC05621) : const Color(0xFF38A169);
-      canvas.drawCircle(o, model.pressed ? 12 : 9, fill);
-      canvas.drawCircle(
+    // トラックごとの骨格＋カーソル。
+    for (final id in model.trackIds) {
+      final v = model.track(id);
+      if (v == null) continue;
+      final color = OverlayCanvas.colorForSlot(v.colorSlot);
+      final skeleton = v.skeleton;
+      if (skeleton != null && skeleton.length == 21) {
+        _paintSkeleton(canvas, size, skeleton, color);
+      }
+      final c = v.cursor;
+      if (c != null) {
+        final o = _p(c, size);
+        canvas.drawCircle(
           o,
-          model.pressed ? 12 : 9,
+          v.pressed ? 12 : 9,
+          Paint()
+            ..style = PaintingStyle.fill
+            ..color = v.pressed ? _darken(color) : color,
+        );
+        canvas.drawCircle(
+          o,
+          v.pressed ? 12 : 9,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2
-            ..color = Colors.white);
+            ..color = Colors.white,
+        );
+      }
     }
   }
+
+  void _paintSkeleton(Canvas canvas, Size size, List<Vec2> lm, Color color) {
+    final bone = Paint()
+      ..color = color.withValues(alpha: 0.85)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    for (final c in HandSkeleton.connections) {
+      canvas.drawLine(_p(lm[c[0]], size), _p(lm[c[1]], size), bone);
+    }
+    final joint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    for (final p in lm) {
+      canvas.drawCircle(_p(p, size), 3, joint);
+    }
+  }
+
+  Color _darken(Color c) => Color.alphaBlend(const Color(0x66000000), c);
 
   @override
   bool shouldRepaint(covariant _OverlayPainter old) => true;
