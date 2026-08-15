@@ -186,7 +186,7 @@ void main() {
     await tester.tap(calibrationStart);
     await settle(tester);
     expect(tester.takeException(), isNull);
-    expect(find.textContaining('キャリブレーション中: スマホのカメラで'), findsOneWidget);
+    expect(find.textContaining('位置合わせ中: スマホのカメラで'), findsOneWidget);
     expect(find.byKey(const ValueKey('calibration-cancel')), findsOneWidget);
     expect(find.byKey(const ValueKey('calibration-preview')), findsNothing);
     expect(find.byKey(const ValueKey('desktop-header-menu')), findsNothing);
