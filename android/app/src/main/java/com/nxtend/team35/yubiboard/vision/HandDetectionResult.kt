@@ -38,3 +38,9 @@ data class HandDetectionResult(
     val handedness: String? get() = primaryHand?.handedness
     val handednessScore: Float? get() = primaryHand?.handednessScore
 }
+
+fun HandDetectionResult.limitHands(maxHands: Int): HandDetectionResult {
+    require(maxHands in 1..HandTrackAssigner.MAX_HANDS)
+    if (hands.size <= maxHands) return this
+    return copy(hands = hands.sortedBy { it.trackId }.take(maxHands))
+}

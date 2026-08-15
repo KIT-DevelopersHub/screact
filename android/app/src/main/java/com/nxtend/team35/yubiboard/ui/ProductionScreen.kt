@@ -78,6 +78,7 @@ fun ProductionScreen(
     savedHost: String,
     savedPort: Int,
     hasTrustedPc: Boolean,
+    maxHands: Int = 1,
     cameraPermissionPermanentlyDenied: Boolean,
     previewContent: @Composable () -> Unit,
     onRequestCameraPermission: () -> Unit,
@@ -91,6 +92,7 @@ fun ProductionScreen(
     onRetryNow: () -> Unit,
     onChangeConnectionSettings: () -> Unit,
     onForgetTrustedPc: () -> Unit,
+    onMaxHandsChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var host by rememberSaveable { mutableStateOf(savedHost.ifBlank { "127.0.0.1" }) }
@@ -182,6 +184,8 @@ fun ProductionScreen(
         HelpDialog(
             hasTrustedPc = hasTrustedPc,
             isConnected = state.connection.status == ConnectionStatus.CONNECTED,
+            maxHands = maxHands,
+            onMaxHandsChange = onMaxHandsChange,
             onChangeConnectionSettings = { showHelp = false; onChangeConnectionSettings() },
             onDisconnect = { showHelp = false; onDisconnect() },
             onForgetTrustedPc = { showHelp = false; onForgetTrustedPc() },
@@ -1187,6 +1191,8 @@ private fun calibrationRetryMessage(reason: CalibrationRetryReason): String = wh
 private fun HelpDialog(
     hasTrustedPc: Boolean,
     isConnected: Boolean,
+    maxHands: Int,
+    onMaxHandsChange: (Int) -> Unit,
     onChangeConnectionSettings: () -> Unit,
     onDisconnect: () -> Unit,
     onForgetTrustedPc: () -> Unit,
@@ -1200,6 +1206,32 @@ private fun HelpDialog(
                 modifier = Modifier.testTag("production_help_content"),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                Text("操作する手の数", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = maxHands == 1,
+                        onClick = { onMaxHandsChange(1) },
+                        label = { Text("1手のみ") },
+                        modifier = Modifier.testTag("hand_mode_single"),
+                    )
+                    FilterChip(
+                        selected = maxHands == 2,
+                        onClick = { onMaxHandsChange(2) },
+                        label = { Text("2手") },
+                        modifier = Modifier.testTag("hand_mode_dual"),
+                    )
+                }
+                Text(
+                    if (maxHands == 1) {
+                        "認識の安定性と負荷の軽さを優先します。"
+                    } else {
+                        "2手を同時に検出します。端末負荷が高くなる場合があります。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Text("設置方法", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text(
                     "PC画面全体が映る位置へ端末を固定し、反射や逆光を避けてください。",

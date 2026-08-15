@@ -30,6 +30,7 @@ import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.ui.calibrationUiStateAfterFrame
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.HandTrackAssigner
+import com.nxtend.team35.yubiboard.vision.limitHands
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
@@ -255,7 +256,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun submitHand(result: HandDetectionResult) {
         if (BuildConfig.DEBUG && SystemClock.uptimeMillis() < syntheticHandOverrideUntilMs) return
-        publishHand(result)
+        publishHand(result.limitHands(currentSettings.maxHands))
     }
 
     private fun publishHand(result: HandDetectionResult) {
@@ -517,6 +518,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.edit()
             .putInt(KEY_ANALYSIS_WIDTH, effective.analysisWidth)
             .putInt(KEY_ANALYSIS_HEIGHT, effective.analysisHeight)
+            .putInt(KEY_MAX_HANDS, effective.maxHands)
             .putFloat(KEY_DETECTION_CONFIDENCE, effective.minDetectionConfidence)
             .putFloat(KEY_PRESENCE_CONFIDENCE, effective.minPresenceConfidence)
             .putFloat(KEY_TRACKING_CONFIDENCE, effective.minTrackingConfidence)
@@ -550,6 +552,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
+        maxHands = preferences.getInt(KEY_MAX_HANDS, 1),
         // The app is production-only. Ignore legacy/restored debug preferences.
         debugModeEnabled = false,
     ).let { if (it.validate() == null) it else AppSettings() }
@@ -562,6 +565,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_ANALYSIS_WIDTH = "analysis_width"
         private const val KEY_ANALYSIS_HEIGHT = "analysis_height"
+        private const val KEY_MAX_HANDS = "max_hands"
         private const val KEY_DETECTION_CONFIDENCE = "detection_confidence"
         private const val KEY_PRESENCE_CONFIDENCE = "presence_confidence"
         private const val KEY_TRACKING_CONFIDENCE = "tracking_confidence"
