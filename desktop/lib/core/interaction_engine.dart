@@ -87,6 +87,20 @@ class InteractionEngine {
 
   bool get isCalibrated => _homography != null;
 
+  /// 現在の位置合わせ（ホモグラフィ）。session内の全トラックで共有するため
+  /// MultiHandEngine が読み出し、新規トラックのエンジンへ配布する。
+  Homography? get homography => _homography;
+
+  /// session単位で確定した位置合わせを、このトラック用エンジンへ取り込む。
+  /// ジェスチャー・平滑化の履歴はトラックごとに独立させるためリセットする。
+  /// （位置合わせ自体はsession共有・操作状態は手ごと独立、が仕様）。
+  void adoptCalibration(Homography? homography, EngineMode mode) {
+    _homography = homography;
+    this.mode = mode;
+    _screenFilter.reset();
+    _rec.reset();
+  }
+
   /// ピンチ認識の感度（0..1）。既定0.5は従来の比率ON=0.40/OFF=0.60。
   double get recognitionSensitivity => _rec.recognitionSensitivity;
 

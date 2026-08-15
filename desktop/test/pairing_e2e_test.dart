@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
+import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/net/discovery.dart';
 import 'package:thehack_overlay/net/input_server.dart';
 import 'package:thehack_overlay/ui/pairing_controller.dart';
@@ -20,7 +21,7 @@ void main() {
     late InputServer server;
     late PairingController controller;
     server = InputServer(
-      engine: engine,
+      engine: MultiHandEngine(calibrationEngine: engine),
       port: 0, // 空きポート
       onEvents: (_) {},
       onStatus: (st) {

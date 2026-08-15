@@ -7,6 +7,7 @@ import 'package:thehack_overlay/core/calibration_config.dart';
 import 'package:thehack_overlay/core/geom.dart';
 import 'package:thehack_overlay/core/homography.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
+import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/net/input_server.dart';
 import 'package:thehack_overlay/protocol/messages.dart';
@@ -264,7 +265,7 @@ void main() {
       final flow = CalibrationFlowController();
       final statuses = <ServerStatus>[];
       final server = InputServer(
-        engine: engine,
+        engine: MultiHandEngine(calibrationEngine: engine),
         port: 0, // 空きポート（稼働中アプリの8765と衝突させない）
         onEvents: (_) {},
         onStatus: (st) {
@@ -346,7 +347,7 @@ void main() {
         config: CalibrationConfig.forCalibrationTarget(),
       );
       final server = InputServer(
-        engine: engine,
+        engine: MultiHandEngine(calibrationEngine: engine),
         port: 0,
         acceptCalibrationMessages: false,
         onEvents: (_) {},
@@ -422,7 +423,7 @@ void main() {
         config: CalibrationConfig(source: CalibrationSource.slideCornersOnly),
       );
       final server = InputServer(
-        engine: engine,
+        engine: MultiHandEngine(calibrationEngine: engine),
         port: 0,
         onEvents: (_) {},
         onStatus: (_) {},

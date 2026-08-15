@@ -7,6 +7,7 @@ import 'package:thehack_overlay/core/geom.dart';
 import 'package:thehack_overlay/core/gesture_recognizer.dart';
 import 'package:thehack_overlay/core/homography.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
+import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/net/input_server.dart';
@@ -196,7 +197,7 @@ void main() {
       final events = <InteractionEvent>[];
       final engine = InteractionEngine();
       final server = InputServer(
-        engine: engine,
+        engine: MultiHandEngine(calibrationEngine: engine),
         port: 0, // 空きポート（ユーザーの起動中アプリ8765と衝突させない）
         onEvents: events.addAll,
         onStatus: (_) {},

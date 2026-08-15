@@ -5,6 +5,8 @@ import 'dart:math' as math;
 
 import '../core/homography.dart';
 import '../core/interaction_engine.dart';
+import '../core/multi_hand_engine.dart';
+import '../protocol/input_frame.dart';
 import '../protocol/messages.dart';
 
 /// 接続状態のスナップショット（デバッグ表示用）。
@@ -33,10 +35,19 @@ class ServerStatus {
 /// Androidの hello/hand_frame/calibration_markers/heartbeat を捌く（protocol v1）。
 /// hand_frame は「常に最新の1枚だけ処理」= 未処理の古いフレームは新着で置換する。
 class InputServer {
-  final InteractionEngine engine;
+  final MultiHandEngine engine;
+
+  /// OS入力（単一カーソル）へ流す主トラック（最小trackId）の操作イベント。
+  /// 単一手では従来どおり、その手のイベント全てが渡る。
   final void Function(List<InteractionEvent>) onEvents;
+
+  /// 各トラックの操作イベント（オーバーレイの2カーソル/2色描画用）。任意。
+  final void Function(Map<int, List<InteractionEvent>>)? onTrackEvents;
+
   final void Function(ServerStatus) onStatus;
-  final void Function(HandFrame)? onFrame;
+
+  /// 受信フレーム全体（0〜2トラックの骨格・骨格表示/状態用）。任意。
+  final void Function(InputFrame)? onFrame;
   final int port;
 
   /// WebSocket確立後、helloを送らない接続が単一クライアント枠を占有できる時間。
@@ -65,13 +76,14 @@ class InputServer {
   bool _handDetected = false;
 
   // 単一スロット（最新フレームだけ保持）
-  HandFrame? _pending;
+  InputFrame? _pending;
   bool _processing = false;
 
   InputServer({
     required this.engine,
     required this.onEvents,
     required this.onStatus,
+    this.onTrackEvents,
     this.onFrame,
     this.port = 8765,
     this.helloTimeout = const Duration(seconds: 5),
@@ -195,7 +207,15 @@ class InputServer {
           _onHello(source, Hello.fromJson(j));
           break;
         case 'hand_frame':
-          _enqueueFrame(HandFrame.fromJson(j));
+          final frame = InputFrame.parse(j, expectedSessionId: _sessionId);
+          if (frame == null) {
+            // 手数超過・trackId重複・21点以外・NaN/範囲外・session不一致等は
+            // 一部採用せず、その hand_frame 全体を破棄する。
+            _log('不正な hand_frame を破棄（全体）');
+            _emit(error: 'invalid hand_frame (discarded)');
+            break;
+          }
+          _enqueueFrame(frame);
           break;
         case 'calibration_markers':
           _onCalibration(CalibrationMarkers.fromJson(j));
@@ -315,7 +335,7 @@ class InputServer {
     );
   }
 
-  void _enqueueFrame(HandFrame f) {
+  void _enqueueFrame(InputFrame f) {
     if (_sessionId == null) return; // ハンドシェイク前は無視
     _pending = f; // 最新で置換
     _drain();
@@ -327,17 +347,33 @@ class InputServer {
     while (_pending != null) {
       final f = _pending!;
       _pending = null;
+      // (sessionId, trackId) ごとに分離したエンジンで処理。単調増加でない
+      // frameId は onInputFrame が null を返す＝フレーム全体を破棄する。
+      final byTrack = engine.onInputFrame(f);
+      if (byTrack == null) {
+        _log('失効した hand_frame を破棄（frameId=${f.frameId}）');
+        _emit(error: 'stale hand_frame (discarded)');
+        await Future<void>.delayed(Duration.zero);
+        continue;
+      }
       _frames++;
       if (_frames == 1) _log('hand_frame 受信開始 (frameId=${f.frameId})');
       _lastFrameId = f.frameId;
-      _handDetected = f.detected;
+      _handDetected = f.hasHands;
       onFrame?.call(f);
-      final events = engine.onFrame(f);
-      if (events.isNotEmpty) onEvents(events);
+      _dispatch(byTrack);
       _emit();
       await Future<void>.delayed(Duration.zero); // 他イベントに譲る
     }
     _processing = false;
+  }
+
+  /// 主トラック（最小trackId）のイベントをOS入力へ、全トラックをオーバーレイへ。
+  void _dispatch(Map<int, List<InteractionEvent>> byTrack) {
+    if (byTrack.isEmpty) return;
+    final primary = engine.primaryTrackIdOf(byTrack);
+    if (primary != null) onEvents(byTrack[primary]!);
+    onTrackEvents?.call(byTrack);
   }
 
   void requestMode(String mode) {
@@ -390,11 +426,9 @@ class InputServer {
     _handDetected = false;
     _pending = null;
     if (!releaseInput) return;
-    onEvents(
-      engine.onFrame(
-        const HandFrame(frameId: -1, capturedAtMonotonicMs: 0, detected: false),
-      ),
-    );
+    // WebSocket切断・停止では全trackIdを即時解除する。
+    final byTrack = engine.releaseAll();
+    _dispatch(byTrack);
   }
 
   Future<void> stop() async {
