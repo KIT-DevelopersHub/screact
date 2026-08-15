@@ -598,3 +598,43 @@ Phase 1では必要なファイルだけを変更する。特にhome_page.dart�
 14. Android・Desktopの契約テスト、純粋ロジックテスト、実機境界テストが成功する。
 
 実装時は通信変更をdocs/android/android-protocol-v1.md、画面外動作と主トラック規則をdocs/desktop/desktop-app-requirements.mdへ先に反映してからコードを変更する。
+
+---
+
+## 14. PR #26 実機デバッグ結果
+
+2026-08-16に`fix/desktop-screen-boundary`のcommit `0f01140`を次の環境で確認した。
+
+- PC: Windows 10.0.26200.9168、Desktop Windows debug build
+- Android: Xiaomi 25118PC98G、Android 16（API 36）、1080×2392、debug APK
+- 接続: PCとAndroidを同一LANへ接続し、UDP自動発見後にTCP 8765のWebSocketを確立
+- 確認者: ユーザーによる実機操作と目視、CodexによるADB・TCP状態確認
+
+### 14.1 実行結果
+
+| 確認項目 | 結果 | 証跡・補足 |
+| --- | --- | --- |
+| Android debug APK | 成功 | `assembleDebug`成功、実機への上書きインストール成功 |
+| Desktop Windows debug build | 成功 | `flutter build windows --debug`成功 |
+| 自動発見・初回認証 | 成功 | Androidの「画面認識開始」後、AndroidからPCのTCP 8765へ接続確立 |
+| 配置確認・4マーカー位置合わせ | 成功 | PCの「位置合わせ開始」後、Androidが追跡状態へ遷移 |
+| 単一手の画面境界 | PR #26の範囲では問題なし | 四辺を横断する操作をユーザーが目視し、画面端判定は良好でブロッカーなしと判断 |
+| 手喪失・再入場 | PR #26の範囲では問題なし | 境界横断と手の出し入れを含む目視確認で、継続を妨げる問題なし |
+| 2手認識・描画判定 | 後続課題 | 2手の認識成立と描画モードへの遷移が難しく、Phase 2のジェスチャー状態とAndroid側認識を分けて評価する |
+| 2手描画の滑らかさ | 後続課題 | 確認環境ではカクつきを体感。Androidの`gfxinfo`だけではPC描画・通信・検出のどこが原因か判別できないため、区間別計測が必要 |
+| Windowsネイティブカーソル入力 | 未実装 | 現行mainの既知制約。オーバーレイ確認とOS入力確認を分け、別PRで実装する |
+| Android instrumentation test | 未実行 | debug APKは導入成功したが、test APKは端末側の`INSTALL_FAILED_USER_RESTRICTED`で導入できなかった |
+
+Android側の案内はPCで「配置OK」を押す表現だが、現行Desktopの実ボタンは「位置合わせ開始」である。位置合わせ自体は完走したためPR #26のブロッカーとはしないが、接続UI文言の同期課題として別に扱う。
+
+### 14.2 PR #26の判定
+
+PR #26が変更する画面境界、安全解除、骨格非クリップ、OS主トラック安定化のうち、実機で確認可能な画面境界経路にブロッカーは見つからなかった。自動テスト148件と`flutter analyze`の成功も合わせ、Phase 1としてはレビュー・マージ判断へ進められる。
+
+次の課題はPR #26へ混ぜず、責任範囲ごとに分ける。
+
+1. Desktopのジェスチャー開始条件と曖昧状態の改善
+2. Androidの2手認識・trackId安定性と、Desktopまでのフレームレート／遅延計測
+3. 2手描画時のカクつきの区間別計測とボトルネック修正
+4. Windowsネイティブのポインター、クリック、ドラッグ、スクロール入力
+5. Androidの「配置OK」とDesktopの「位置合わせ開始」の文言同期
