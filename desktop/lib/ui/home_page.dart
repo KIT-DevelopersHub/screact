@@ -78,6 +78,9 @@ class _HomePageState extends State<HomePage> {
   late int _configuredPort;
   bool _enforcePairing = true;
   bool _startingServer = false;
+  // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
+  // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
+  bool _showManualConnect = false;
   bool _overlayOn = false;
   bool _enteringOverlay = false;
   String? _overlayError;
@@ -193,7 +196,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handlePairingChanged() {
-    if (!_disposed && mounted) setState(() {});
+    if (_disposed || !mounted) return;
+    // UDP検索がタイムアウトしたら、手動接続の逃げ道（IP/ポート）を自動で開く。
+    if (_pairing.phase == PairingPhase.timeout) _showManualConnect = true;
+    setState(() {});
   }
 
   void _handleServerLog(String message) {
@@ -396,12 +402,17 @@ class _HomePageState extends State<HomePage> {
     });
     if (justConnected) {
       // helloの認証完了を接続確定とし、UDP広告はここで終了する。
-      // 位置合わせtargetは画面のボタンが押されるまで開始しない。
       _pairing.onConnected();
-      // 既存の位置合わせを再利用できる場合は、白いアプリ内キャンバスを
-      // 経由せず標準の透明オーバーレイへ直接入る。
       if (_engine.isCalibrated && _overlayPlatformSupported) {
+        // 既存の位置合わせを再利用できる場合は、白いアプリ内キャンバスを
+        // 経由せず標準の透明オーバーレイへ直接入る。
         unawaited(_enterOverlay());
+      } else if (!_engine.isCalibrated) {
+        // 未校正なら手動ボタンを待たず、そのまま位置合わせ（ArUco表示）へ
+        // 自動遷移する。接続後に「位置合わせ開始」を押させる2クリックを廃止。
+        unawaited(
+          _startCalibrationDisplay(intoOverlay: _overlayPlatformSupported),
+        );
       }
     }
     _flow.onEngineEpoch(_engine.calibrationCount);
@@ -439,6 +450,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startCalibrationDisplay({required bool intoOverlay}) async {
     final server = _server;
     if (server == null || !_phoneConnected) return;
+    // 既に位置合わせターゲットを表示中なら二重起動しない
+    // （接続時の自動遷移と旧AUTOFLOW/再入の競合を防ぐ）。
+    if (_flow.showingTarget) return;
     setState(() {
       _calibrationHadTracking =
           _engine.isCalibrated && _engine.mode == EngineMode.tracking;
@@ -668,21 +682,63 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        // 既定ではIP/ポートを中央に常時表示しない（1ボタンに集中させる）。
+        // UDPで自動接続できない環境向けに、控えめなリンクから手動接続情報を開ける。
         Positioned(
-          top: 220,
+          top: 210,
           left: 330,
           width: 940,
-          child: ProductionPanel(
-            key: const ValueKey('connection-info'),
-            padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 24),
-            borderColor: const Color(0xFFB8B8B8),
-            child: Column(
-              children: [
-                _connectionValueRow('IPアドレス', _displayIp),
-                const Divider(height: 18, thickness: 1.5),
-                _connectionValueRow('IPポート', '$_displayPort'),
+          child: Column(
+            children: [
+              TextButton.icon(
+                key: const ValueKey('manual-connect-toggle'),
+                onPressed:
+                    () => setState(
+                      () => _showManualConnect = !_showManualConnect,
+                    ),
+                icon: Icon(
+                  _showManualConnect
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 30,
+                ),
+                label: Text(
+                  _showManualConnect ? '手動接続の情報を隠す' : 'つながらないときは手動で接続',
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF686666),
+                  ),
+                ),
+              ),
+              if (_showManualConnect) ...[
+                const SizedBox(height: 8),
+                ProductionPanel(
+                  key: const ValueKey('connection-info'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 52,
+                    vertical: 18,
+                  ),
+                  borderColor: const Color(0xFFB8B8B8),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'スマホのアプリに次の値を入力してください',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF686666),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _connectionValueRow('IPアドレス', _displayIp),
+                      const Divider(height: 18, thickness: 1.5),
+                      _connectionValueRow('IPポート', '$_displayPort'),
+                    ],
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
         ),
         Positioned(
