@@ -14,6 +14,8 @@ import com.nxtend.team35.yubiboard.protocol.MarkerPayload
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
 import com.nxtend.team35.yubiboard.protocol.SCHEMA_VERSION
 import com.nxtend.team35.yubiboard.protocol.SourceInfo
+import com.nxtend.team35.yubiboard.protocol.TWO_HAND_INTERACTION_PROFILE
+import com.nxtend.team35.yubiboard.protocol.TrackedHandPayload
 import com.nxtend.team35.yubiboard.protocol.CalibrationStatusMessage
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
@@ -38,6 +40,7 @@ class YubiBoardWebSocketClient(
     private val onTrustedConnectionIssued: (ConnectionConfig, String) -> Unit = { _, _ -> },
     private val onTrustedConnectionInvalid: () -> Unit = {},
     private val onCalibrationReuseQueued: () -> Unit = {},
+    private val onInteractionProfileChanged: (Boolean) -> Unit = {},
     private val onLog: (String) -> Unit = {},
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(10, TimeUnit.SECONDS)
@@ -230,8 +233,13 @@ class YubiBoardWebSocketClient(
             return
         }
         val result = latestHand.getAndSet(null) ?: return
-        val hadOutOfRange = result.detected && result.landmarks.any {
-            it.x !in 0f..1f || it.y !in 0f..1f
+        if (!isValidHandFrame(result)) {
+            AppDiagnostics.increment("network.invalid_hand_frames")
+            AppDiagnostics.event("network", "invalid_hand_frame_dropped")
+            return
+        }
+        val hadOutOfRange = result.hands.any { hand ->
+            hand.landmarks.any { it.x !in 0f..1f || it.y !in 0f..1f }
         }
         if (hadOutOfRange) {
             AppDiagnostics.increment("network.landmarks_clamped")
@@ -239,22 +247,32 @@ class YubiBoardWebSocketClient(
                 "landmarks_clamped",
                 "network",
                 "landmarks_clamped",
-                mapOf("rawIndexTip" to result.landmarks.getOrNull(8)),
+                mapOf("trackIds" to result.hands.map { it.trackId }),
             )
         }
+        val hands = result.hands.sortedBy { it.trackId }.map { tracked ->
+            TrackedHandPayload(
+                trackId = tracked.trackId,
+                handedness = tracked.handedness,
+                handednessScore = tracked.handednessScore,
+                landmarks = tracked.landmarks.map {
+                    listOf(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f), it.z)
+                },
+            )
+        }
+        val primary = hands.firstOrNull()
         val message = HandFrameMessage(
             sessionId = activeSession,
             frameId = frameId.incrementAndGet(),
             capturedAtMonotonicMs = result.capturedAtMonotonicMs,
             source = SourceInfo(result.sourceWidth, result.sourceHeight),
-            hand = if (result.detected) {
+            hands = hands,
+            hand = if (primary != null) {
                 HandPayload(
                     detected = true,
-                    handedness = result.handedness,
-                    handednessScore = result.handednessScore,
-                    landmarks = result.landmarks.map {
-                        listOf(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f), it.z)
-                    },
+                    handedness = primary.handedness,
+                    handednessScore = primary.handednessScore,
+                    landmarks = primary.landmarks,
                 )
             } else {
                 HandPayload(detected = false)
@@ -281,6 +299,8 @@ class YubiBoardWebSocketClient(
                 mapOf(
                     "frameId" to message.frameId,
                     "detected" to result.detected,
+                    "handCount" to hands.size,
+                    "trackIds" to hands.map { it.trackId },
                     "bytes" to encoded.toByteArray().size,
                     "captureToSendMs" to (now - result.capturedAtMonotonicMs).coerceAtLeast(0),
                 ),
@@ -290,6 +310,18 @@ class YubiBoardWebSocketClient(
             latestHand.compareAndSet(null, result)
         }
     }
+
+    private fun isValidHandFrame(result: HandDetectionResult): Boolean =
+        result.hands.size <= 2 &&
+            result.hands.map { it.trackId }.let { ids ->
+                ids.all { it > 0 } && ids.distinct().size == ids.size
+            } &&
+            result.hands.all { hand ->
+                hand.landmarks.size == 21 &&
+                    hand.landmarks.all { it.x.isFinite() && it.y.isFinite() && it.z.isFinite() } &&
+                    (hand.handednessScore == null ||
+                        hand.handednessScore.isFinite() && hand.handednessScore in 0f..1f)
+            }
 
     private fun startHeartbeat(socket: WebSocket, activeSession: String) {
         heartbeatTask?.cancel(false)
@@ -367,6 +399,9 @@ class YubiBoardWebSocketClient(
                     onTrustedConnectionIssued(activeConfig, token)
                 }
                 sessionId = message.sessionId
+                val supportsTwoHands =
+                    message.acceptedInteractionProfile == TWO_HAND_INTERACTION_PROFILE
+                onInteractionProfileChanged(supportsTwoHands)
                 val cachedCalibration = lastStableCalibration.get()
                 val reuseCalibration = reconnecting && calibrationConfirmed && cachedCalibration != null
                 calibrationRequested = message.calibrationRequired && !reuseCalibration
@@ -377,6 +412,7 @@ class YubiBoardWebSocketClient(
                         "sessionId" to message.sessionId,
                         "calibrationRequired" to message.calibrationRequired,
                         "calibrationReused" to reuseCalibration,
+                        "acceptedInteractionProfile" to message.acceptedInteractionProfile,
                     ),
                 )
                 AppDiagnostics.gauge("network.session_id", message.sessionId)

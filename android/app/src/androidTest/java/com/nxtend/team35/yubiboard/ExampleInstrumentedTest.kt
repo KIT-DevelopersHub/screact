@@ -20,7 +20,7 @@ class ExampleInstrumentedTest {
     @Test
     fun nativeDependenciesAndModelArePackaged() {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.nxtend.team35.yubiboard", appContext.packageName)
+        assertEquals(BuildConfig.APPLICATION_ID, appContext.packageName)
         assertTrue(OpenCVLoader.initLocal())
         appContext.assets.open("hand_landmarker.task").use { model ->
             assertTrue(model.available() > 0)

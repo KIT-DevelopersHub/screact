@@ -19,26 +19,27 @@ const iy = CalibrationConfig.targetMarkerInsetY; // 0.2222
 List<Vec2> targetCenters() => Homography.insetRect(ix, iy);
 
 Marker markerAt(int id, Vec2 c) => Marker(id, c, [
-      Vec2(c.x - .02, c.y - .02),
-      Vec2(c.x + .02, c.y - .02),
-      Vec2(c.x + .02, c.y + .02),
-      Vec2(c.x - .02, c.y + .02),
-    ]);
+  Vec2(c.x - .02, c.y - .02),
+  Vec2(c.x + .02, c.y - .02),
+  Vec2(c.x + .02, c.y + .02),
+  Vec2(c.x - .02, c.y + .02),
+]);
 
 /// ID 10..13 のマーカーを指定のカメラ座標に置いた calibration_markers。
 CalibrationMarkers markersFrom(List<Vec2> centers) => CalibrationMarkers(0, [
-      for (var i = 0; i < 4; i++)
-        markerAt(Homography.cornerMarkerIds[i], centers[i]),
-    ]);
+  for (var i = 0; i < 4; i++)
+    markerAt(Homography.cornerMarkerIds[i], centers[i]),
+]);
 
 void main() {
   group('ID対応付け＋マーカーインセット外挿', () {
     test('カメラ＝画面が一致する置き方なら恒等写像になる', () {
-      final h = Homography.fromMarkers(
-        markersFrom(targetCenters()).markers,
-        insetX: ix,
-        insetY: iy,
-      )!;
+      final h =
+          Homography.fromMarkers(
+            markersFrom(targetCenters()).markers,
+            insetX: ix,
+            insetY: iy,
+          )!;
       const samples = [
         Vec2(0, 0),
         Vec2(1, 1),
@@ -61,11 +62,12 @@ void main() {
       expect(tl.x, closeTo(0, 1e-6)); // 補正なし: マーカー位置→(0,0)
       expect(tl.y, closeTo(0, 1e-6));
 
-      final withInset = Homography.fromMarkers(
-        markersFrom(targetCenters()).markers,
-        insetX: ix,
-        insetY: iy,
-      )!;
+      final withInset =
+          Homography.fromMarkers(
+            markersFrom(targetCenters()).markers,
+            insetX: ix,
+            insetY: iy,
+          )!;
       final same = withInset.map(const Vec2(ix, iy));
       expect(same.x, closeTo(ix, 1e-6)); // 補正あり: マーカー位置はそのまま
       expect(same.y, closeTo(iy, 1e-6));
@@ -75,11 +77,12 @@ void main() {
       // カメラが上下逆さま: 画面点 s はカメラ上では (1-x, 1-y) に見える。
       Vec2 rot(Vec2 p) => Vec2(1 - p.x, 1 - p.y);
       final centers = [for (final c in targetCenters()) rot(c)];
-      final h = Homography.fromMarkers(
-        markersFrom(centers).markers,
-        insetX: ix,
-        insetY: iy,
-      )!;
+      final h =
+          Homography.fromMarkers(
+            markersFrom(centers).markers,
+            insetX: ix,
+            insetY: iy,
+          )!;
       const samples = [Vec2(0.2, 0.3), Vec2(0.9, 0.8), Vec2(0.0, 1.0)];
       for (final s in samples) {
         final m = h.map(rot(s));
@@ -90,16 +93,23 @@ void main() {
 
     test('斜めから見た場合もマーカーインセット外挿で画面全域が正写される', () {
       // 画面全域→カメラ台形の順方向ホモグラフィで「その角度から見た」座標を合成。
-      final fwd = Homography.fromCorrespondences(
-        const [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)],
-        const [Vec2(0.18, 0.20), Vec2(0.84, 0.12), Vec2(0.95, 0.80), Vec2(0.08, 0.68)],
-      )!;
+      final fwd =
+          Homography.fromCorrespondences(
+            const [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)],
+            const [
+              Vec2(0.18, 0.20),
+              Vec2(0.84, 0.12),
+              Vec2(0.95, 0.80),
+              Vec2(0.08, 0.68),
+            ],
+          )!;
       final centers = [for (final c in targetCenters()) fwd.map(c)];
-      final h = Homography.fromMarkers(
-        markersFrom(centers).markers,
-        insetX: ix,
-        insetY: iy,
-      )!;
+      final h =
+          Homography.fromMarkers(
+            markersFrom(centers).markers,
+            insetX: ix,
+            insetY: iy,
+          )!;
       const samples = [Vec2(0.05, 0.05), Vec2(0.5, 0.5), Vec2(0.95, 0.9)];
       for (final s in samples) {
         final m = h.map(fwd.map(s));
@@ -111,16 +121,21 @@ void main() {
 
   group('slide_corners の四隅インセット補正', () {
     test('検知四隅が実画面より内側でも設定した内側率で端まで外挿される', () {
-      final fwd = Homography.fromCorrespondences(
-        const [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)],
-        const [Vec2(0.18, 0.20), Vec2(0.84, 0.12), Vec2(0.95, 0.80), Vec2(0.08, 0.68)],
-      )!;
+      final fwd =
+          Homography.fromCorrespondences(
+            const [Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1)],
+            const [
+              Vec2(0.18, 0.20),
+              Vec2(0.84, 0.12),
+              Vec2(0.95, 0.80),
+              Vec2(0.08, 0.68),
+            ],
+          )!;
       // 検知点は画面端から5%内側に寄っている想定。
       final detected = [
-        for (final c in Homography.insetRect(0.05, 0.05)) fwd.map(c)
+        for (final c in Homography.insetRect(0.05, 0.05)) fwd.map(c),
       ];
-      final h =
-          Homography.fromCorners(detected, insetX: 0.05, insetY: 0.05)!;
+      final h = Homography.fromCorners(detected, insetX: 0.05, insetY: 0.05)!;
       const samples = [Vec2(0, 0), Vec2(1, 1), Vec2(0.3, 0.7)];
       for (final s in samples) {
         final m = h.map(fwd.map(s));
@@ -152,7 +167,9 @@ void main() {
       engine.calibrate(MockHand.markers());
       // 3マーカーしかない不正データ → リセット
       final bad = CalibrationMarkers(
-          0, MockHand.markers().markers.take(3).toList());
+        0,
+        MockHand.markers().markers.take(3).toList(),
+      );
       expect(engine.calibrate(bad), isFalse);
       expect(engine.calibrate(MockHand.markers()), isFalse);
       expect(engine.calibrate(MockHand.markers()), isFalse);
@@ -166,8 +183,12 @@ void main() {
       expect(engine.calibrate(MockHand.markers()), isFalse);
       expect(engine.isCalibrated, isFalse);
       expect(
-        engine.calibrateFromCorners(
-            const [Vec2(0.1, 0.1), Vec2(0.9, 0.1), Vec2(0.9, 0.9), Vec2(0.1, 0.9)]),
+        engine.calibrateFromCorners(const [
+          Vec2(0.1, 0.1),
+          Vec2(0.9, 0.1),
+          Vec2(0.9, 0.9),
+          Vec2(0.1, 0.9),
+        ]),
         isTrue,
       );
     });
@@ -177,8 +198,12 @@ void main() {
         config: CalibrationConfig(source: CalibrationSource.arucoOnly),
       );
       expect(
-        engine.calibrateFromCorners(
-            const [Vec2(0.1, 0.1), Vec2(0.9, 0.1), Vec2(0.9, 0.9), Vec2(0.1, 0.9)]),
+        engine.calibrateFromCorners(const [
+          Vec2(0.1, 0.1),
+          Vec2(0.9, 0.1),
+          Vec2(0.9, 0.9),
+          Vec2(0.1, 0.9),
+        ]),
         isFalse,
       );
       expect(engine.isCalibrated, isFalse);
@@ -232,8 +257,7 @@ void main() {
   });
 
   group('WS経由の一連フロー（実サーバE2E）', () {
-    test('calibration_markers 受信で校正され、完了通知(set_mode tracking)が返る',
-        () async {
+    test('calibration_markers 受信で校正され、完了通知(set_mode tracking)が返る', () async {
       final engine = InteractionEngine(
         config: CalibrationConfig.forCalibrationTarget(),
       );
@@ -252,7 +276,8 @@ void main() {
       addTearDown(server.stop);
 
       final ws = await WebSocket.connect(
-          'ws://localhost:${server.boundPort}/ws/v1/input');
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
       addTearDown(ws.close);
       final ack = Completer<void>();
       final trackingNotified = Completer<void>();
@@ -307,17 +332,94 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(engine.isCalibrated, isTrue);
-      expect(flow.state, CalibrationFlowState.done,
-          reason: '四隅受信でキャリブ画像が自動クローズされる');
+      expect(
+        flow.state,
+        CalibrationFlowState.done,
+        reason: '四隅受信でキャリブ画像が自動クローズされる',
+      );
       expect(statuses.last.mode, EngineMode.tracking);
       expect(statuses.last.lastError, isNull);
     });
 
-    test('source=slideCornersOnly 設定では calibration_markers が無視される',
-        () async {
+    test('acceptCalibrationMessages=falseでは正しいマーカーも無視し、true後だけ校正する', () async {
       final engine = InteractionEngine(
-        config:
-            CalibrationConfig(source: CalibrationSource.slideCornersOnly),
+        config: CalibrationConfig.forCalibrationTarget(),
+      );
+      final server = InputServer(
+        engine: engine,
+        port: 0,
+        acceptCalibrationMessages: false,
+        onEvents: (_) {},
+        onStatus: (_) {},
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      final ws = await WebSocket.connect(
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
+      addTearDown(ws.close);
+      final ack = Completer<void>();
+      final trackingNotified = Completer<void>();
+      ws.listen((data) {
+        final json = jsonDecode(data as String) as Map<String, dynamic>;
+        if (json['messageType'] == 'hello_ack' && !ack.isCompleted) {
+          ack.complete();
+        }
+        if (json['messageType'] == 'control_message' &&
+            json['command'] == 'set_mode' &&
+            json['mode'] == 'tracking' &&
+            !trackingNotified.isCompleted) {
+          trackingNotified.complete();
+        }
+      });
+
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'hello',
+          'deviceId': 'gated-calibration-phone',
+        }),
+      );
+      await ack.future.timeout(const Duration(seconds: 5));
+
+      final centers = targetCenters();
+      final markers = {
+        'schemaVersion': 1,
+        'messageType': 'calibration_markers',
+        'capturedAtMonotonicMs': 0,
+        'markers': [
+          for (var i = 0; i < 4; i++)
+            {
+              'id': Homography.cornerMarkerIds[i],
+              'center': [centers[i].x, centers[i].y],
+              'corners': [
+                [centers[i].x - .02, centers[i].y - .02],
+                [centers[i].x + .02, centers[i].y - .02],
+                [centers[i].x + .02, centers[i].y + .02],
+                [centers[i].x - .02, centers[i].y + .02],
+              ],
+            },
+        ],
+      };
+
+      ws.add(jsonEncode(markers));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(engine.isCalibrated, isFalse);
+      expect(engine.calibrationCount, 0);
+      expect(trackingNotified.isCompleted, isFalse);
+
+      server.acceptCalibrationMessages = true;
+      ws.add(jsonEncode(markers));
+      await trackingNotified.future.timeout(const Duration(seconds: 5));
+      expect(engine.isCalibrated, isTrue);
+      expect(engine.calibrationCount, 1);
+      expect(engine.mode, EngineMode.tracking);
+    });
+
+    test('source=slideCornersOnly 設定では calibration_markers が無視される', () async {
+      final engine = InteractionEngine(
+        config: CalibrationConfig(source: CalibrationSource.slideCornersOnly),
       );
       final server = InputServer(
         engine: engine,
@@ -329,7 +431,8 @@ void main() {
       addTearDown(server.stop);
 
       final ws = await WebSocket.connect(
-          'ws://localhost:${server.boundPort}/ws/v1/input');
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
       addTearDown(ws.close);
       final ack = Completer<void>();
       ws.listen((data) {
@@ -338,42 +441,48 @@ void main() {
           ack.complete();
         }
       });
-      ws.add(jsonEncode({
-        'schemaVersion': 1,
-        'messageType': 'hello',
-        'deviceId': 'test-phone',
-      }));
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'hello',
+          'deviceId': 'test-phone',
+        }),
+      );
       await ack.future.timeout(const Duration(seconds: 5));
 
       final centers = targetCenters();
-      ws.add(jsonEncode({
-        'schemaVersion': 1,
-        'messageType': 'calibration_markers',
-        'capturedAtMonotonicMs': 0,
-        'markers': [
-          for (var i = 0; i < 4; i++)
-            {
-              'id': Homography.cornerMarkerIds[i],
-              'center': [centers[i].x, centers[i].y],
-              'corners': const [],
-            },
-        ],
-      }));
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'calibration_markers',
+          'capturedAtMonotonicMs': 0,
+          'markers': [
+            for (var i = 0; i < 4; i++)
+              {
+                'id': Homography.cornerMarkerIds[i],
+                'center': [centers[i].x, centers[i].y],
+                'corners': const [],
+              },
+          ],
+        }),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(engine.isCalibrated, isFalse);
 
       // slide_corners なら受け付ける。
-      ws.add(jsonEncode({
-        'schemaVersion': 1,
-        'messageType': 'slide_corners',
-        'capturedAtMonotonicMs': 0,
-        'corners': [
-          [0.1, 0.1],
-          [0.9, 0.1],
-          [0.9, 0.9],
-          [0.1, 0.9],
-        ],
-      }));
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'slide_corners',
+          'capturedAtMonotonicMs': 0,
+          'corners': [
+            [0.1, 0.1],
+            [0.9, 0.1],
+            [0.9, 0.9],
+            [0.1, 0.9],
+          ],
+        }),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(engine.isCalibrated, isTrue);
     });

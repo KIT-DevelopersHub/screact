@@ -44,6 +44,13 @@ HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
     (0, 17),
 )
 FINGERTIPS = frozenset((4, 8, 12, 16, 20))
+TRACK_COLORS = ((59, 220, 182), (255, 145, 82))
+
+
+@dataclass(frozen=True)
+class LoggedHand:
+    track_id: int
+    landmarks: tuple[tuple[float, float, float], ...]
 
 
 @dataclass(frozen=True)
@@ -52,8 +59,15 @@ class LoggedFrame:
     session_id: str
     captured_at_ms: int | None
     received_at_seconds: float | None
-    detected: bool
-    landmarks: tuple[tuple[float, float, float], ...]
+    hands: tuple[LoggedHand, ...]
+
+    @property
+    def detected(self) -> bool:
+        return bool(self.hands)
+
+    @property
+    def landmarks(self) -> tuple[tuple[float, float, float], ...]:
+        return self.hands[0].landmarks if self.hands else ()
 
 
 def _parse_received_at(value: Any) -> float | None:
@@ -72,16 +86,28 @@ def parse_logged_frame(value: Any) -> LoggedFrame | None:
     message = value.get("message", value)
     if not isinstance(message, dict) or message.get("messageType") != "hand_frame":
         return None
-    hand = message.get("hand")
-    if not isinstance(hand, dict) or not isinstance(hand.get("detected"), bool):
+    raw_hands = message.get("hands")
+    if raw_hands is None:
+        legacy = message.get("hand")
+        if not isinstance(legacy, dict) or not isinstance(legacy.get("detected"), bool):
+            return None
+        raw_hands = [dict(legacy, trackId=1)] if legacy["detected"] else []
+    if not isinstance(raw_hands, list) or len(raw_hands) > 2:
         return None
 
-    detected = hand["detected"]
-    parsed_landmarks: list[tuple[float, float, float]] = []
-    if detected:
+    parsed_hands: list[LoggedHand] = []
+    seen_ids: set[int] = set()
+    for hand in raw_hands:
+        if not isinstance(hand, dict):
+            return None
+        track_id = hand.get("trackId")
+        if not isinstance(track_id, int) or track_id <= 0 or track_id in seen_ids:
+            return None
+        seen_ids.add(track_id)
         landmarks = hand.get("landmarks")
         if not isinstance(landmarks, list) or len(landmarks) != 21:
             return None
+        parsed_landmarks: list[tuple[float, float, float]] = []
         for point in landmarks:
             if not isinstance(point, list) or len(point) != 3:
                 return None
@@ -92,6 +118,7 @@ def parse_logged_frame(value: Any) -> LoggedFrame | None:
             if not all(math.isfinite(coordinate) for coordinate in coordinates):
                 return None
             parsed_landmarks.append(coordinates)
+        parsed_hands.append(LoggedHand(track_id, tuple(parsed_landmarks)))
 
     captured = message.get("capturedAtMonotonicMs")
     try:
@@ -109,8 +136,7 @@ def parse_logged_frame(value: Any) -> LoggedFrame | None:
         session_id=str(message.get("sessionId", "")),
         captured_at_ms=captured_at_ms,
         received_at_seconds=_parse_received_at(value.get("receivedAtUtc")),
-        detected=detected,
-        landmarks=tuple(parsed_landmarks),
+        hands=tuple(sorted(parsed_hands, key=lambda hand: hand.track_id)),
     )
 
 
@@ -226,31 +252,25 @@ def _paint_line(
 
 def render_rgb_frame(frame: LoggedFrame, width: int, height: int) -> bytes:
     pixels = bytearray(width * height * 3)
-    if not frame.detected:
-        return bytes(pixels)
-
-    points = [
-        (
-            round(min(1.0, max(0.0, x)) * (width - 1)),
-            round(min(1.0, max(0.0, y)) * (height - 1)),
-        )
-        for x, y, _ in frame.landmarks
-    ]
     line_width = max(2, round(min(width, height) / 180))
     point_radius = max(3, round(min(width, height) / 100))
-    for start_index, end_index in HAND_CONNECTIONS:
-        _paint_line(
-            pixels,
-            width,
-            height,
-            points[start_index],
-            points[end_index],
-            line_width,
-            (235, 235, 235),
-        )
-    for index, (x, y) in enumerate(points):
-        color = (255, 210, 0) if index in FINGERTIPS else (0, 210, 255)
-        _paint_circle(pixels, width, height, x, y, point_radius, color)
+    for hand_index, hand in enumerate(frame.hands):
+        color = TRACK_COLORS[hand_index % len(TRACK_COLORS)]
+        points = [
+            (
+                round(min(1.0, max(0.0, x)) * (width - 1)),
+                round(min(1.0, max(0.0, y)) * (height - 1)),
+            )
+            for x, y, _ in hand.landmarks
+        ]
+        for start_index, end_index in HAND_CONNECTIONS:
+            _paint_line(
+                pixels, width, height, points[start_index], points[end_index],
+                line_width, color,
+            )
+        for index, (x, y) in enumerate(points):
+            radius = point_radius + 1 if index in FINGERTIPS else point_radius
+            _paint_circle(pixels, width, height, x, y, radius, color)
     return bytes(pixels)
 
 
@@ -366,9 +386,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"動画生成に失敗しました: {error}", file=sys.stderr)
         return 1
     detected_count = sum(1 for frame in frames if frame.detected)
+    two_hand_count = sum(1 for frame in frames if len(frame.hands) == 2)
     print(
         f"動画を生成しました: {args.output} "
-        f"(受信{len(frames)}フレーム、手検出{detected_count}、"
+        f"(受信{len(frames)}フレーム、手検出{detected_count}、2手{two_hand_count}、"
         f"出力{output_count}フレーム、スキップ{skipped})"
     )
     return 0

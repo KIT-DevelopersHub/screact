@@ -52,10 +52,17 @@ OverlayModeController::OverlayModeController(HWND window,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
         if (call.method_name() == "isAvailable") {
-          result->Success(flutter::EncodableValue(true));
+          // クリック透過後の脱出経路が保証できる場合だけ利用可能とする。
+          // Ctrl+Shift+O が他アプリと競合して登録できない環境で、自動的に
+          // 操作不能な全画面へ入らないための安全ゲート。
+          result->Success(flutter::EncodableValue(is_available()));
         } else if (call.method_name() == "enterOverlay") {
-          EnterOverlay();
-          result->Success(flutter::EncodableValue(true));
+          if (!is_available()) {
+            result->Success(flutter::EncodableValue(false));
+          } else {
+            EnterOverlay();
+            result->Success(flutter::EncodableValue(true));
+          }
         } else if (call.method_name() == "exitOverlay") {
           ExitOverlay(/*notify_flutter=*/false);
           result->Success(flutter::EncodableValue(true));
@@ -64,12 +71,13 @@ OverlayModeController::OverlayModeController(HWND window,
         }
       });
   // 脱出経路: Ctrl+Shift+O（クリック透過中でも届くグローバルホットキー）。
-  RegisterHotKey(window_, kHotKeyId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-                 'O');
+  hot_key_registered_ =
+      RegisterHotKey(window_, kHotKeyId,
+                     MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'O') != FALSE;
 }
 
 OverlayModeController::~OverlayModeController() {
-  if (window_) UnregisterHotKey(window_, kHotKeyId);
+  if (window_ && hot_key_registered_) UnregisterHotKey(window_, kHotKeyId);
 }
 
 void OverlayModeController::EnterOverlay() {

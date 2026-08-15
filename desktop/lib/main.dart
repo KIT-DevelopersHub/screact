@@ -13,14 +13,21 @@ class YubiBoardApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF2B6CB0);
     return MaterialApp(
       title: 'Screact Desktop',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: seed,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF5A4696),
+          brightness: Brightness.light,
+          surface: Colors.white,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF3FBF9),
+        textTheme: ThemeData.light().textTheme.apply(
+          bodyColor: const Color(0xFF3F3F3F),
+          displayColor: const Color(0xFF3F3F3F),
+        ),
         useMaterial3: true,
-        scaffoldBackgroundColor: Colors.white,
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
@@ -31,24 +38,32 @@ class YubiBoardApp extends StatelessWidget {
           style: FilledButton.styleFrom(
             minimumSize: const Size(0, 42),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            textStyle:
-                const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
             visualDensity: VisualDensity.compact,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-            textStyle:
-                const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
-            textStyle:
-                const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            textStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
         dividerTheme: const DividerThemeData(space: 1, thickness: 1),

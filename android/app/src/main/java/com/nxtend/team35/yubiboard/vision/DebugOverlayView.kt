@@ -13,12 +13,15 @@ class DebugOverlayView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(59, 220, 182)
         strokeWidth = 5f
         style = Paint.Style.STROKE
     }
     private val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val trackTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
+        textSize = 30f
         style = Paint.Style.FILL
     }
     private var result: HandDetectionResult? = null
@@ -53,7 +56,7 @@ class DebugOverlayView @JvmOverloads constructor(
             return
         }
         val current = result ?: return
-        if (!current.detected || current.landmarks.size != 21) return
+        if (!current.detected) return
 
         val sourceWidth = current.sourceWidth.toFloat()
         val sourceHeight = current.sourceHeight.toFloat()
@@ -61,22 +64,30 @@ class DebugOverlayView @JvmOverloads constructor(
         val offsetX = (width - sourceWidth * scale) / 2f
         val offsetY = (height - sourceHeight * scale) / 2f
 
-        fun screenPoint(index: Int): Pair<Float, Float> {
-            val landmark = current.landmarks[index]
+        fun screenPoint(hand: TrackedHand, index: Int): Pair<Float, Float> {
+            val landmark = hand.landmarks[index]
             return Pair(
                 offsetX + landmark.x * sourceWidth * scale,
                 offsetY + landmark.y * sourceHeight * scale,
             )
         }
 
-        CONNECTIONS.forEach { (from, to) ->
-            val start = screenPoint(from)
-            val end = screenPoint(to)
-            canvas.drawLine(start.first, start.second, end.first, end.second, linePaint)
-        }
-        current.landmarks.indices.forEach { index ->
-            val point = screenPoint(index)
-            canvas.drawCircle(point.first, point.second, 7f, pointPaint)
+        current.hands.forEach { hand ->
+            if (hand.landmarks.size != 21) return@forEach
+            val color = TRACK_COLORS[(hand.trackId - 1).mod(TRACK_COLORS.size)]
+            linePaint.color = color
+            pointPaint.color = color
+            CONNECTIONS.forEach { (from, to) ->
+                val start = screenPoint(hand, from)
+                val end = screenPoint(hand, to)
+                canvas.drawLine(start.first, start.second, end.first, end.second, linePaint)
+            }
+            hand.landmarks.indices.forEach { index ->
+                val point = screenPoint(hand, index)
+                canvas.drawCircle(point.first, point.second, 7f, pointPaint)
+            }
+            val wrist = screenPoint(hand, 0)
+            canvas.drawText("ID ${hand.trackId}", wrist.first + 12f, wrist.second - 12f, trackTextPaint)
         }
     }
 
@@ -103,6 +114,10 @@ class DebugOverlayView @JvmOverloads constructor(
     }
 
     companion object {
+        private val TRACK_COLORS = intArrayOf(
+            Color.rgb(59, 220, 182),
+            Color.rgb(255, 145, 82),
+        )
         private val CONNECTIONS = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 4,
             0 to 5, 5 to 6, 6 to 7, 7 to 8,

@@ -26,6 +26,7 @@ docs/
 ### システム全体
 
 - [システム全体要件定義書](./system/system-requirements.md): AndroidとPCを含む製品の目的、責任境界、完成形
+- [2人同時操作・最大2手連携 共有シート](./two-person-two-hand-integration-sheet.md): Android・PC並列実装用の1枚資料
 
 正常系の正本はシステム全体要件定義書の「デモクリティカルな利用フロー」とする。各担当資料では、接続、配置確認、ArUco、追跡、PC処理の順序を変更しない。
 

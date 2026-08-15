@@ -5,9 +5,13 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
+import android.content.Context
+import android.net.wifi.WifiManager
 import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
+import com.nxtend.team35.yubiboard.network.DesktopDiscoveryListener
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
@@ -20,32 +24,57 @@ import com.nxtend.team35.yubiboard.settings.TrustedConnectionStore
 import com.nxtend.team35.yubiboard.ui.CalibrationRetryReason
 import com.nxtend.team35.yubiboard.ui.CalibrationUiState
 import com.nxtend.team35.yubiboard.ui.CameraUiState
-import com.nxtend.team35.yubiboard.ui.ExperienceMode
+import com.nxtend.team35.yubiboard.ui.PairingUiState
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
 import com.nxtend.team35.yubiboard.ui.TrackingUiState
 import com.nxtend.team35.yubiboard.ui.calibrationUiStateAfterFrame
 import com.nxtend.team35.yubiboard.vision.HandDetectionResult
+import com.nxtend.team35.yubiboard.vision.HandTrackAssigner
 import com.nxtend.team35.yubiboard.vision.MarkerDetectionResult
 import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
 import com.nxtend.team35.yubiboard.vision.NormalizedPoint
+import com.nxtend.team35.yubiboard.vision.TrackedHand
 import java.util.UUID
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+internal class ConnectionRequestLauncher(
+    private val launch: (ConnectionConfig, Boolean) -> Unit,
+) {
+    fun connect(
+        host: String,
+        portText: String,
+        pairingToken: String,
+        automatic: Boolean,
+    ): String? {
+        val port = portText.toIntOrNull() ?: return "ポートは数字で入力してください"
+        val config = ConnectionConfig(
+            host = host.trim(),
+            port = port,
+            pairingToken = pairingToken.trim(),
+        )
+        config.validate()?.let { return it }
+        launch(config, automatic)
+        return null
+    }
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    val handTrackAssigner = HandTrackAssigner()
     private val preferences = application.getSharedPreferences(PREFERENCES, 0)
     private val mutableConnection = MutableLiveData(ConnectionSnapshot(ConnectionStatus.DISCONNECTED))
     private val mutableMode = MutableLiveData(CaptureMode.TRACKING)
     private val mutableLog = MutableLiveData<String>()
     private val mutableSettings = MutableLiveData(loadSettings())
-    private var productionSnapshot = ProductionUiState(
-        experience = if (mutableSettings.value?.debugModeEnabled == true) {
-            ExperienceMode.DEBUG
-        } else {
-            ExperienceMode.PRODUCTION
-        },
-    )
+    private var productionSnapshot = ProductionUiState()
     private val mutableProductionState = MutableLiveData(productionSnapshot)
     private val mutableCalibrationReset = MutableLiveData<Long>()
+    private val mutableHandResult = MutableLiveData<HandDetectionResult>()
+    private var syntheticHandStreamJob: Job? = null
+    @Volatile
+    private var syntheticHandOverrideUntilMs = 0L
 
     val connection: LiveData<ConnectionSnapshot> = mutableConnection
     val mode: LiveData<CaptureMode> = mutableMode
@@ -53,6 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val settings: LiveData<AppSettings> = mutableSettings
     val productionState: LiveData<ProductionUiState> = mutableProductionState
     val calibrationReset: LiveData<Long> = mutableCalibrationReset
+    val handResult: LiveData<HandDetectionResult> = mutableHandResult
     val currentSettings: AppSettings get() = mutableSettings.value ?: AppSettings()
 
     private val trustedConnectionStore = TrustedConnectionStore(
@@ -65,8 +95,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val savedPort: Int get() = trustedConnection?.port ?: DEFAULT_PORT
     val hasTrustedPc: Boolean get() = trustedConnection != null
 
+    private val deviceId = getOrCreateDeviceId()
+
     private val webSocketClient = YubiBoardWebSocketClient(
-        deviceId = getOrCreateDeviceId(),
+        deviceId = deviceId,
         clientVersion = BuildConfig.VERSION_NAME,
         onStateChanged = ::handleConnectionChanged,
         onModeChanged = ::handleModeChanged,
@@ -74,12 +106,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onTrustedConnectionIssued = ::handleTrustedConnectionIssued,
         onTrustedConnectionInvalid = ::handleTrustedConnectionInvalid,
         onCalibrationReuseQueued = ::handleCalibrationReuseQueued,
+        onInteractionProfileChanged = ::handleInteractionProfileChanged,
         onLog = mutableLog::postValue,
     )
     private val trustedConnectionCoordinator = TrustedConnectionCoordinator(
         trustedConnectionStore,
         webSocketClient::connect,
     )
+    private val connectionRequestLauncher = ConnectionRequestLauncher(webSocketClient::connect)
+
+    @Volatile
+    private var discoveryListener: DesktopDiscoveryListener? = null
 
     init {
         webSocketClient.setMaxFrameRate(currentSettings.maxSendFps)
@@ -88,21 +125,105 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connect(host: String, portText: String, pairingToken: String): String? {
-        val port = portText.toIntOrNull() ?: return "ポートは数字で入力してください"
-        val config = ConnectionConfig(
-            host = host.trim(),
-            port = port,
-            pairingToken = pairingToken.trim(),
-        )
-        config.validate()?.let { return it }
-        webSocketClient.connect(config)
-        return null
+        return connectToDesktop(host, portText, pairingToken, automatic = false)
     }
 
+    private fun connectToDesktop(
+        host: String,
+        portText: String,
+        pairingToken: String,
+        automatic: Boolean,
+    ): String? = connectionRequestLauncher.connect(host, portText, pairingToken, automatic)
+
+    /**
+     * 「画面認識開始」: デスクトップのUDPブロードキャストの待受を開始する。
+     * offer を受信すると Android から WebSocket 接続する（IP/コード入力なし）。
+     */
+    fun startAutoPairing() {
+        if (discoveryListener?.isRunning == true) return
+        val listener = DesktopDiscoveryListener(
+            deviceId = deviceId,
+            deviceName = android.os.Build.MODEL.ifBlank { "Android" },
+            model = android.os.Build.MODEL.ifBlank { "Android" },
+            onConnect = ::onDesktopSelected,
+            onLog = { message ->
+                mutableLog.postValue(message)
+                if (message.contains("受信に失敗")) {
+                    updateProduction {
+                        it.copy(
+                            pairing = PairingUiState.IDLE,
+                            notice = "自動検出が中断されました。もう一度お試しください。",
+                        )
+                    }
+                }
+            },
+            multicastLock = createMulticastLock(),
+        )
+        // start直後にofferが届いても callback 側から同じlistenerを停止できるよう、
+        // ソケットを開く前に参照を公開する。
+        discoveryListener = listener
+        // WAITING を先に公開し、起動直後の offer callback が IDLE へ戻した状態を
+        // start() 後の書き込みで逆転させない。起動失敗時は下で IDLE へ戻す。
+        updateProduction { it.copy(pairing = PairingUiState.WAITING, notice = null) }
+        val error = runCatching { listener.start() }.exceptionOrNull()
+        if (error != null) {
+            if (discoveryListener === listener) discoveryListener = null
+            listener.stop()
+            AppDiagnostics.event("discovery", "listen_failed", mapOf("message" to error.message))
+            mutableLog.postValue("自動検出を開始できませんでした。手動接続をお試しください")
+            updateProduction {
+                it.copy(
+                    pairing = PairingUiState.IDLE,
+                    notice = "自動検出を開始できませんでした。手動接続をお試しください。",
+                )
+            }
+            return
+        }
+    }
+
+    /** 待受のキャンセル（「画面認識開始」前の状態に戻す）。 */
+    fun cancelAutoPairing() {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE, notice = null) }
+    }
+
+    private fun onDesktopSelected(host: String, wsPort: Int, token: String) {
+        // offer 受信で PC の接続情報が揃ったので、UDP待受は閉じて WS 接続へ移る。
+        // 以後の再接続は WebSocketClient 自身が担う（生UDPに依存しない）。
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE, notice = null) }
+        connectToDesktop(host, wsPort.toString(), token, automatic = true)?.let { error ->
+            mutableLog.postValue(error)
+            updateProduction { it.copy(notice = error) }
+        }
+    }
+
+    private fun stopDiscovery() {
+        discoveryListener?.stop()
+        discoveryListener = null
+    }
+
+    private fun createMulticastLock(): DesktopDiscoveryListener.Lock? = runCatching {
+        val wifi = getApplication<Application>()
+            .applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifi.createMulticastLock("screact-discovery").apply { setReferenceCounted(false) }
+        object : DesktopDiscoveryListener.Lock {
+            override fun acquire() = lock.acquire()
+            override fun release() {
+                if (lock.isHeld) lock.release()
+            }
+        }
+    }.getOrNull()
+
     fun disconnect() {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE, notice = null) }
         webSocketClient.disconnect()
-        trustedConnectionCoordinator.forget()
-        trustedConnection = null
+    }
+
+    /** Activityが画面外へ出たら、カメラと同様にLAN待受・WS再接続も停止する。 */
+    fun onAppBackgrounded() {
+        disconnect()
     }
 
     fun retryNow() = webSocketClient.retryNow()
@@ -112,6 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onNetworkAvailable() = webSocketClient.onNetworkAvailable()
 
     fun changeConnectionSettings() {
+        stopDiscovery()
         webSocketClient.disconnect()
         trustedConnectionCoordinator.forget()
         trustedConnection = null
@@ -120,6 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 connection = ConnectionSnapshot(ConnectionStatus.DISCONNECTED),
                 calibration = CalibrationUiState.Inactive,
                 tracking = TrackingUiState.INACTIVE,
+                pairing = PairingUiState.IDLE,
             )
         }
     }
@@ -131,7 +254,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun submitHand(result: HandDetectionResult) {
+        if (BuildConfig.DEBUG && SystemClock.uptimeMillis() < syntheticHandOverrideUntilMs) return
+        publishHand(result)
+    }
+
+    private fun publishHand(result: HandDetectionResult) {
         webSocketClient.submitHand(result)
+        mutableHandResult.postValue(result)
         updateProduction { current ->
             if (current.captureMode != CaptureMode.TRACKING) return@updateProduction current
             val nextTracking = when (result.trackingState) {
@@ -180,41 +309,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         handleModeChanged(mode)
     }
 
-    fun setExperienceMode(mode: ExperienceMode) {
-        if (!BuildConfig.DEBUG && mode == ExperienceMode.DEBUG) return
-        val debugEnabled = mode == ExperienceMode.DEBUG
-        val updated = currentSettings.copy(debugModeEnabled = debugEnabled)
-        preferences.edit().putBoolean(KEY_DEBUG_MODE, debugEnabled).apply()
-        AppDiagnostics.setEnabled(debugEnabled)
-        mutableSettings.value = updated
-        updateProduction { it.copy(experience = mode) }
+    fun submitDebugHands(count: Int) {
+        check(BuildConfig.DEBUG) { "Synthetic hand input is available only in debug builds" }
+        require(count in 0..2)
+        syntheticHandStreamJob?.cancel()
+        syntheticHandOverrideUntilMs = SystemClock.uptimeMillis() + SINGLE_SYNTHETIC_HOLD_MS
+        AppDiagnostics.event("debug", "synthetic_hands", mapOf("count" to count))
+        publishHand(createDebugHandResult(count))
     }
 
-    fun submitDebugHand(detected: Boolean) {
-        check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
-        val landmarks = if (detected) List(21) { index ->
-            LandmarkPoint(
-                x = 0.3f + (index % 5) * 0.08f,
-                y = 0.25f + (index / 5) * 0.12f,
-                z = -index * 0.001f,
+    fun startDebugHandStream(count: Int = 2, durationMs: Long = SYNTHETIC_STREAM_DURATION_MS) {
+        check(BuildConfig.DEBUG) { "Synthetic hand input is available only in debug builds" }
+        require(count in 0..2)
+        require(durationMs > 0)
+        syntheticHandStreamJob?.cancel()
+        val endAtMs = SystemClock.uptimeMillis() + durationMs
+        syntheticHandOverrideUntilMs = endAtMs
+        AppDiagnostics.event(
+            "debug",
+            "synthetic_hand_stream",
+            mapOf("count" to count, "durationMs" to durationMs),
+        )
+        syntheticHandStreamJob = viewModelScope.launch {
+            try {
+                while (SystemClock.uptimeMillis() < endAtMs) {
+                    publishHand(createDebugHandResult(count))
+                    delay(SYNTHETIC_STREAM_INTERVAL_MS)
+                }
+            } finally {
+                if (syntheticHandOverrideUntilMs == endAtMs) syntheticHandOverrideUntilMs = 0L
+            }
+        }
+    }
+
+    private fun stopDebugHandStream() {
+        syntheticHandStreamJob?.cancel()
+        syntheticHandStreamJob = null
+        syntheticHandOverrideUntilMs = 0L
+    }
+
+    private fun createDebugHandResult(count: Int): HandDetectionResult {
+        val hands = List(count) { handIndex ->
+            val baseX = if (handIndex == 0) 0.22f else 0.62f
+            TrackedHand(
+                trackId = handIndex + 1,
+                landmarks = List(21) { index ->
+                    LandmarkPoint(
+                        x = baseX + (index % 5) * 0.04f,
+                        y = 0.25f + (index / 5) * 0.10f,
+                        z = -index * 0.001f,
+                    )
+                },
+                handedness = if (handIndex == 0) "LEFT" else "RIGHT",
+                handednessScore = 0.99f,
             )
-        } else emptyList()
-        AppDiagnostics.event("debug", "synthetic_hand", mapOf("detected" to detected))
-        submitHand(
-            HandDetectionResult(
-                capturedAtMonotonicMs = SystemClock.uptimeMillis(),
-                sourceWidth = currentSettings.analysisWidth,
-                sourceHeight = currentSettings.analysisHeight,
-                detected = detected,
-                landmarks = landmarks,
-                handedness = if (detected) "RIGHT" else null,
-                handednessScore = if (detected) 0.99f else null,
-            ),
+        }
+        return HandDetectionResult(
+            capturedAtMonotonicMs = SystemClock.uptimeMillis(),
+            sourceWidth = currentSettings.analysisWidth,
+            sourceHeight = currentSettings.analysisHeight,
+            hands = hands,
         )
     }
 
     fun submitDebugCalibration() {
-        check(currentSettings.debugModeEnabled) { "Debug mode is disabled" }
+        check(BuildConfig.DEBUG) { "Synthetic calibration is available only in debug builds" }
         fun marker(id: Int, x: Float, y: Float) = DetectedMarker(
             id = id,
             center = NormalizedPoint(x, y),
@@ -243,6 +402,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleConnectionChanged(snapshot: ConnectionSnapshot) {
+        // offer受信時に通常は待受を閉じるが、開始直後の競合や異常系でも
+        // 接続の決着時にソケットとMulticastLockを確実に解放する。
+        if (snapshot.status in setOf(
+                ConnectionStatus.CONNECTED,
+                ConnectionStatus.DISCONNECTED,
+                ConnectionStatus.ERROR,
+            )
+        ) {
+            stopDiscovery()
+        }
         mutableConnection.postValue(snapshot)
         updateProduction { current ->
             val resetCaptureState = snapshot.status !in setOf(ConnectionStatus.CONNECTED)
@@ -322,6 +491,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateProduction { it.copy(calibration = CalibrationUiState.WaitingForPc) }
     }
 
+    private fun handleInteractionProfileChanged(twoHandsAccepted: Boolean) {
+        val notice = if (twoHandsAccepted) {
+            null
+        } else {
+            "PCは1手互換モードです"
+        }
+        updateProduction { it.copy(notice = notice) }
+        AppDiagnostics.event(
+            "network",
+            "interaction_profile",
+            mapOf("twoHandsAccepted" to twoHandsAccepted),
+        )
+    }
+
     @Synchronized
     private fun updateProduction(transform: (ProductionUiState) -> ProductionUiState) {
         productionSnapshot = transform(productionSnapshot)
@@ -329,7 +512,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSettings(settings: AppSettings): String? {
-        val effective = if (BuildConfig.DEBUG) settings else settings.copy(debugModeEnabled = false)
+        val effective = settings.copy(debugModeEnabled = false)
         effective.validate()?.let { return it }
         preferences.edit()
             .putInt(KEY_ANALYSIS_WIDTH, effective.analysisWidth)
@@ -341,17 +524,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putBoolean(KEY_DEBUG_MODE, effective.debugModeEnabled)
             .apply()
         webSocketClient.setMaxFrameRate(effective.maxSendFps)
+        if (!effective.debugModeEnabled) stopDebugHandStream()
         AppDiagnostics.setEnabled(effective.debugModeEnabled)
         mutableSettings.value = effective
-        updateProduction {
-            it.copy(
-                experience = if (effective.debugModeEnabled) ExperienceMode.DEBUG else ExperienceMode.PRODUCTION,
-            )
-        }
         return null
     }
 
     override fun onCleared() {
+        stopDiscovery()
         webSocketClient.close()
         super.onCleared()
     }
@@ -370,10 +550,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
-        debugModeEnabled = BuildConfig.DEBUG && preferences.getBoolean(KEY_DEBUG_MODE, true),
+        // The app is production-only. Ignore legacy/restored debug preferences.
+        debugModeEnabled = false,
     ).let { if (it.validate() == null) it else AppSettings() }
 
     companion object {
+        private const val SINGLE_SYNTHETIC_HOLD_MS = 250L
+        private const val SYNTHETIC_STREAM_DURATION_MS = 3_000L
+        private const val SYNTHETIC_STREAM_INTERVAL_MS = 50L
         private const val PREFERENCES = "yubiboard_connection"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_ANALYSIS_WIDTH = "analysis_width"
