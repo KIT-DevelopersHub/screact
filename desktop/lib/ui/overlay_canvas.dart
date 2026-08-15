@@ -11,8 +11,9 @@ class OverlayCanvas extends StatelessWidget {
   final OverlayModel model;
   const OverlayCanvas({super.key, required this.model});
 
-  /// トラックID→表示色（2手を確実に別色にする）。
-  static Color colorFor(int trackId) => _palette[trackId % _palette.length];
+  /// 表示モデルが割り当てた色スロット→表示色。
+  static Color colorForSlot(int colorSlot) =>
+      _palette[colorSlot % _palette.length];
 
   static const List<Color> _palette = [
     Color(0xFF2B6CB0), // 青
@@ -43,7 +44,7 @@ class _OverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     // インク（トラック別の色）。
     for (final stroke in model.strokes) {
-      final color = OverlayCanvas.colorFor(stroke.trackId);
+      final color = OverlayCanvas.colorForSlot(stroke.colorSlot);
       final ink = Paint()
         ..color = color
         ..strokeWidth = 4
@@ -75,7 +76,7 @@ class _OverlayPainter extends CustomPainter {
     for (final id in model.trackIds) {
       final v = model.track(id);
       if (v == null) continue;
-      final color = OverlayCanvas.colorFor(id);
+      final color = OverlayCanvas.colorForSlot(v.colorSlot);
       final skeleton = v.skeleton;
       if (skeleton != null && skeleton.length == 21) {
         _paintSkeleton(canvas, size, skeleton, color);

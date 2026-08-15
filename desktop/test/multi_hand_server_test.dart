@@ -8,6 +8,7 @@ import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/core/multi_hand_engine.dart';
 import 'package:thehack_overlay/net/input_server.dart';
 import 'package:thehack_overlay/protocol/input_frame.dart';
+import 'package:thehack_overlay/protocol/messages.dart';
 
 import 'fixtures/two_hand_fixtures.dart';
 
@@ -40,10 +41,12 @@ void main() {
     addTearDown(ws.close);
 
     final ackSession = Completer<String>();
+    final acceptedProfile = Completer<String?>();
     ws.listen((data) {
       final j = jsonDecode(data as String) as Map<String, dynamic>;
       if (j['messageType'] == 'hello_ack' && !ackSession.isCompleted) {
         ackSession.complete(j['sessionId'] as String);
+        acceptedProfile.complete(j['acceptedInteractionProfile'] as String?);
       }
     });
 
@@ -57,6 +60,10 @@ void main() {
     });
     // 実Androidと同じく、サーバが払い出した sessionId をフレームへ載せる。
     final session = await ackSession.future.timeout(const Duration(seconds: 5));
+    expect(
+      await acceptedProfile.future.timeout(const Duration(seconds: 5)),
+      kTwoHandInteractionProfile,
+    );
 
     Future<void> waitFrames(int n) async {
       for (var i = 0; i < 100 && frames.length < n; i++) {

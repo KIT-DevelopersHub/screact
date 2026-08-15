@@ -4,6 +4,7 @@ import '../core/geom.dart';
 /// PCはWebSocketサーバとして Android から hello / hand_frame / calibration_markers /
 /// heartbeat を受け、hello_ack / control_message を返す。未知フィールドは無視する。
 const int kSchemaVersion = 1;
+const String kTwoHandInteractionProfile = 'two_users_two_active_hands';
 
 /// 受信: hello（接続開始）。
 class Hello {
@@ -38,12 +39,14 @@ class HelloAck {
   final int widthPx;
   final int heightPx;
   final bool calibrationRequired;
+  final String? acceptedInteractionProfile;
   const HelloAck({
     required this.sessionId,
     required this.surfaceId,
     required this.widthPx,
     required this.heightPx,
     required this.calibrationRequired,
+    this.acceptedInteractionProfile,
   });
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +59,8 @@ class HelloAck {
           'heightPx': heightPx,
         },
         'calibrationRequired': calibrationRequired,
+        if (acceptedInteractionProfile != null)
+          'acceptedInteractionProfile': acceptedInteractionProfile,
       };
 }
 

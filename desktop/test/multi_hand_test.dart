@@ -112,7 +112,7 @@ void main() {
       expect(InputFrame.parse(j), isNull);
     });
 
-    test('session不一致は破棄・一致/欠落は受理', () {
+    test('session不一致・認証後の欠落は破棄し、一致だけ受理', () {
       expect(
         InputFrame.parse(twoHandFrame(sessionId: 'session-99'),
             expectedSessionId: 'session-01'),
@@ -122,6 +122,33 @@ void main() {
         InputFrame.parse(twoHandFrame(), expectedSessionId: 'session-01'),
         isNotNull,
       );
+      final missing = twoHandFrame()..remove('sessionId');
+      expect(
+        InputFrame.parse(missing, expectedSessionId: 'session-01'),
+        isNull,
+      );
+    });
+
+    test('frameIdと時刻が整数でなければ破棄', () {
+      final fractionalFrame = twoHandFrame()..['frameId'] = 1.5;
+      expect(InputFrame.parse(fractionalFrame), isNull);
+      final fractionalTime = twoHandFrame()..['capturedAtMonotonicMs'] = 3.5;
+      expect(InputFrame.parse(fractionalTime), isNull);
+    });
+
+    test('互換handが最小trackIdのコピーでなければ全体破棄', () {
+      final wrongDetected = twoHandFrame();
+      (wrongDetected['hand'] as Map<String, dynamic>)['detected'] = false;
+      expect(InputFrame.parse(wrongDetected), isNull);
+
+      final wrongLandmarks = twoHandFrame();
+      final legacy = wrongLandmarks['hand'] as Map<String, dynamic>;
+      final landmarks = [
+        for (final p in legacy['landmarks'] as List) [...p as List],
+      ];
+      landmarks[8][0] = 0.99;
+      legacy['landmarks'] = landmarks;
+      expect(InputFrame.parse(wrongLandmarks), isNull);
     });
 
     test('schemaVersion 不一致は破棄', () {

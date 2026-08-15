@@ -279,6 +279,10 @@ class InputServer {
       widthPx: 1920,
       heightPx: 1080,
       calibrationRequired: !engine.isCalibrated,
+      acceptedInteractionProfile:
+          hello.interactionProfile == kTwoHandInteractionProfile
+              ? kTwoHandInteractionProfile
+              : null,
     );
     _sendTo(source, ack.toJson());
     engine.mode =

@@ -43,23 +43,23 @@ class InputFrame {
     Map<String, dynamic> j, {
     String? expectedSessionId,
   }) {
-    final schema = (j['schemaVersion'] as num?)?.toInt() ?? kSchemaVersion;
-    if (schema != kSchemaVersion) return null;
+    final schemaRaw = j['schemaVersion'];
+    final schema = schemaRaw == null ? kSchemaVersion : _finiteInt(schemaRaw);
+    if (schema == null || schema != kSchemaVersion) return null;
 
-    final sessionId = j['sessionId'] as String?;
-    if (expectedSessionId != null &&
-        sessionId != null &&
-        sessionId != expectedSessionId) {
+    final sessionRaw = j['sessionId'];
+    if (sessionRaw != null && sessionRaw is! String) return null;
+    final sessionId = sessionRaw as String?;
+    if (expectedSessionId != null && sessionId != expectedSessionId) {
       return null; // session不一致 → 破棄
     }
 
-    final frameIdNum = j['frameId'] as num?;
-    if (frameIdNum == null || !frameIdNum.toDouble().isFinite) return null;
-    final frameId = frameIdNum.toInt();
+    final frameId = _finiteInt(j['frameId']);
+    if (frameId == null || frameId < 0) return null;
 
-    final capturedNum = j['capturedAtMonotonicMs'] as num?;
-    if (capturedNum != null && !capturedNum.toDouble().isFinite) return null;
-    final captured = capturedNum?.toInt() ?? 0;
+    final capturedRaw = j['capturedAtMonotonicMs'];
+    final captured = capturedRaw == null ? 0 : _finiteInt(capturedRaw);
+    if (captured == null || captured < 0) return null;
 
     // hands が正本。存在すれば hand は無視する。
     if (j.containsKey('hands')) {
@@ -78,6 +78,7 @@ class InputFrame {
         prevId = track.trackId;
         tracks.add(track);
       }
+      if (!_legacyHandMatches(j['hand'], tracks)) return null;
       return InputFrame(
         schemaVersion: schema,
         sessionId: sessionId,
@@ -117,17 +118,52 @@ class InputFrame {
     );
   }
 
+  static int? _finiteInt(dynamic raw) {
+    if (raw is! num || !raw.toDouble().isFinite) return null;
+    final value = raw.toInt();
+    return raw == value ? value : null;
+  }
+
+  /// `hand` が同梱されている場合は、正本 `hands` の最小 trackId と一致するか検証する。
+  /// 省略は移行中クライアントとの互換のため許容する。
+  static bool _legacyHandMatches(dynamic raw, List<HandTrack> tracks) {
+    if (raw == null) return true;
+    if (raw is! Map) return false;
+    final hand = raw.cast<String, dynamic>();
+    if (tracks.isEmpty) return hand['detected'] == false;
+    if (hand['detected'] != true) return false;
+
+    final primary = tracks.first;
+    final handedness = hand['handedness'];
+    if (handedness != null && handedness is! String) return false;
+    if (handedness != primary.handedness) return false;
+    final landmarks = _parseLandmarks(hand['landmarks'], requireRange: true);
+    if (landmarks == null) return false;
+    for (var i = 0; i < landmarks.length; i++) {
+      final legacy = landmarks[i];
+      final current = primary.landmarks[i];
+      if (legacy.x != current.x ||
+          legacy.y != current.y ||
+          legacy.z != current.z) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static HandTrack? _parseTrack(
     Map<String, dynamic> j, {
     required bool requireRange,
   }) {
     final idNum = j['trackId'] as num?;
     if (idNum == null || idNum != idNum.toInt() || idNum <= 0) return null;
+    final handedness = j['handedness'];
+    if (handedness != null && handedness is! String) return null;
     final landmarks = _parseLandmarks(j['landmarks'], requireRange: requireRange);
     if (landmarks == null) return null;
     return HandTrack(
       trackId: idNum.toInt(),
-      handedness: j['handedness'] as String?,
+      handedness: handedness as String?,
       landmarks: landmarks,
     );
   }

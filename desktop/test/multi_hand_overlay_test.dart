@@ -11,8 +11,12 @@ List<Vec2> _asVec(List<List<double>> lm) =>
     [for (final p in lm) Vec2(p[0], p[1])];
 
 void main() {
-  test('2トラックは必ず別色になる', () {
-    expect(OverlayCanvas.colorFor(7), isNot(OverlayCanvas.colorFor(12)));
+  test('trackIdがパレット周期分離れていても2トラックは別色になる', () {
+    final model = OverlayModel();
+    model.showSkeletons({1: _asVec(hand7Landmarks), 5: _asVec(hand12Landmarks)});
+    final first = OverlayCanvas.colorForSlot(model.track(1)!.colorSlot);
+    final second = OverlayCanvas.colorForSlot(model.track(5)!.colorSlot);
+    expect(first, isNot(second));
   });
 
   testWidgets('OverlayModel は2骨格＋2カーソルを別トラックとして保持する',

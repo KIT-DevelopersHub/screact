@@ -8,13 +8,21 @@ import 'interaction_engine.dart';
 class InkStroke {
   final List<Vec2> points;
   final int trackId;
-  InkStroke(this.points, {this.trackId = OverlayModel.legacyTrackId});
+  final int colorSlot;
+  InkStroke(
+    this.points, {
+    this.trackId = OverlayModel.legacyTrackId,
+    this.colorSlot = 0,
+  });
 }
 
 /// 1トラック分の表示状態（カーソル・押下・骨格）。
 class TrackVisual {
+  final int colorSlot;
   Vec2? cursor;
   bool pressed = false;
+
+  TrackVisual({required this.colorSlot});
 
   /// 画面正規化に写した21点骨格（null は非表示）。
   List<Vec2>? skeleton;
@@ -26,6 +34,7 @@ class TrackVisual {
 class OverlayModel extends ChangeNotifier {
   /// 単一手（後方互換）の既定トラックID。旧 [apply] はこのトラックへ流す。
   static const int legacyTrackId = 0;
+  static const int colorSlotCount = 4;
 
   final Map<int, TrackVisual> _tracks = {};
   final List<InkStroke> strokes = [];
@@ -43,7 +52,14 @@ class OverlayModel extends ChangeNotifier {
   bool get pressed => _tracks[legacyTrackId]?.pressed ??
       (_tracks.isEmpty ? false : _tracks.values.first.pressed);
 
-  TrackVisual _visual(int id) => _tracks.putIfAbsent(id, TrackVisual.new);
+  TrackVisual _visual(int id) => _tracks.putIfAbsent(id, () {
+        final used = _tracks.values.map((track) => track.colorSlot).toSet();
+        var slot = id % colorSlotCount;
+        while (used.contains(slot)) {
+          slot = (slot + 1) % colorSlotCount;
+        }
+        return TrackVisual(colorSlot: slot);
+      });
 
   /// 単一手・既存フロー向けの後方互換 API（既定トラックへ適用）。
   void apply(InteractionEvent e) => applyTrack(legacyTrackId, e);
@@ -76,7 +92,11 @@ class OverlayModel extends ChangeNotifier {
       case InteractionKind.drawDown:
         v.cursor = e.screen;
         v.pressed = true;
-        final stroke = InkStroke([e.screen], trackId: trackId);
+        final stroke = InkStroke(
+          [e.screen],
+          trackId: trackId,
+          colorSlot: v.colorSlot,
+        );
         _active[trackId] = stroke;
         strokes.add(stroke);
         break;
