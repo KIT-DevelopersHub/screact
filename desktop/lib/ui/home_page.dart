@@ -19,6 +19,7 @@ import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
 import 'calibration_target.dart';
+import 'color_palette.dart';
 import 'overlay_canvas.dart';
 import 'pairing_controller.dart';
 import 'pairing_qr_panel.dart';
@@ -1185,6 +1186,22 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
                 const SizedBox(height: 30),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      '描画色',
+                      style: TextStyle(
+                        color: ProductionDesign.textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    ColorPalette(model: _overlay),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
