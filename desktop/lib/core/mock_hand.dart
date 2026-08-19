@@ -86,41 +86,4 @@ class MockHand {
       landmarks: lm,
     );
   }
-
-  /// グー（全指を折り畳んだ握り拳）の手を合成する（＝消しゴム）。
-  /// 4本の指先を各PIPより手首側へ置き、[GestureRecognizer] の伸展判定で
-  /// extendedFingers==0（＝fist）になるようにする。[tip] は手の代表位置。
-  static HandFrame fist({required int frameId, required Vec2 tip}) {
-    final cx = tip.x, cy = tip.y;
-    final wrist = Vec2(cx, cy + 0.25);
-    final lm =
-        List<Landmark>.filled(
-          21,
-          Landmark(wrist.x, wrist.y, 0),
-          growable: false,
-        ).toList();
-    void set(int idx, Vec2 v) => lm[idx] = Landmark(v.x, v.y, 0);
-
-    set(HandFrame.wrist, wrist);
-    set(HandFrame.indexMcp, Vec2(cx, cy + 0.12)); // 5（scale基準）
-    // 各指: PIP は cy+0.06、TIP は cy+0.10（PIPより手首側＝折り畳み）。
-    set(6, Vec2(cx, cy + 0.06));
-    set(HandFrame.indexTip, Vec2(cx, cy + 0.10));
-    set(10, Vec2(cx + 0.01, cy + 0.06));
-    set(HandFrame.middleTip, Vec2(cx + 0.01, cy + 0.10));
-    set(14, Vec2(cx + 0.06, cy + 0.06));
-    set(HandFrame.ringTip, Vec2(cx + 0.06, cy + 0.10));
-    set(18, Vec2(cx + 0.09, cy + 0.06));
-    set(HandFrame.pinkyTip, Vec2(cx + 0.09, cy + 0.10));
-    // 親指は掌側へ寄せる（人差し指先端から十分離しピンチ判定を避ける）。
-    set(HandFrame.thumbTip, Vec2(cx - 0.12, cy + 0.12));
-
-    return HandFrame(
-      frameId: frameId,
-      capturedAtMonotonicMs: frameId * 33,
-      detected: true,
-      handedness: 'RIGHT',
-      landmarks: lm,
-    );
-  }
 }

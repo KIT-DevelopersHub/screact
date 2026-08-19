@@ -17,9 +17,6 @@ enum InteractionKind {
   drawDown, // 2本指くっつき開始（インク描画の開始）
   drawMove, // くっつき中の移動（インク線）
   drawUp, // くっつき解除（インク確定）
-  eraseDown, // グー（消しゴム）開始
-  eraseMove, // グー移動中（近傍のインクを消す）
-  eraseUp, // グー解除（消しゴム終了）
   pressDown, // ピンチ押下（OSクリック/ドラッグの開始）
   pressMove, // 押下中の移動（OSドラッグ）
   pressUp, // 押下解除
@@ -72,8 +69,6 @@ class InteractionEngine {
   int _pressStartMs = 0;
   // 2本指くっつき状態機械（インク描画）
   bool _drawing = false;
-  // グー状態機械（消しゴム）
-  bool _erasing = false;
   Vec2? _lastScreen;
   // スクロール状態
   Vec2? _lastScrollAnchor;
@@ -210,7 +205,6 @@ class InteractionEngine {
   /// 1フレーム処理。安全解除も含め、UI/OSへ渡すイベント列を返す。
   ///
   /// 優先順位（相互排他）:
-  ///   0. 消しゴム（グー＝全指を折り畳む・近傍のインクを消す）
   ///   1. スクロール（2本指を立てて移動・くっつき/ピンチなし）
   ///   2. インク描画（人差し指＋中指がくっつく・筆点は中間点）
   ///   3. OSクリック/ドラッグ（親指＋人差し指のピンチ）
@@ -235,33 +229,6 @@ class InteractionEngine {
       _insideStreak = 0;
     }
     if (!pose.pinching) _blockPressUntilNeutral = false;
-
-    // 0) 消しゴム: グー（全指を折り畳む）で近傍のインクを消す。他の全ジェスチャーに
-    // 優先し、排他的に扱う（描画/クリックが同時に走らないよう先に閉じる）。
-    if (pose.fist) {
-      final rawErase = _toSurface(pose.erasePoint);
-      final screen = _filteredScreen(
-        _isInside(rawErase) ? rawErase : rawIndex,
-        t,
-      );
-      if (_drawing) events.addAll(_endDraw(screen));
-      if (_pressed) {
-        events.addAll(_endPress(screen: screen, tMs: t, allowClick: false));
-      }
-      _lastScrollAnchor = null;
-      _primaryNeutral = false;
-      if (!_erasing) {
-        _erasing = true;
-        events.add(InteractionEvent(InteractionKind.eraseDown, screen));
-      } else {
-        events.add(InteractionEvent(InteractionKind.eraseMove, screen));
-      }
-      _lastScreen = screen;
-      return events;
-    } else if (_erasing) {
-      // グーが解けた: 消しゴムを終了（eraseUp）。同フレームで下の分岐も評価する。
-      events.addAll(_endErase(_filteredScreen(rawIndex, t)));
-    }
 
     // 1) スクロール: 人差し指＋中指を立てて動かす（くっつき/ピンチしていない時）。
     final scrolling =
@@ -340,7 +307,6 @@ class InteractionEngine {
     final at = _lastScreen ?? const Vec2(0, 0);
     if (!_outside) {
       if (_drawing) events.addAll(_endDraw(at));
-      if (_erasing) events.addAll(_endErase(at));
       if (_pressed) {
         events.addAll(_endPress(screen: at, allowClick: false));
       }
@@ -359,12 +325,6 @@ class InteractionEngine {
   List<InteractionEvent> _endDraw(Vec2 screen) {
     _drawing = false;
     return [InteractionEvent(InteractionKind.drawUp, screen)];
-  }
-
-  /// 消しゴム（グー）の終了。
-  List<InteractionEvent> _endErase(Vec2 screen) {
-    _erasing = false;
-    return [InteractionEvent(InteractionKind.eraseUp, screen)];
   }
 
   List<InteractionEvent> _endPress({
@@ -391,9 +351,6 @@ class InteractionEngine {
     if (_drawing) {
       events.add(InteractionEvent(InteractionKind.drawUp, at));
     }
-    if (_erasing) {
-      events.add(InteractionEvent(InteractionKind.eraseUp, at));
-    }
     if (_pressed) {
       events.add(InteractionEvent(InteractionKind.pressUp, at));
     }
@@ -401,7 +358,6 @@ class InteractionEngine {
     _pressed = false;
     _pressStart = null;
     _drawing = false;
-    _erasing = false;
     _lastScrollAnchor = null;
     _lastRawSurface = null;
     _outside = false;
