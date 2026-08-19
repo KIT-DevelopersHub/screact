@@ -21,10 +21,13 @@ class HandLandmarkerProcessor(
     minDetectionConfidence: Float = DEFAULT_CONFIDENCE,
     minPresenceConfidence: Float = DEFAULT_CONFIDENCE,
     minTrackingConfidence: Float = DEFAULT_CONFIDENCE,
+    // N フレームに1回だけ推論へ投入する（1 = 全フレーム投入＝現状維持）。
+    private val inferenceFrameStride: Int = 1,
 ) : AutoCloseable {
     private var handLandmarker: HandLandmarker? = null
     private val frameTimes = ArrayDeque<Long>()
     private val trackingStateMachine = TrackingStateMachine()
+    private var frameCounter = 0L
 
     init {
         require(maxHands in 1..HandTrackAssigner.MAX_HANDS)
@@ -49,6 +52,16 @@ class HandLandmarkerProcessor(
     fun process(image: ImageProxy) {
         val detector = handLandmarker
         if (detector == null) {
+            image.close()
+            return
+        }
+
+        // 間引き: stride>1 のとき、Bitmap生成・推論より手前でフレームを捨てる
+        // （変換コストごと削減）。捨てるフレームも ImageProxy は必ず close する。
+        val stride = if (inferenceFrameStride < 1) 1 else inferenceFrameStride
+        val index = frameCounter++
+        if (stride > 1 && index % stride != 0L) {
+            AppDiagnostics.increment("hand.frames_skipped")
             image.close()
             return
         }

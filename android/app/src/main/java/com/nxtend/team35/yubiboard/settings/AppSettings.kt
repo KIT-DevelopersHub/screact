@@ -8,6 +8,10 @@ data class AppSettings(
     val minPresenceConfidence: Float = 0.5f,
     val minTrackingConfidence: Float = 0.5f,
     val maxSendFps: Int = 20,
+    // 推論投入の間引き。N フレームに1回だけ MediaPipe 推論へ投入する。
+    // 既定 1 = 全フレーム投入（現状維持）。2以上でBitmap生成＋推論負荷を 1/N に
+    // 減らせるが、送信fps割れの逆効果があるため既定OFFのまま実機計測で判断する。
+    val inferenceFrameStride: Int = 1,
     val debugModeEnabled: Boolean = false,
 ) {
     fun validate(): String? = when {
@@ -17,6 +21,7 @@ data class AppSettings(
         minPresenceConfidence !in 0f..1f -> "存在信頼度は0.0〜1.0です"
         minTrackingConfidence !in 0f..1f -> "追跡信頼度は0.0〜1.0です"
         maxSendFps !in 5..20 -> "送信fpsは5〜20です"
+        inferenceFrameStride !in 1..4 -> "推論の間引きは1〜4です"
         else -> null
     }
 

@@ -405,6 +405,7 @@ class MainActivity : ComponentActivity() {
         minDetectionConfidence = settings.minDetectionConfidence,
         minPresenceConfidence = settings.minPresenceConfidence,
         minTrackingConfidence = settings.minTrackingConfidence,
+        inferenceFrameStride = settings.inferenceFrameStride,
         onResult = { result ->
             viewModel.submitHand(result)
             runOnUiThread {

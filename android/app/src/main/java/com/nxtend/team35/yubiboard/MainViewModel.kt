@@ -523,6 +523,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putFloat(KEY_PRESENCE_CONFIDENCE, effective.minPresenceConfidence)
             .putFloat(KEY_TRACKING_CONFIDENCE, effective.minTrackingConfidence)
             .putInt(KEY_MAX_SEND_FPS, effective.maxSendFps)
+            .putInt(KEY_INFERENCE_STRIDE, effective.inferenceFrameStride)
             .putBoolean(KEY_DEBUG_MODE, effective.debugModeEnabled)
             .apply()
         webSocketClient.setMaxFrameRate(effective.maxSendFps)
@@ -552,6 +553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         minPresenceConfidence = preferences.getFloat(KEY_PRESENCE_CONFIDENCE, 0.5f),
         minTrackingConfidence = preferences.getFloat(KEY_TRACKING_CONFIDENCE, 0.5f),
         maxSendFps = preferences.getInt(KEY_MAX_SEND_FPS, 20),
+        inferenceFrameStride = preferences.getInt(KEY_INFERENCE_STRIDE, 1),
         maxHands = preferences.getInt(KEY_MAX_HANDS, 1),
         // The app is production-only. Ignore legacy/restored debug preferences.
         debugModeEnabled = false,
@@ -570,6 +572,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_PRESENCE_CONFIDENCE = "presence_confidence"
         private const val KEY_TRACKING_CONFIDENCE = "tracking_confidence"
         private const val KEY_MAX_SEND_FPS = "max_send_fps"
+        private const val KEY_INFERENCE_STRIDE = "inference_frame_stride"
         private const val KEY_DEBUG_MODE = "debug_mode"
         // デスクトップ側サーバの既定ポート（desktop/lib/ui/home_page.dart と一致させる）
         private const val DEFAULT_PORT = 8765
