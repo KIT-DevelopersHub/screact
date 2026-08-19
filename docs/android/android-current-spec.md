@@ -249,7 +249,7 @@ flowchart LR
 
 ## 9. 手指ランドマーク検出
 
-MediaPipe Hand Landmarkerを`LIVE_STREAM`モードで使用し、最大2手を検出する。Androidが手のひら中心距離から一時`trackId`を割り当て、300ms以内の短時間欠落ではIDを維持する。モデル`hand_landmarker.task`はAPKのassetsへ同梱する。
+MediaPipe Hand Landmarkerを`LIVE_STREAM`モードで使用する。既定はデモ安定性と端末負荷を優先する「1手のみ」で、設定から「2手」へ切り替えた場合だけ最大2手を検出する。Androidが手のひら中心距離から一時`trackId`を割り当て、300ms以内の短時間欠落ではIDを維持する。モデル`hand_landmarker.task`はAPKのassetsへ同梱する。
 
 ```mermaid
 flowchart TD
@@ -498,6 +498,7 @@ flowchart LR
 
 | 設定 | 既定値 | 許容値 | 永続化 |
 | --- | ---: | --- | --- |
+| 操作する手の数 | 1手のみ | 1手のみ、2手 | する |
 | debug要求解像度 | 1280×720 | 1280×720、960×540、640×480、比較用1920×1080 | する |
 | 検出信頼度 | 0.5 | 0.0〜1.0 | する |
 | 存在信頼度 | 0.5 | 0.0〜1.0 | する |

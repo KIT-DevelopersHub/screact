@@ -17,6 +17,7 @@ class HandLandmarkerProcessor(
     private val trackAssigner: HandTrackAssigner,
     private val onResult: (HandDetectionResult) -> Unit,
     private val onError: (Throwable) -> Unit,
+    maxHands: Int = 1,
     minDetectionConfidence: Float = DEFAULT_CONFIDENCE,
     minPresenceConfidence: Float = DEFAULT_CONFIDENCE,
     minTrackingConfidence: Float = DEFAULT_CONFIDENCE,
@@ -26,6 +27,7 @@ class HandLandmarkerProcessor(
     private val trackingStateMachine = TrackingStateMachine()
 
     init {
+        require(maxHands in 1..HandTrackAssigner.MAX_HANDS)
         runCatching {
             val baseOptions = BaseOptions.builder()
                 .setModelAssetPath(MODEL_FILE)
@@ -35,7 +37,7 @@ class HandLandmarkerProcessor(
                 .setMinHandDetectionConfidence(minDetectionConfidence)
                 .setMinHandPresenceConfidence(minPresenceConfidence)
                 .setMinTrackingConfidence(minTrackingConfidence)
-                .setNumHands(HandTrackAssigner.MAX_HANDS)
+                .setNumHands(maxHands)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setResultListener(::handleResult)
                 .setErrorListener(onError)

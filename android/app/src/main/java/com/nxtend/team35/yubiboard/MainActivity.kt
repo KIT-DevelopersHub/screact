@@ -262,12 +262,14 @@ class MainActivity : ComponentActivity() {
                 // ようにする（黒画面やチラつきを避ける）。
                 var showSplash by rememberSaveable { mutableStateOf(true) }
                 val productionState by viewModel.productionState.observeAsState(ProductionUiState())
+                val appSettings by viewModel.settings.observeAsState(initialSettings)
                 Box(Modifier.fillMaxSize().background(Color(0xFF101010))) {
                     ProductionScreen(
                         state = productionState,
                         savedHost = viewModel.savedHost,
                         savedPort = viewModel.savedPort,
                         hasTrustedPc = viewModel.hasTrustedPc,
+                        maxHands = appSettings.maxHands,
                         cameraPermissionPermanentlyDenied = cameraPermissionPermanentlyDenied,
                         previewContent = {
                             Box(Modifier.fillMaxSize()) {
@@ -300,6 +302,9 @@ class MainActivity : ComponentActivity() {
                         onRetryNow = viewModel::retryNow,
                         onChangeConnectionSettings = viewModel::changeConnectionSettings,
                         onForgetTrustedPc = viewModel::forgetTrustedPc,
+                        onMaxHandsChange = { maxHands ->
+                            applySettings(appSettings.copy(maxHands = maxHands))
+                        },
                     )
                     AnimatedVisibility(
                         visible = showSplash,
@@ -396,6 +401,7 @@ class MainActivity : ComponentActivity() {
     private fun createHandProcessor(settings: AppSettings) = HandLandmarkerProcessor(
         context = this,
         trackAssigner = viewModel.handTrackAssigner,
+        maxHands = settings.maxHands,
         minDetectionConfidence = settings.minDetectionConfidence,
         minPresenceConfidence = settings.minPresenceConfidence,
         minTrackingConfidence = settings.minTrackingConfidence,
@@ -424,7 +430,8 @@ class MainActivity : ComponentActivity() {
         if (error != null) return error
         val detectorChanged = previous.minDetectionConfidence != candidate.minDetectionConfidence ||
             previous.minPresenceConfidence != candidate.minPresenceConfidence ||
-            previous.minTrackingConfidence != candidate.minTrackingConfidence
+            previous.minTrackingConfidence != candidate.minTrackingConfidence ||
+            previous.maxHands != candidate.maxHands
         if (detectorChanged) replaceHandProcessor(candidate)
         if (cameraPermissionGranted &&
             (previous.analysisWidth != candidate.analysisWidth ||
@@ -433,7 +440,9 @@ class MainActivity : ComponentActivity() {
         ) {
             startCamera()
         }
-        transientMessage = if (candidate.debugModeEnabled) {
+        transientMessage = if (previous.maxHands != candidate.maxHands) {
+            if (candidate.maxHands == 1) "1手のみモードに切り替えました" else "2手モードに切り替えました"
+        } else if (candidate.debugModeEnabled) {
             "デバッグモードを有効にしました"
         } else {
             "本番モードを有効にしました"
@@ -790,6 +799,20 @@ private fun SettingsDialog(
                         selected = draft.analysisWidth == 1920,
                         onClick = { draft = draft.copy(analysisWidth = 1920, analysisHeight = 1080) },
                         label = { Text("1920 × 1080（比較用）") },
+                    )
+                }
+
+                Text("操作する手の数", fontWeight = FontWeight.SemiBold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = draft.maxHands == 1,
+                        onClick = { draft = draft.copy(maxHands = 1) },
+                        label = { Text("1手のみ") },
+                    )
+                    FilterChip(
+                        selected = draft.maxHands == 2,
+                        onClick = { draft = draft.copy(maxHands = 2) },
+                        label = { Text("2手") },
                     )
                 }
 

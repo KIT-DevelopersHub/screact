@@ -225,6 +225,18 @@ void main() {
       expect(p7.x, lessThan(p12.x));
     });
 
+    test('1手フレームでは受信した1トラック分だけ状態を保持する', () {
+      final e = calibrated();
+
+      final first = e.onInputFrame(onePointerHand(1, trackId: 7))!;
+      expect(first.keys, [7]);
+      expect(e.activeTrackCount, 1);
+      expect(e.activeTrackIds, [7]);
+
+      e.onInputFrame(onePointerHand(2, trackId: 7));
+      expect(e.activeTrackCount, 1, reason: '未受信の2手目用エンジンは事前生成しない');
+    });
+
     test('片手が消えたら、その trackId だけ即時解除し他方は継続', () {
       final e = calibrated();
       e.onInputFrame(twoPointerHands(1));

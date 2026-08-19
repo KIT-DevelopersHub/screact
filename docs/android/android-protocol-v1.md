@@ -4,7 +4,7 @@ Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクラ�
 
 ## 接続
 
-Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_active_hands`、`maxHands=2`とし、`capabilities`には従来値に加えて`multi_hand_landmarks_21`と`stable_hand_track_id`を含める。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。
+Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_active_hands`、`maxHands=2`とし、`capabilities`には従来値に加えて`multi_hand_landmarks_21`と`stable_hand_track_id`を含める。`maxHands`は端末の対応能力を表し、利用設定の既定は1手、任意切替時だけ2手を検出・送信する。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。
 
 初回接続では`pairingToken`へPC画面に表示された6桁コードを設定し、`resumeToken`は省略する。認証成功時、PCは暗号学的乱数生成器で32 byteを生成し、パディングなしBase64URLへ変換した`resumeToken`を`hello_ack`へ設定する。Androidはホスト、ポート、`resumeToken`を保存し、次回起動では`pairingToken`を省略して保存済み`resumeToken`を送る。`pairingToken`と`resumeToken`は排他的で、必ずどちらか一方だけを送る。
 
@@ -70,6 +70,7 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 ### 最大2手の`hand_frame`
 
 - `hands`を新しい正本とし、0〜2件を`trackId`昇順で送る。各要素は正の一意な`trackId`、任意の左右分類・信頼度、`normalized_camera`、`mediapipe_hand_21`、21個の`[x,y,z]`を持つ。
+- 1手モードでは`hands`を0〜1件、2手モードでは0〜2件とする。モード切替でスキーマや`interactionProfile`は変更しない。
 - `trackId`はAndroidが手のひら中心（ランドマーク0、5、9、13、17）の距離で割り当てる。通常移動と300ms以内の欠落では維持し、終了済みIDは再利用しない。
 - 従来の`hand`も必ず送る。`hands`が空なら`detected=false`、それ以外は最小`trackId`の要素から`trackId`だけを除いた完全コピーへ`detected=true`を加える。
 - 新PCは`hands`があれば`hand`を無視する。旧PCは未知の`hands`を無視し、互換用`hand`を従来どおり処理できる。
