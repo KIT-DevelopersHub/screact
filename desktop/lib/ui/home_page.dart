@@ -13,6 +13,7 @@ import '../protocol/input_frame.dart';
 import '../net/connection_log.dart';
 import '../net/discovery.dart';
 import '../net/input_server.dart';
+import '../net/pairing_payload.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
@@ -20,6 +21,7 @@ import 'calibration_flow.dart';
 import 'calibration_target.dart';
 import 'overlay_canvas.dart';
 import 'pairing_controller.dart';
+import 'pairing_qr_panel.dart';
 import 'production_design.dart';
 
 enum DesktopSection { connection, calibration, workspace, settings }
@@ -119,6 +121,21 @@ class _HomePageState extends State<HomePage> {
   int get _port => _configuredPort;
   int get _displayPort => _server?.boundPort ?? _configuredPort;
   String get _displayIp => _wifiIp ?? '(IPを取得できません)';
+
+  /// UDP 自動発見が使えない環境向けの QR フォールバック用 URI。
+  /// LAN 直結情報（IP/ポート）と 6桁トークンが揃ったときだけ生成する
+  /// （リレー構成は後段で relay/room を相乗せする）。認証は hello の
+  /// pairingToken 1本のまま（QR は配達手段）。
+  String? get _pairingUri {
+    final token = _pairingCode;
+    final host = _wifiIp;
+    if (token == null || host == null || host.isEmpty) return null;
+    return PairingPayload(
+      pairingToken: token,
+      lanHost: host,
+      lanPort: _displayPort,
+    ).toUri();
+  }
 
   @override
   void initState() {
@@ -739,6 +756,13 @@ class _HomePageState extends State<HomePage> {
                   borderColor: const Color(0xFFB8B8B8),
                   child: Column(
                     children: [
+                      // UDP不可環境向けフォールバック: QRを自動表示（この手動接続
+                      // パネル自体がUDPタイムアウトで自動展開されるため、QRも自動で
+                      // 出る）。読み取れない場合の手入力用にIP/ポートも併記する。
+                      if (_pairingUri case final uri?) ...[
+                        PairingQrPanel(uri: uri),
+                        const Divider(height: 24, thickness: 1.5),
+                      ],
                       const Text(
                         'スマホのアプリに次の値を入力してください',
                         style: TextStyle(
