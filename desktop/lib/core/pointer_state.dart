@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'geom.dart';
@@ -43,6 +45,37 @@ class OverlayModel extends ChangeNotifier {
   /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
   static const double _minPointDist = 0.002;
 
+  /// 通知（＝再描画）の合体を有効にするか。既定 false は現状維持（各変更で即時
+  /// notify）。true にすると、同一マイクロタスク内で連続する複数の変更を1回の
+  /// notify にまとめる。1フレームで showSkeletons と applyTrackEvents が続けて
+  /// 呼ばれる経路（骨格＋カーソル/インク）で repaint を2回→1回に半減できる。
+  /// notify semantics を変える設定なので、実機計測で効果を確認してから有効化する。
+  bool coalesceNotifications = false;
+
+  bool _notifyScheduled = false;
+  bool _disposed = false;
+
+  /// [coalesceNotifications] に従って即時 or マイクロタスク合体で通知する。
+  void _notify() {
+    if (!coalesceNotifications) {
+      notifyListeners();
+      return;
+    }
+    if (_notifyScheduled) return;
+    _notifyScheduled = true;
+    scheduleMicrotask(() {
+      _notifyScheduled = false;
+      if (_disposed) return;
+      notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   Iterable<int> get trackIds => _tracks.keys;
   TrackVisual? track(int id) => _tracks[id];
 
@@ -74,12 +107,12 @@ class OverlayModel extends ChangeNotifier {
         _applyTrack(id, e);
       }
     });
-    notifyListeners();
+    _notify();
   }
 
   void applyTrack(int trackId, InteractionEvent e) {
     _applyTrack(trackId, e);
-    notifyListeners();
+    _notify();
   }
 
   void _applyTrack(int trackId, InteractionEvent e) {
@@ -154,7 +187,7 @@ class OverlayModel extends ChangeNotifier {
       if (!byTrack.containsKey(id)) _tracks[id]!.skeleton = null;
     }
     _pruneEmpty();
-    notifyListeners();
+    _notify();
   }
 
   void _pruneEmpty() {
