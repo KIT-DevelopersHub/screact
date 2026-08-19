@@ -69,6 +69,63 @@ void main() {
     expect(model.trackIds.toSet(), {7});
   });
 
+  test('InkStroke.pathFor は点数・サイズ不変ならPathをキャッシュする', () {
+    final stroke = InkStroke([
+      const Vec2(0.1, 0.1),
+      const Vec2(0.2, 0.2),
+      const Vec2(0.3, 0.1),
+    ]);
+    const size = Size(640, 360);
+    final first = stroke.pathFor(size);
+    // 同一サイズ・同一点数なら同じPathインスタンスを返す（再構築しない）。
+    expect(identical(stroke.pathFor(size), first), isTrue);
+
+    // サイズが変われば作り直す。
+    expect(identical(stroke.pathFor(const Size(800, 600)), first), isFalse);
+
+    // 点が増えれば作り直す（描画中ストローク）。
+    final beforeGrow = stroke.pathFor(size);
+    stroke.points.add(const Vec2(0.4, 0.2));
+    expect(identical(stroke.pathFor(size), beforeGrow), isFalse);
+  });
+
+  test('インク履歴は上限を超えると古い完了ストロークから捨てる', () {
+    final model = OverlayModel();
+    // 上限(240)を超える完了ストロークを作る（drawDown→drawUp）。
+    for (var i = 0; i < 320; i++) {
+      final x = 0.1 + (i % 50) * 0.01;
+      model.applyTrack(
+        7,
+        InteractionEvent(InteractionKind.drawDown, Vec2(x, 0.5)),
+      );
+      model.applyTrack(
+        7,
+        InteractionEvent(InteractionKind.drawUp, Vec2(x, 0.5)),
+      );
+    }
+    expect(model.strokes.length, lessThanOrEqualTo(240));
+
+    // 描画中（未drawUp）のストロークは上限超過でも捨てない。
+    model.applyTrack(
+      7,
+      const InteractionEvent(InteractionKind.drawDown, Vec2(0.9, 0.9)),
+    );
+    final active = model.strokes.last;
+    for (var i = 0; i < 400; i++) {
+      // 別トラックで新規ストロークを量産してもactiveは残る。
+      model.applyTrack(
+        3,
+        InteractionEvent(InteractionKind.drawDown, Vec2(0.2, 0.01 * (i % 90))),
+      );
+      model.applyTrack(
+        3,
+        InteractionEvent(InteractionKind.drawUp, Vec2(0.2, 0.01 * (i % 90))),
+      );
+    }
+    expect(model.strokes.contains(active), isTrue);
+    expect(model.strokes.length, lessThanOrEqualTo(240));
+  });
+
   testWidgets('2骨格を別色で同時描画（ゴールデン）', (tester) async {
     final model = OverlayModel();
     model.showSkeletons({
