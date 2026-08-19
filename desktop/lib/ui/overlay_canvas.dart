@@ -95,21 +95,41 @@ class _OverlayPainter extends CustomPainter {
       final c = v.cursor;
       if (c != null) {
         final o = _p(c, size);
-        canvas.drawCircle(
-          o,
-          v.pressed ? 12 : 9,
-          Paint()
-            ..style = PaintingStyle.fill
-            ..color = v.pressed ? _darken(color) : color,
-        );
-        canvas.drawCircle(
-          o,
-          v.pressed ? 12 : 9,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2
-            ..color = Colors.white,
-        );
+        if (v.erasing) {
+          // 消しゴム: 実際の消去半径を表す輪（塗りつぶさない）で範囲を可視化する。
+          final r = OverlayModel.eraserRadius * size.shortestSide;
+          canvas.drawCircle(
+            o,
+            r,
+            Paint()
+              ..style = PaintingStyle.fill
+              ..color = const Color(0x33000000),
+          );
+          canvas.drawCircle(
+            o,
+            r,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.5
+              ..color = Colors.white,
+          );
+        } else {
+          canvas.drawCircle(
+            o,
+            v.pressed ? 12 : 9,
+            Paint()
+              ..style = PaintingStyle.fill
+              ..color = v.pressed ? _darken(color) : color,
+          );
+          canvas.drawCircle(
+            o,
+            v.pressed ? 12 : 9,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.white,
+          );
+        }
       }
     }
     canvas.restore();
