@@ -16,21 +16,31 @@ fun ImageProxy.toCorrectedBitmap(): Bitmap {
     } finally {
         close()
     }
-    val cropped = if (
+    val fullFrame =
         crop.left == 0 && crop.top == 0 && crop.right == bitmap.width && crop.bottom == bitmap.height
-    ) {
-        bitmap
-    } else {
-        Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height())
+
+    // 回転が無ければ切り出しだけ（全域なら確保も不要）。
+    if (rotationDegrees == 0) {
+        if (fullFrame) return bitmap
+        val cropped = Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height())
+        if (cropped !== bitmap) bitmap.recycle()
+        return cropped
     }
-    if (rotationDegrees == 0) return cropped
-    return Bitmap.createBitmap(
-        cropped,
-        0,
-        0,
-        cropped.width,
-        cropped.height,
-        Matrix().apply { postRotate(rotationDegrees.toFloat()) },
+
+    // 切り出しと回転を1回の createBitmap で行い、中間 Bitmap の確保を1枚分省く。
+    // 端末は通常 90/270 度回転するため、この経路が毎フレームの主コストになる。
+    val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+    val result = Bitmap.createBitmap(
+        bitmap,
+        crop.left,
+        crop.top,
+        crop.width(),
+        crop.height(),
+        matrix,
         true,
     )
+    // 元 Bitmap（toBitmap の出力）はもう参照されないので即解放し、GC 前に
+    // ネイティブメモリを返す（Large Object の GC 回数・PSS 増加を抑える）。
+    if (result !== bitmap) bitmap.recycle()
+    return result
 }
