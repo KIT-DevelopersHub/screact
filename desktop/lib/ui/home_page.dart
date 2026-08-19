@@ -81,6 +81,9 @@ class _HomePageState extends State<HomePage> {
   late int _configuredPort;
   bool _enforcePairing = true;
   bool _startingServer = false;
+  // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
+  // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
+  bool _showManualConnect = false;
   bool _overlayOn = false;
   bool _enteringOverlay = false;
   String? _overlayError;
@@ -111,11 +114,11 @@ class _HomePageState extends State<HomePage> {
       !_enteringOverlay;
   String get _overlayExitHint =>
       Platform.isWindows
-          ? '解除するには Ctrl+Shift+O を使ってください'
-          : '解除するには、メニューバーの ✏ または ⌘⇧O を使ってください';
+          ? '操作画面を閉じるには Ctrl+Shift+O を押してください'
+          : '操作画面を閉じるには、メニューバーの ✏ か ⌘⇧O を押してください';
   int get _port => _configuredPort;
   int get _displayPort => _server?.boundPort ?? _configuredPort;
-  String get _displayIp => _wifiIp ?? '(IP取得不可)';
+  String get _displayIp => _wifiIp ?? '(IPを取得できません)';
 
   @override
   void initState() {
@@ -196,7 +199,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handlePairingChanged() {
-    if (!_disposed && mounted) setState(() {});
+    if (_disposed || !mounted) return;
+    // UDP検索がタイムアウトしたら、手動接続の逃げ道（IP/ポート）を自動で開く。
+    if (_pairing.phase == PairingPhase.timeout) _showManualConnect = true;
+    setState(() {});
   }
 
   void _handleServerLog(String message) {
@@ -347,7 +353,10 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _startingServer = false;
         _pairingCode = null;
-        _serverError = '接続を開始できませんでした: $error';
+        _serverError =
+            '接続を開始できませんでした。'
+            'ポート番号が他のアプリで使われていないか確認して、'
+            'もう一度お試しください。（詳細: $error）';
       });
     } finally {
       if (identical(_startingServerInstance, server)) {
@@ -410,12 +419,17 @@ class _HomePageState extends State<HomePage> {
     });
     if (justConnected) {
       // helloの認証完了を接続確定とし、UDP広告はここで終了する。
-      // 位置合わせtargetは画面のボタンが押されるまで開始しない。
       _pairing.onConnected();
-      // 既存の位置合わせを再利用できる場合は、白いアプリ内キャンバスを
-      // 経由せず標準の透明オーバーレイへ直接入る。
       if (_engine.isCalibrated && _overlayPlatformSupported) {
+        // 既存の位置合わせを再利用できる場合は、白いアプリ内キャンバスを
+        // 経由せず標準の透明オーバーレイへ直接入る。
         unawaited(_enterOverlay());
+      } else if (!_engine.isCalibrated) {
+        // 未校正なら手動ボタンを待たず、そのまま位置合わせ（ArUco表示）へ
+        // 自動遷移する。接続後に「位置合わせ開始」を押させる2クリックを廃止。
+        unawaited(
+          _startCalibrationDisplay(intoOverlay: _overlayPlatformSupported),
+        );
       }
     }
     _flow.onEngineEpoch(_engine.calibrationCount);
@@ -453,6 +467,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startCalibrationDisplay({required bool intoOverlay}) async {
     final server = _server;
     if (server == null || !_phoneConnected) return;
+    // 既に位置合わせターゲットを表示中なら二重起動しない
+    // （接続時の自動遷移と旧AUTOFLOW/再入の競合を防ぐ）。
+    if (_flow.showingTarget) return;
     setState(() {
       _calibrationHadTracking =
           _engine.isCalibrated && _engine.mode == EngineMode.tracking;
@@ -470,13 +487,15 @@ class _HomePageState extends State<HomePage> {
   Future<void> _enterOverlay() async {
     if (_disposed || !mounted || _enteringOverlay) return;
     if (!_running || !_phoneConnected) {
-      setState(() => _overlayError = 'スマホ接続後にオーバーレイを表示できます。');
+      setState(
+        () => _overlayError = 'スマホを接続すると、操作画面を表示できます。',
+      );
       return;
     }
     if (!_engine.isCalibrated && !_flow.showingTarget) {
       setState(() {
         _section = DesktopSection.calibration;
-        _overlayError = '先に位置合わせを完了してください。';
+        _overlayError = '先に「位置合わせ」を終わらせてください。';
       });
       return;
     }
@@ -645,12 +664,12 @@ class _HomePageState extends State<HomePage> {
             pairingPhase == PairingPhase.timeout);
     final retrying = pairingPhase == PairingPhase.timeout && canRestartSearch;
     final primaryLabel = switch (pairingPhase) {
-      _ when _startingServer => '準備中',
-      PairingPhase.searching => '検索中',
-      PairingPhase.waitingConnect => '接続待ち',
-      PairingPhase.timeout when canRestartSearch => '再試行',
-      PairingPhase.idle when canRestartSearch => '再検索',
-      _ => '始める',
+      _ when _startingServer => '準備中…',
+      PairingPhase.searching => '検索中…',
+      PairingPhase.waitingConnect => '接続中…',
+      PairingPhase.timeout when canRestartSearch => 'もう一度さがす',
+      PairingPhase.idle when canRestartSearch => 'もう一度さがす',
+      _ => 'はじめる',
     };
     final VoidCallback? primaryAction =
         _startingServer ||
@@ -680,21 +699,63 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        // 既定ではIP/ポートを中央に常時表示しない（1ボタンに集中させる）。
+        // UDPで自動接続できない環境向けに、控えめなリンクから手動接続情報を開ける。
         Positioned(
-          top: 220,
+          top: 210,
           left: 330,
           width: 940,
-          child: ProductionPanel(
-            key: const ValueKey('connection-info'),
-            padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 24),
-            borderColor: const Color(0xFFB8B8B8),
-            child: Column(
-              children: [
-                _connectionValueRow('IPアドレス', _displayIp),
-                const Divider(height: 18, thickness: 1.5),
-                _connectionValueRow('IPポート', '$_displayPort'),
+          child: Column(
+            children: [
+              TextButton.icon(
+                key: const ValueKey('manual-connect-toggle'),
+                onPressed:
+                    () => setState(
+                      () => _showManualConnect = !_showManualConnect,
+                    ),
+                icon: Icon(
+                  _showManualConnect
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 30,
+                ),
+                label: Text(
+                  _showManualConnect ? '手動接続の情報を隠す' : 'つながらないときは手動で接続',
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF686666),
+                  ),
+                ),
+              ),
+              if (_showManualConnect) ...[
+                const SizedBox(height: 8),
+                ProductionPanel(
+                  key: const ValueKey('connection-info'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 52,
+                    vertical: 18,
+                  ),
+                  borderColor: const Color(0xFFB8B8B8),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'スマホのアプリに次の値を入力してください',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF686666),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _connectionValueRow('IPアドレス', _displayIp),
+                      const Divider(height: 18, thickness: 1.5),
+                      _connectionValueRow('IPポート', '$_displayPort'),
+                    ],
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
         ),
         Positioned(
@@ -723,7 +784,7 @@ class _HomePageState extends State<HomePage> {
             key: const ValueKey('server-stop'),
             width: 430,
             height: 78,
-            label: '接続停止',
+            label: '接続を止める',
             onPressed: _running ? _stopServer : null,
             textStyle: const TextStyle(
               fontSize: 38,
@@ -841,20 +902,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _connectionStatusLabel() {
-    if (_startingServer) return '接続を準備しています・・・';
-    if (!_running) return '接続を開始してください';
+    if (_startingServer) return '接続を準備しています…';
+    if (!_running) return '「はじめる」を押して接続をはじめてください';
     if (!_phoneConnected) {
       return switch (_pairing.phase) {
-        PairingPhase.searching => 'スマホを検索しています・・・',
-        PairingPhase.waitingConnect => 'スマホを検出しました。接続を待っています・・・',
-        PairingPhase.timeout => 'スマホが見つかりません。再試行してください',
-        PairingPhase.idle => 'スマホの接続待ち・・・',
+        PairingPhase.searching => 'スマホを検索しています…（スマホ側のアプリを開いてください）',
+        PairingPhase.waitingConnect => 'スマホが見つかりました。接続しています…',
+        PairingPhase.timeout =>
+          'スマホが見つかりません。同じWi-Fiにつないで「もう一度さがす」を押してください',
+        PairingPhase.idle => 'スマホからの接続を待っています…',
       };
     }
     if (_engine.isCalibrated && _status.mode == EngineMode.tracking) {
-      return '操作できます';
+      return '準備完了！指でスライドを操作できます';
     }
-    return '接続中・・・';
+    return 'スマホと接続しました。「位置合わせ」にすすんでください';
   }
 
   Widget _calibrationScreen() {
@@ -880,7 +942,7 @@ class _HomePageState extends State<HomePage> {
           left: 250,
           width: 1100,
           child: Text(
-            '位置合わせ完了後は自動でオーバーレイ表示します。$_overlayExitHint',
+            '位置合わせが終わると、自動で操作画面に切り替わります。$_overlayExitHint',
             key: const ValueKey('overlay-exit-hint'),
             textAlign: TextAlign.center,
             style: const TextStyle(
@@ -897,7 +959,7 @@ class _HomePageState extends State<HomePage> {
             key: const ValueKey('calibration-start'),
             width: 420,
             height: 82,
-            label: '位置合わせ開始',
+            label: '位置合わせをはじめる',
             onPressed:
                 _running && _phoneConnected && !_flow.showingTarget
                     ? _onPhonePlaced
@@ -982,31 +1044,31 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _calibrationStatusLabel() {
-    if (!_running) return 'PC接続を開始してください';
-    if (!_phoneConnected) return 'スマホ接続待ち...';
-    if (_flow.showingTarget) return '検出中...';
+    if (!_running) return 'まず「接続」画面で接続をはじめてください';
+    if (!_phoneConnected) return 'スマホの接続を待っています…';
+    if (_flow.showingTarget) return '読み取り中…';
     if (_engine.isCalibrated) return '位置合わせ完了';
-    return '検出準備完了';
+    return '準備ができました。「位置合わせをはじめる」を押してください';
   }
 
   Widget _workspaceScreen() {
     final title = switch ((_running, _phoneConnected, _engine.isCalibrated)) {
-      (false, _, _) => 'PC接続を開始してください',
+      (false, _, _) => 'まず接続をはじめてください',
       (true, false, _) => 'スマホの接続を待っています',
       (true, true, false) => '位置合わせが必要です',
-      _ when _enteringOverlay => 'オーバーレイを準備しています',
-      _ => 'オーバーレイは解除されています',
+      _ when _enteringOverlay => '操作画面を準備しています',
+      _ => '操作画面は表示していません',
     };
     final description = switch ((
       _running,
       _phoneConnected,
       _engine.isCalibrated,
     )) {
-      (false, _, _) => '接続画面で「始める」を押すと、自動検出を開始します。',
-      (true, false, _) => '接続後、位置合わせ済みならスライド上へ自動表示します。',
-      (true, true, false) => '位置合わせを完了すると、スライド上へ自動表示します。',
+      (false, _, _) => '「接続」画面で「はじめる」を押すと、スマホの接続をはじめます。',
+      (true, false, _) => '接続すると、位置合わせ済みの場合はスライド上へ自動で表示します。',
+      (true, true, false) => '位置合わせを終えると、スライド上へ自動で表示します。',
       _ when _enteringOverlay => '透明な操作画面へ切り替えています…',
-      _ => '下のボタンから、透明な操作画面をもう一度表示できます。',
+      _ => '下のボタンで、透明な操作画面をもう一度表示できます。',
     };
     return _designCanvas(
       key: const ValueKey('workspace-page'),
@@ -1094,7 +1156,7 @@ class _HomePageState extends State<HomePage> {
                       key: const ValueKey('overlay-clear'),
                       width: 300,
                       height: 72,
-                      label: 'インクを消去',
+                      label: '書いた線を消す',
                       icon: Icons.cleaning_services_outlined,
                       outlined: true,
                       onPressed: _overlay.clear,
@@ -1149,7 +1211,7 @@ class _HomePageState extends State<HomePage> {
               CharacterMascot(size: 150, semanticLabel: '設定キャラクター'),
               SizedBox(width: 20),
               Text(
-                'Setting',
+                '設定',
                 style: TextStyle(
                   fontSize: 70,
                   fontWeight: FontWeight.w900,
@@ -1245,7 +1307,7 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     const Expanded(
                       child: Text(
-                        '平滑化',
+                        '手ブレ補正',
                         style: TextStyle(
                           fontSize: 38,
                           fontWeight: FontWeight.w900,
@@ -1593,7 +1655,7 @@ class _HomePageState extends State<HomePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'キャリブレーション中: スマホのカメラでこの画面全体を映してください',
+                    '位置合わせ中: スマホのカメラで画面全体を映してください',
                     style: TextStyle(color: Colors.white, fontSize: 13),
                   ),
                   const SizedBox(width: 14),
@@ -1692,7 +1754,7 @@ class _HomePageState extends State<HomePage> {
                               icon: const Icon(
                                 Icons.cleaning_services_outlined,
                               ),
-                              label: const Text('インクを消去'),
+                              label: const Text('書いた線を消す'),
                             ),
                           ],
                         ),
