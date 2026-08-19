@@ -47,19 +47,21 @@ class OverlayModel extends ChangeNotifier {
   TrackVisual? track(int id) => _tracks[id];
 
   /// 最初のトラックのカーソル（後方互換の単一カーソル参照）。
-  Vec2? get cursor => _tracks[legacyTrackId]?.cursor ??
+  Vec2? get cursor =>
+      _tracks[legacyTrackId]?.cursor ??
       (_tracks.isEmpty ? null : _tracks.values.first.cursor);
-  bool get pressed => _tracks[legacyTrackId]?.pressed ??
+  bool get pressed =>
+      _tracks[legacyTrackId]?.pressed ??
       (_tracks.isEmpty ? false : _tracks.values.first.pressed);
 
   TrackVisual _visual(int id) => _tracks.putIfAbsent(id, () {
-        final used = _tracks.values.map((track) => track.colorSlot).toSet();
-        var slot = id % colorSlotCount;
-        while (used.contains(slot)) {
-          slot = (slot + 1) % colorSlotCount;
-        }
-        return TrackVisual(colorSlot: slot);
-      });
+    final used = _tracks.values.map((track) => track.colorSlot).toSet();
+    var slot = id % colorSlotCount;
+    while (used.contains(slot)) {
+      slot = (slot + 1) % colorSlotCount;
+    }
+    return TrackVisual(colorSlot: slot);
+  });
 
   /// 単一手・既存フロー向けの後方互換 API（既定トラックへ適用）。
   void apply(InteractionEvent e) => applyTrack(legacyTrackId, e);
@@ -128,6 +130,12 @@ class OverlayModel extends ChangeNotifier {
       case InteractionKind.scroll:
         v.cursor = e.screen;
         break;
+      case InteractionKind.pointerExit:
+        // 画面外でも手自体は検出中なので、骨格とトラック色は保持する。
+        v.cursor = null;
+        v.pressed = false;
+        _active.remove(trackId);
+        break;
       case InteractionKind.release:
         // トラッキング喪失: このトラックのカーソル/骨格を消す。
         _active.remove(trackId);
@@ -151,7 +159,8 @@ class OverlayModel extends ChangeNotifier {
 
   void _pruneEmpty() {
     _tracks.removeWhere(
-      (id, v) => v.cursor == null && v.skeleton == null && !_active.containsKey(id),
+      (id, v) =>
+          v.cursor == null && v.skeleton == null && !_active.containsKey(id),
     );
   }
 

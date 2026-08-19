@@ -204,7 +204,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleServerEvents(List<InteractionEvent> events) {
-    // 主トラック（最小trackId）のイベントをOS入力へ。単一手では従来どおり。
+    // MultiHandEngineが安定して保持する主トラックだけをOS入力へ流す。
     if (_disposed) return;
     for (final event in events) {
       _bridge.applyEvent(event);
@@ -222,7 +222,7 @@ class _HomePageState extends State<HomePage> {
     final byTrack = <int, List<Vec2>>{};
     for (final track in frame.tracks) {
       byTrack[track.trackId] = [
-        for (final lm in track.landmarks) _engine.mapToScreen(lm.xy),
+        for (final lm in track.landmarks) _engine.mapToSurface(lm.xy),
       ];
     }
     _overlay.showSkeletons(byTrack);

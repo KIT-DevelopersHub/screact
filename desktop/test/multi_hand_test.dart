@@ -14,7 +14,22 @@ Map<String, dynamic> pointerTrack(int trackId, Vec2 tip, {bool pinch = false}) {
   final f = MockHand.at(frameId: 0, tip: tip, pinch: pinch);
   return {
     'trackId': trackId,
-    'landmarks': [for (final l in f.landmarks) [l.x, l.y, l.z]],
+    'landmarks': [
+      for (final l in f.landmarks) [l.x, l.y, l.z],
+    ],
+  };
+}
+
+/// 実Android送信と同様に全点をカメラ範囲へ収めつつ、ホモグラフィ後に
+/// 人差し指が画面外になる境界テスト用トラック。
+Map<String, dynamic> boundaryPointerTrack(int trackId, Vec2 tip) {
+  final f = MockHand.at(frameId: 0, tip: tip, pinch: false);
+  return {
+    'trackId': trackId,
+    'landmarks': [
+      for (final l in f.landmarks)
+        [l.x.clamp(0.0, 1.0), l.y.clamp(0.0, 1.0), l.z],
+    ],
   };
 }
 
@@ -22,27 +37,28 @@ Map<String, dynamic> multiHandFrame(
   int frameId,
   List<Map<String, dynamic>> hands, {
   String sessionId = 'session-01',
-}) =>
-    {
-      'schemaVersion': 1,
-      'messageType': 'hand_frame',
-      'sessionId': sessionId,
-      'frameId': frameId,
-      'capturedAtMonotonicMs': frameId * 33,
-      'hands': hands,
-    };
+}) => {
+  'schemaVersion': 1,
+  'messageType': 'hand_frame',
+  'sessionId': sessionId,
+  'frameId': frameId,
+  'capturedAtMonotonicMs': frameId * 33,
+  'hands': hands,
+};
 
 /// 左手 7（左寄り）＋右手 12（右寄り）のポインタ2手フレーム。
-InputFrame twoPointerHands(int frameId) => InputFrame.parse(multiHandFrame(
-      frameId,
-      [pointerTrack(7, const Vec2(0.3, 0.5)), pointerTrack(12, const Vec2(0.7, 0.5))],
-    ))!;
+InputFrame twoPointerHands(int frameId) =>
+    InputFrame.parse(
+      multiHandFrame(frameId, [
+        pointerTrack(7, const Vec2(0.3, 0.5)),
+        pointerTrack(12, const Vec2(0.7, 0.5)),
+      ]),
+    )!;
 
 InputFrame onePointerHand(int frameId, {int trackId = 7, double x = 0.3}) =>
-    InputFrame.parse(multiHandFrame(
-      frameId,
-      [pointerTrack(trackId, Vec2(x, 0.5))],
-    ))!;
+    InputFrame.parse(
+      multiHandFrame(frameId, [pointerTrack(trackId, Vec2(x, 0.5))]),
+    )!;
 
 InputFrame noHands(int frameId) =>
     InputFrame.parse(multiHandFrame(frameId, const []))!;
@@ -77,7 +93,10 @@ void main() {
 
     test('trackId 重複は破棄', () {
       final j = twoHandFrame();
-      j['hands'] = [handPayload(7, hand7Landmarks), handPayload(7, hand12Landmarks)];
+      j['hands'] = [
+        handPayload(7, hand7Landmarks),
+        handPayload(7, hand12Landmarks),
+      ];
       expect(InputFrame.parse(j), isNull);
     });
 
@@ -90,7 +109,9 @@ void main() {
 
     test('NaN/Infinity を含む点は破棄', () {
       final j = twoHandFrame();
-      final bad = [for (final p in hand7Landmarks) [...p]];
+      final bad = [
+        for (final p in hand7Landmarks) [...p],
+      ];
       bad[5][0] = double.nan;
       j['hands'] = [handPayload(7, bad)];
       expect(InputFrame.parse(j), isNull);
@@ -98,7 +119,9 @@ void main() {
 
     test('x,y 範囲外は破棄（新 hands[] 経路）', () {
       final j = twoHandFrame();
-      final bad = [for (final p in hand7Landmarks) [...p]];
+      final bad = [
+        for (final p in hand7Landmarks) [...p],
+      ];
       bad[8][0] = 1.4; // x>1
       j['hands'] = [handPayload(7, bad)];
       expect(InputFrame.parse(j), isNull);
@@ -114,8 +137,10 @@ void main() {
 
     test('session不一致・認証後の欠落は破棄し、一致だけ受理', () {
       expect(
-        InputFrame.parse(twoHandFrame(sessionId: 'session-99'),
-            expectedSessionId: 'session-01'),
+        InputFrame.parse(
+          twoHandFrame(sessionId: 'session-99'),
+          expectedSessionId: 'session-01',
+        ),
         isNull,
       );
       expect(
@@ -239,14 +264,23 @@ void main() {
     test('片手のドラッグ状態は他方の消失で解除されない（独立性）', () {
       final e = calibrated();
       // 7 をピンチ（押下）、12 はポインタ。
-      e.onInputFrame(InputFrame.parse(multiHandFrame(1, [
-        pointerTrack(7, const Vec2(0.3, 0.5), pinch: true),
-        pointerTrack(12, const Vec2(0.7, 0.5)),
-      ]))!);
+      e.onInputFrame(
+        InputFrame.parse(
+          multiHandFrame(1, [
+            pointerTrack(7, const Vec2(0.3, 0.5), pinch: true),
+            pointerTrack(12, const Vec2(0.7, 0.5)),
+          ]),
+        )!,
+      );
       // 12 が消える。7 は押下継続（pressUp が出ない）。
-      final out = e.onInputFrame(InputFrame.parse(multiHandFrame(2, [
-        pointerTrack(7, const Vec2(0.32, 0.5), pinch: true),
-      ]))!)!;
+      final out =
+          e.onInputFrame(
+            InputFrame.parse(
+              multiHandFrame(2, [
+                pointerTrack(7, const Vec2(0.32, 0.5), pinch: true),
+              ]),
+            )!,
+          )!;
       expect(out[12]!.any((ev) => ev.kind == InteractionKind.release), isTrue);
       expect(out[7]!.any((ev) => ev.kind == InteractionKind.pressUp), isFalse);
       expect(out[7]!.any((ev) => ev.kind == InteractionKind.pressMove), isTrue);
@@ -280,7 +314,11 @@ void main() {
 
     test('後方互換 hand フレームも単一トラックとして操作を生む', () {
       final e = calibrated();
-      final base = MockHand.at(frameId: 0, tip: const Vec2(0.5, 0.5), pinch: false);
+      final base = MockHand.at(
+        frameId: 0,
+        tip: const Vec2(0.5, 0.5),
+        pinch: false,
+      );
       final j = {
         'schemaVersion': 1,
         'messageType': 'hand_frame',
@@ -288,13 +326,91 @@ void main() {
         'capturedAtMonotonicMs': 33,
         'hand': {
           'detected': true,
-          'landmarks': [for (final l in base.landmarks) [l.x, l.y, l.z]],
+          'landmarks': [
+            for (final l in base.landmarks) [l.x, l.y, l.z],
+          ],
         },
       };
       final out = e.onInputFrame(InputFrame.parse(j)!)!;
       expect(out.keys, [InputFrame.compatTrackId]);
-      expect(out[InputFrame.compatTrackId]!.any(
-          (ev) => ev.kind == InteractionKind.pointerMove), isTrue);
+      expect(
+        out[InputFrame.compatTrackId]!.any(
+          (ev) => ev.kind == InteractionKind.pointerMove,
+        ),
+        isTrue,
+      );
+    });
+
+    test('骨格用surface変換は画面外座標を端へ丸めない', () {
+      final e = calibrated();
+      final outside = e.mapToSurface(const Vec2(0.05, 0.5));
+      expect(outside.x, lessThan(0));
+      expect(outside.y, closeTo(0.5, 1e-6));
+    });
+
+    test('OS主トラックは2フレーム安定後に選び、画面外でも交代しない', () {
+      final e = calibrated();
+      final first = e.onInputFrame(twoPointerHands(1))!;
+      expect(e.primaryTrackId, isNull);
+      expect(e.primaryTrackIdOf(first), isNull);
+
+      final second = e.onInputFrame(twoPointerHands(2))!;
+      expect(e.primaryTrackId, 7);
+      expect(e.primaryTrackIdOf(second), 7);
+
+      final exit =
+          e.onInputFrame(
+            InputFrame.parse(
+              multiHandFrame(3, [
+                boundaryPointerTrack(7, const Vec2(0.05, 0.5)),
+                pointerTrack(12, const Vec2(0.7, 0.5)),
+              ]),
+            )!,
+          )!;
+      expect(
+        exit[7]!.any((event) => event.kind == InteractionKind.pointerExit),
+        isTrue,
+      );
+      expect(e.primaryTrackId, 7);
+      expect(e.primaryTrackIdOf(exit), 7);
+
+      final stillOutside =
+          e.onInputFrame(
+            InputFrame.parse(
+              multiHandFrame(4, [
+                boundaryPointerTrack(7, const Vec2(0.05, 0.5)),
+                pointerTrack(12, const Vec2(0.72, 0.5)),
+              ]),
+            )!,
+          )!;
+      expect(stillOutside.containsKey(7), isFalse);
+      expect(e.primaryTrackId, 7);
+      expect(e.primaryTrackIdOf(stillOutside), isNull);
+    });
+
+    test('主トラック消失フレームは旧解除だけを選び、次候補を後で引き継ぐ', () {
+      final e = calibrated();
+      e.onInputFrame(twoPointerHands(1));
+      e.onInputFrame(twoPointerHands(2));
+      expect(e.primaryTrackId, 7);
+
+      final vanished = e.onInputFrame(onePointerHand(3, trackId: 12, x: 0.7))!;
+      expect(
+        vanished[7]!.any((event) => event.kind == InteractionKind.release),
+        isTrue,
+      );
+      expect(e.primaryTrackIdOf(vanished), 7);
+      expect(e.primaryTrackId, isNull);
+
+      final candidate1 =
+          e.onInputFrame(onePointerHand(4, trackId: 12, x: 0.7))!;
+      expect(e.primaryTrackIdOf(candidate1), isNull);
+      expect(e.primaryTrackId, isNull);
+
+      final candidate2 =
+          e.onInputFrame(onePointerHand(5, trackId: 12, x: 0.7))!;
+      expect(e.primaryTrackId, 12);
+      expect(e.primaryTrackIdOf(candidate2), 12);
     });
   });
 }

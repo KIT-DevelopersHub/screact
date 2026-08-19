@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'calibration_config.dart';
 import 'geom.dart';
 import 'homography.dart';
@@ -26,13 +24,22 @@ class MultiHandEngine {
   /// 直近に採用した frameId（単調増加の検証用）。session開始/切断でリセット。
   int? _lastFrameId;
 
+  // OS入力は単一カーソルなので、イベント発生有無とは独立して所有者を保持する。
+  int? _primaryTrackId;
+  int? _dispatchPrimaryTrackId;
+  int? _primaryCandidateTrackId;
+  int _primaryCandidateStreak = 0;
+
+  static const int _primaryStableFrames = 2;
+
   factory MultiHandEngine({
     InteractionEngine? calibrationEngine,
     CalibrationConfig? config,
     EngineMode mode = EngineMode.calibration,
     bool smoothingEnabled = true,
   }) {
-    final calib = calibrationEngine ??
+    final calib =
+        calibrationEngine ??
         InteractionEngine(
           config: config,
           mode: mode,
@@ -42,8 +49,8 @@ class MultiHandEngine {
   }
 
   MultiHandEngine._(this._calib)
-      : _sensitivity = _calib.recognitionSensitivity,
-        _smoothing = _calib.smoothingEnabled;
+    : _sensitivity = _calib.recognitionSensitivity,
+      _smoothing = _calib.smoothingEnabled;
 
   // ---- 単一手エンジン互換のファサード（UI/サーバはこの形で扱う） ----
 
@@ -81,6 +88,7 @@ class MultiHandEngine {
   /// 現在追跡中のトラック数（0〜2）。
   int get activeTrackCount => _tracks.length;
   Iterable<int> get activeTrackIds => _tracks.keys;
+  int? get primaryTrackId => _primaryTrackId;
 
   // ---- 位置合わせ（session共有）----
 
@@ -102,23 +110,20 @@ class MultiHandEngine {
     }
   }
 
-  /// カメラ正規化座標を画面正規化座標へ（未校正時は恒等・0..1にクランプ）。
-  /// 骨格をカーソルと同じ座標系で重ねるために使う。
-  Vec2 mapToScreen(Vec2 camera) {
-    final s = _calib.homography?.map(camera) ?? camera;
-    return Vec2(s.x.clamp(0.0, 1.0), s.y.clamp(0.0, 1.0));
-  }
+  /// カメラ正規化座標を未クリップの画面surface座標へ写す。
+  /// 骨格は範囲外を保持し、描画Canvas側で画面矩形へクリップする。
+  Vec2 mapToSurface(Vec2 camera) => _calib.homography?.map(camera) ?? camera;
 
   InteractionEngine _engineFor(int trackId) => _tracks.putIfAbsent(trackId, () {
-        final e = InteractionEngine(
-          config: _calib.config,
-          mode: _calib.mode,
-          smoothingEnabled: _smoothing,
-        );
-        e.recognitionSensitivity = _sensitivity;
-        e.adoptCalibration(_calib.homography, _calib.mode);
-        return e;
-      });
+    final e = InteractionEngine(
+      config: _calib.config,
+      mode: _calib.mode,
+      smoothingEnabled: _smoothing,
+    );
+    e.recognitionSensitivity = _sensitivity;
+    e.adoptCalibration(_calib.homography, _calib.mode);
+    return e;
+  });
 
   /// フレーム処理。返り値は trackId→操作イベント列。
   /// null は「不正/失効フレーム＝全体破棄」（イベントを一切出さない）。
@@ -129,19 +134,22 @@ class MultiHandEngine {
     if (_lastFrameId != null && frame.frameId <= _lastFrameId!) return null;
     _lastFrameId = frame.frameId;
 
+    final previousPrimary = _primaryTrackId;
+    _dispatchPrimaryTrackId = null;
     final result = <int, List<InteractionEvent>>{};
     final seen = <int>{};
     for (final track in frame.tracks) {
       seen.add(track.trackId);
-      final events = _engineFor(track.trackId).onFrame(
-        track.toHandFrame(frame.frameId, frame.capturedAtMonotonicMs),
-      );
+      final events = _engineFor(
+        track.trackId,
+      ).onFrame(track.toHandFrame(frame.frameId, frame.capturedAtMonotonicMs));
       if (events.isNotEmpty) result[track.trackId] = events;
     }
 
     // 消えた trackId は個別に解除（押下/描画/ドラッグを閉じる）→ 破棄。
-    final vanished =
-        _tracks.keys.where((id) => !seen.contains(id)).toList(growable: false);
+    final vanished = _tracks.keys
+        .where((id) => !seen.contains(id))
+        .toList(growable: false);
     for (final id in vanished) {
       final events = _tracks[id]!.onFrame(
         HandFrame(
@@ -153,11 +161,55 @@ class MultiHandEngine {
       if (events.isNotEmpty) result[id] = events;
       _tracks.remove(id);
     }
+
+    if (previousPrimary != null) {
+      if (seen.contains(previousPrimary)) {
+        // 画面外やイベントなしでも所有権は維持する。
+        _dispatchPrimaryTrackId = previousPrimary;
+      } else {
+        // このフレームは旧所有者の解除だけをOSへ送り、引き継がない。
+        _dispatchPrimaryTrackId = previousPrimary;
+        _primaryTrackId = null;
+        _resetPrimaryCandidate();
+      }
+    } else {
+      _advancePrimaryCandidate();
+    }
     return result;
+  }
+
+  void _advancePrimaryCandidate() {
+    final candidates = _tracks.entries
+      .where((entry) => entry.value.canAcquirePrimary)
+      .map((entry) => entry.key)
+      .toList(growable: false)..sort();
+    if (candidates.isEmpty) {
+      _resetPrimaryCandidate();
+      return;
+    }
+
+    final candidate = candidates.first;
+    if (_primaryCandidateTrackId == candidate) {
+      _primaryCandidateStreak++;
+    } else {
+      _primaryCandidateTrackId = candidate;
+      _primaryCandidateStreak = 1;
+    }
+    if (_primaryCandidateStreak < _primaryStableFrames) return;
+
+    _primaryTrackId = candidate;
+    _dispatchPrimaryTrackId = candidate;
+    _resetPrimaryCandidate();
+  }
+
+  void _resetPrimaryCandidate() {
+    _primaryCandidateTrackId = null;
+    _primaryCandidateStreak = 0;
   }
 
   /// 全トラックを即時解除（WebSocket切断・停止時）。trackId→解除イベント列を返す。
   Map<int, List<InteractionEvent>> releaseAll() {
+    _dispatchPrimaryTrackId = _primaryTrackId;
     final result = <int, List<InteractionEvent>>{};
     for (final entry in _tracks.entries) {
       final events = entry.value.onFrame(
@@ -167,12 +219,14 @@ class MultiHandEngine {
     }
     _tracks.clear();
     _lastFrameId = null;
+    _primaryTrackId = null;
+    _resetPrimaryCandidate();
     return result;
   }
 
-  /// OS入力（単一カーソル）へ流す主トラック＝最小 trackId。無ければ null。
+  /// OS入力（単一カーソル）へ流す、このフレームの明示的な主トラック。
   int? primaryTrackIdOf(Map<int, List<InteractionEvent>> byTrack) {
-    if (byTrack.isEmpty) return null;
-    return byTrack.keys.reduce(math.min);
+    final id = _dispatchPrimaryTrackId;
+    return id != null && byTrack.containsKey(id) ? id : null;
   }
 }
