@@ -19,6 +19,7 @@ import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
 import 'calibration_target.dart';
+import 'color_palette.dart';
 import 'overlay_canvas.dart';
 import 'pairing_controller.dart';
 import 'pairing_qr_panel.dart';
@@ -617,7 +618,19 @@ class _HomePageState extends State<HomePage> {
       }
       return Material(
         type: MaterialType.transparency,
-        child: SizedBox.expand(child: OverlayCanvas(model: _overlay)),
+        child: SizedBox.expand(
+          child: Stack(
+            children: [
+              OverlayCanvas(model: _overlay),
+              // 右下の色パレット。タップで以後の描画色を切り替える。
+              Positioned(
+                right: 24,
+                bottom: 24,
+                child: ColorPalette(model: _overlay),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
