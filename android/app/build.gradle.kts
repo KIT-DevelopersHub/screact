@@ -58,6 +58,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.mlkit.barcode.scanning)
     implementation(libs.opencv)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

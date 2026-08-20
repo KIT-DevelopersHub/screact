@@ -87,6 +87,7 @@ import com.nxtend.team35.yubiboard.vision.ProductionOverlayView
 import com.nxtend.team35.yubiboard.ui.CameraUiState
 import com.nxtend.team35.yubiboard.ui.ProductionScreen
 import com.nxtend.team35.yubiboard.ui.ProductionUiState
+import com.nxtend.team35.yubiboard.ui.QrScanScreen
 import com.nxtend.team35.yubiboard.ui.SplashScreen
 import com.nxtend.team35.yubiboard.ui.ProductionStateLab
 
@@ -120,6 +121,7 @@ class MainActivity : ComponentActivity() {
 
     private var cameraStatus by mutableStateOf("カメラを起動中")
     private var usingFrontCamera by mutableStateOf(false)
+    private var showQrScanner by mutableStateOf(false)
     private var cameraPermissionGranted by mutableStateOf(false)
     private var cameraPermissionPermanentlyDenied by mutableStateOf(false)
     private var cameraStarted = false
@@ -297,6 +299,7 @@ class MainActivity : ComponentActivity() {
                         onConnect = viewModel::connect,
                         onStartAutoPairing = viewModel::startAutoPairing,
                         onCancelAutoPairing = viewModel::cancelAutoPairing,
+                        onScanQr = ::openQrScanner,
                         onCancelConnection = viewModel::disconnect,
                         onDisconnect = viewModel::disconnect,
                         onRetryNow = viewModel::retryNow,
@@ -306,6 +309,18 @@ class MainActivity : ComponentActivity() {
                             applySettings(appSettings.copy(maxHands = maxHands))
                         },
                     )
+                    // QR スキャナはメインプレビューの上に重ねる。背面カメラを共有するため、
+                    // 表示時にメインカメラを止め（openQrScanner）、閉じたら再開する。
+                    if (showQrScanner && cameraPermissionGranted) {
+                        QrScanScreen(
+                            onResult = { host, port, token ->
+                                closeQrScanner()
+                                viewModel.connectViaQr(host, port, token)
+                            },
+                            onCancel = ::closeQrScanner,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     AnimatedVisibility(
                         visible = showSplash,
                         enter = EnterTransition.None,
@@ -365,6 +380,24 @@ class MainActivity : ComponentActivity() {
         viewModel.updateCameraState(CameraUiState.STARTING)
         val profile = CameraProfile.HD_720
         cameraSession.start(profile, allowFallback = !profile.debugOnly)
+    }
+
+    /** QR スキャナを開く。背面カメラを QR 用に譲るため、メインカメラを一旦止める。 */
+    private fun openQrScanner() {
+        if (!cameraPermissionGranted) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
+        if (showQrScanner) return
+        cameraSession.stop()
+        showQrScanner = true
+    }
+
+    /** QR スキャナを閉じ、メインカメラを再開する。 */
+    private fun closeQrScanner() {
+        if (!showQrScanner) return
+        showQrScanner = false
+        if (cameraPermissionGranted) startCamera()
     }
 
     private fun toggleCameraLens() {

@@ -12,6 +12,7 @@ import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.network.DesktopDiscoveryListener
+import com.nxtend.team35.yubiboard.network.PairingPayload
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
@@ -127,6 +128,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connect(host: String, portText: String, pairingToken: String): String? {
         return connectToDesktop(host, portText, pairingToken, automatic = false)
+    }
+
+    /**
+     * QR で読み取った LAN 直結ペイロード（[PairingPayload] 由来の host/port/token）で接続する。
+     * IP・6桁コード入力なしの automatic 経路を再利用し、認証は既存の hello.pairingToken 1本のまま。
+     * 走行中の LAN 待受があれば閉じてから接続する。エラーは通知として表示する。
+     */
+    fun connectViaQr(host: String, port: Int, token: String) {
+        stopDiscovery()
+        updateProduction { it.copy(pairing = PairingUiState.IDLE, notice = null) }
+        connectToDesktop(host, port.toString(), token, automatic = true)?.let { error ->
+            mutableLog.postValue(error)
+            updateProduction { it.copy(notice = error) }
+        }
+    }
+
+    /**
+     * `screact://pair?...` の生 URI から接続する単一エントリ（ディープリンク等の非 QR 経路向け）。
+     * パースできなければユーザー向けメッセージを返し、成功時は null。
+     */
+    fun connectFromPairingUri(uri: String): String? {
+        val payload = PairingPayload.tryParse(uri) ?: return "QRコードを認識できませんでした"
+        if (!payload.hasLanDirect) return "QRコードにLAN接続情報が含まれていません"
+        connectViaQr(payload.lanHost!!, payload.lanPort!!, payload.pairingToken)
+        return null
     }
 
     private fun connectToDesktop(

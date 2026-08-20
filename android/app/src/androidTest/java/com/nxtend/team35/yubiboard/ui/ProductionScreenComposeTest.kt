@@ -409,6 +409,7 @@ class ProductionScreenComposeTest {
                     onConnect = onConnect,
                     onStartAutoPairing = onStartAutoPairing,
                     onCancelAutoPairing = onCancelAutoPairing,
+                    onScanQr = {},
                     onCancelConnection = {},
                     onDisconnect = onDisconnect,
                     onRetryNow = onRetryNow,

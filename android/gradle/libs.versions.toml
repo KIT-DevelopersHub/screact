@@ -12,6 +12,7 @@ lifecycle = "2.10.0"
 mediapipe = "0.10.35"
 opencv = "4.12.0"
 okhttp = "4.12.0"
+mlkitBarcode = "17.3.0"
 kotlinxSerialization = "1.7.3"
 composeBom = "2026.06.00"
 coil = "2.7.0"
@@ -31,6 +32,7 @@ androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifec
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipe" }
 opencv = { group = "org.opencv", name = "opencv", version.ref = "opencv" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity" }

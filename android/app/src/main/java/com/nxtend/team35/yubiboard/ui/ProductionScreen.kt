@@ -87,6 +87,7 @@ fun ProductionScreen(
     onConnect: (String, String, String) -> String?,
     onStartAutoPairing: () -> Unit,
     onCancelAutoPairing: () -> Unit,
+    onScanQr: () -> Unit,
     onCancelConnection: () -> Unit,
     onDisconnect: () -> Unit,
     onRetryNow: () -> Unit,
@@ -126,6 +127,7 @@ fun ProductionScreen(
                     showManual = showManual,
                     onStartAutoPairing = { formError = null; onStartAutoPairing() },
                     onCancelAutoPairing = onCancelAutoPairing,
+                    onScanQr = { formError = null; onScanQr() },
                     onShowManual = {
                         onCancelAutoPairing()
                         formError = null
@@ -160,6 +162,7 @@ fun ProductionScreen(
                     showManual = showManual,
                     onStartAutoPairing = { formError = null; onStartAutoPairing() },
                     onCancelAutoPairing = onCancelAutoPairing,
+                    onScanQr = { formError = null; onScanQr() },
                     onShowManual = {
                         onCancelAutoPairing()
                         formError = null
@@ -225,6 +228,7 @@ private fun ProductionGuidePanel(
     showManual: Boolean,
     onStartAutoPairing: () -> Unit,
     onCancelAutoPairing: () -> Unit,
+    onScanQr: () -> Unit,
     onShowManual: () -> Unit,
     onHideManual: () -> Unit,
     onRequestCameraPermission: () -> Unit,
@@ -314,6 +318,7 @@ private fun ProductionGuidePanel(
                                 AutoPairingStartPanel(
                                     state = state,
                                     onStartAutoPairing = onStartAutoPairing,
+                                    onScanQr = onScanQr,
                                     onShowManual = onShowManual,
                                     compact = compact,
                                     narrow = narrow,
@@ -454,6 +459,7 @@ private fun CameraErrorPanel(
 private fun AutoPairingStartPanel(
     state: ProductionUiState,
     onStartAutoPairing: () -> Unit,
+    onScanQr: () -> Unit,
     onShowManual: () -> Unit,
     compact: Boolean,
     narrow: Boolean,
@@ -479,6 +485,13 @@ private fun AutoPairingStartPanel(
         onClick = onStartAutoPairing,
         compact = compact,
         tag = "auto_pair_button",
+    )
+    Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
+    GuideOutlinedButton(
+        text = "QRコードで接続",
+        onClick = onScanQr,
+        compact = compact,
+        tag = "scan_qr_button",
     )
     TextButton(
         onClick = onShowManual,
@@ -1371,6 +1384,7 @@ fun ProductionStateLab(onDismiss: () -> Unit) {
                     onConnect = { _, _, _ -> lastAction = "接続"; null },
                     onStartAutoPairing = { lastAction = "画面認識開始" },
                     onCancelAutoPairing = { lastAction = "待受キャンセル" },
+                    onScanQr = { lastAction = "QRコードで接続" },
                     onCancelConnection = { lastAction = "キャンセル" },
                     onDisconnect = { lastAction = "切断" },
                     onRetryNow = { lastAction = "今すぐ再接続" },

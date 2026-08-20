@@ -219,6 +219,14 @@ class CameraSession(
         onError(error)
     }
 
+    /**
+     * カメラのバインドだけを解除する（executor は生かす）。QR スキャナ等が同じ背面カメラを
+     * 使う間、メインプレビューを一時停止するために使う。再開は [start] で再バインドする。
+     */
+    fun stop() {
+        provider?.unbindAll()
+    }
+
     override fun close() {
         provider?.unbindAll()
         analysisExecutor.shutdownNow()
