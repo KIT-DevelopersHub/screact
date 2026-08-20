@@ -21,6 +21,7 @@ class TrackVisual {
   final int colorSlot;
   Vec2? cursor;
   bool pressed = false;
+  bool erasing = false; // グー（消しゴム）中。カーソルを消しゴム範囲の輪で描く。
 
   TrackVisual({required this.colorSlot});
 
@@ -42,6 +43,22 @@ class OverlayModel extends ChangeNotifier {
 
   /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
   static const double _minPointDist = 0.002;
+
+  /// 消しゴム（グー）の消去半径（画面正規化・0..1）。この距離以内のインク点を消す。
+  static const double eraserRadius = 0.045;
+
+  /// ユーザーがパレットで選んだ描画色スロット（null=トラック別自動色にフォールバック）。
+  int? _selectedColorSlot;
+  int? get selectedColorSlot => _selectedColorSlot;
+
+  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する。
+  /// 同じ色を再選択したら選択解除し、トラック別自動色へ戻す。
+  void selectColorSlot(int? slot) {
+    final next = _selectedColorSlot == slot ? null : slot;
+    if (next == _selectedColorSlot) return;
+    _selectedColorSlot = next;
+    notifyListeners();
+  }
 
   Iterable<int> get trackIds => _tracks.keys;
   TrackVisual? track(int id) => _tracks[id];
@@ -88,16 +105,19 @@ class OverlayModel extends ChangeNotifier {
       case InteractionKind.pointerMove:
         v.cursor = e.screen;
         v.pressed = false;
+        v.erasing = false;
         _active.remove(trackId);
         break;
       // インク描画（人差し指＋中指のくっつき・中間点）。
       case InteractionKind.drawDown:
         v.cursor = e.screen;
         v.pressed = true;
+        v.erasing = false;
+        // ユーザーがパレットで選んだ色を優先。未選択ならトラック別自動色。
         final stroke = InkStroke(
           [e.screen],
           trackId: trackId,
-          colorSlot: v.colorSlot,
+          colorSlot: _selectedColorSlot ?? v.colorSlot,
         );
         _active[trackId] = stroke;
         strokes.add(stroke);
@@ -115,11 +135,24 @@ class OverlayModel extends ChangeNotifier {
         v.pressed = false;
         _active.remove(trackId);
         break;
+      // 消しゴム（グー）。カーソル位置近傍のインクを消す。
+      case InteractionKind.eraseDown:
+      case InteractionKind.eraseMove:
+        v.cursor = e.screen;
+        v.pressed = false;
+        v.erasing = true;
+        _active.remove(trackId);
+        eraseAt(e.screen);
+        break;
+      case InteractionKind.eraseUp:
+        v.erasing = false;
+        break;
       // OSクリック/ドラッグ（ピンチ）はインクを引かない。カーソルの押下表示のみ。
       case InteractionKind.pressDown:
       case InteractionKind.pressMove:
         v.cursor = e.screen;
         v.pressed = true;
+        v.erasing = false;
         break;
       case InteractionKind.click:
         v.cursor = e.screen;
@@ -129,11 +162,13 @@ class OverlayModel extends ChangeNotifier {
         break;
       case InteractionKind.scroll:
         v.cursor = e.screen;
+        v.erasing = false;
         break;
       case InteractionKind.pointerExit:
         // 画面外でも手自体は検出中なので、骨格とトラック色は保持する。
         v.cursor = null;
         v.pressed = false;
+        v.erasing = false;
         _active.remove(trackId);
         break;
       case InteractionKind.release:
@@ -162,6 +197,60 @@ class OverlayModel extends ChangeNotifier {
       (id, v) =>
           v.cursor == null && v.skeleton == null && !_active.containsKey(id),
     );
+  }
+
+  /// [p]（画面正規化）から [eraserRadius] 以内のインク点を消す。線の途中を消した
+  /// 場合はそこでストロークを分割し、残った前後を別ストロークとして保つ
+  /// （消しゴムで線に穴を開けても、両端が1本に繋がって見えないようにする）。
+  /// 描画中（_active）のストロークは対象外。呼び出し側で notifyListeners する。
+  void eraseAt(Vec2 p) {
+    final active = _active.values.toSet();
+    final next = <InkStroke>[];
+    var changed = false;
+    for (final stroke in strokes) {
+      if (active.contains(stroke)) {
+        next.add(stroke);
+        continue;
+      }
+      var segment = <Vec2>[];
+      var removedAny = false;
+      for (final pt in stroke.points) {
+        if (pt.distanceTo(p) <= eraserRadius) {
+          removedAny = true;
+          if (segment.isNotEmpty) {
+            next.add(
+              InkStroke(
+                segment,
+                trackId: stroke.trackId,
+                colorSlot: stroke.colorSlot,
+              ),
+            );
+            segment = <Vec2>[];
+          }
+        } else {
+          segment.add(pt);
+        }
+      }
+      if (!removedAny) {
+        next.add(stroke);
+      } else {
+        changed = true;
+        if (segment.isNotEmpty) {
+          next.add(
+            InkStroke(
+              segment,
+              trackId: stroke.trackId,
+              colorSlot: stroke.colorSlot,
+            ),
+          );
+        }
+      }
+    }
+    if (changed) {
+      strokes
+        ..clear()
+        ..addAll(next);
+    }
   }
 
   void clear() {

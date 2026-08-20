@@ -10,6 +10,7 @@ class HandPose {
   final bool indexUp;
   final bool middleUp;
   final int extendedFingers;
+  final bool fist; // グー（全指を折り畳む）＝消しゴム
   const HandPose({
     required this.indexTip,
     required this.middleTip,
@@ -18,11 +19,15 @@ class HandPose {
     required this.indexUp,
     required this.middleUp,
     required this.extendedFingers,
+    this.fist = false,
   });
 
   /// 描画の筆点＝人差し指先端と中指先端の中間点。
   Vec2 get drawPoint =>
       Vec2((indexTip.x + middleTip.x) / 2, (indexTip.y + middleTip.y) / 2);
+
+  /// 消しゴムの代表点＝人差し指先端と中指先端の中間点（グー時は掌付近に集まる）。
+  Vec2 get erasePoint => drawPoint;
 }
 
 /// 手指骨格→ポーズ認識。姿勢のしきい値は手のスケール（手首→人差し指付け根）で
@@ -47,6 +52,7 @@ class GestureRecognizer {
   double? _customTogetherOffRatio;
   bool _pinched = false;
   bool _together = false;
+  bool _fist = false;
 
   GestureRecognizer({
     double recognitionSensitivity = defaultRecognitionSensitivity,
@@ -108,6 +114,7 @@ class GestureRecognizer {
   void reset() {
     _pinched = false;
     _together = false;
+    _fist = false;
   }
 
   HandPose? recognize(HandFrame f) {
@@ -148,6 +155,15 @@ class GestureRecognizer {
     final extended =
         [indexUp, middleUp, ringUp, pinkyUp].where((e) => e).length;
 
+    // グー（消しゴム）判定。境界のチャタリングを防ぐため、伸びた指の本数に
+    // ヒステリシス（不感帯 extended==1）を設ける: 0本で確実に握った時だけON、
+    // 2本以上伸ばして明確に開いた時だけOFF。1本の中間状態は直前を保持する。
+    if (_fist) {
+      if (extended >= 2) _fist = false;
+    } else {
+      if (extended == 0) _fist = true;
+    }
+
     return HandPose(
       indexTip: indexTip,
       middleTip: middleTip,
@@ -156,6 +172,7 @@ class GestureRecognizer {
       indexUp: indexUp,
       middleUp: middleUp,
       extendedFingers: extended,
+      fist: _fist,
     );
   }
 }
