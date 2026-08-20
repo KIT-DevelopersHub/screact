@@ -10,6 +10,7 @@ import '../core/interaction_engine.dart';
 import '../core/multi_hand_engine.dart';
 import '../core/pointer_state.dart';
 import '../protocol/input_frame.dart';
+import '../net/bonjour_advertiser.dart';
 import '../net/connection_log.dart';
 import '../net/discovery.dart';
 import '../net/input_server.dart';
@@ -65,6 +66,8 @@ class _HomePageState extends State<HomePage> {
   late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
   final _connLog = ConnectionLog();
+  // iOS 向け Bonjour(_screact._tcp) 広告。Android 互換の UDP offer と並行して流す。
+  late final BonjourAdvertiser _bonjour;
 
   late final TextEditingController _ipController;
   late final TextEditingController _portController;
@@ -142,6 +145,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _configuredPort = widget.port ?? _environmentPort;
     _bridge = widget.desktopBridge ?? DesktopBridge.forPlatform();
+    _bonjour = BonjourAdvertiser(onLog: _handleServerLog);
     _ipController = TextEditingController();
     _portController = TextEditingController(text: '$_configuredPort');
     _draftSensitivity = _engine.recognitionSensitivity;
@@ -371,6 +375,14 @@ class _HomePageState extends State<HomePage> {
         _server = server;
         _startingServer = false;
       });
+      // WebSocket待受成功後に Bonjour 広告を開始する（iOSがキー入力ゼロで自動接続できる）。
+      // Android 互換の UDP offer は PairingController 経由で別途流れる。
+      final code = _pairingCode;
+      if (code != null) {
+        unawaited(
+          _bonjour.start(port: server.boundPort ?? _port, token: code),
+        );
+      }
     } catch (error) {
       await _shutdownServer(server);
       if (_disposed || !mounted) return;
@@ -415,6 +427,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _shutdownServer(InputServer server) async {
+    // サーバ停止と同時に Bonjour 広告も止める（停止後に古い接続先が広告され続けない）。
+    unawaited(_bonjour.stop());
     try {
       await server.stop();
     } catch (error) {

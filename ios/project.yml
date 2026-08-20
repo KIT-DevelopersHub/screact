@@ -1,0 +1,48 @@
+name: Screact
+options:
+  bundleIdPrefix: com.nxtend.team35
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Screact:
+    type: application
+    platform: iOS
+    sources:
+      - path: Screact
+        excludes:
+          - "App/Info.plist"
+          - "Resources/MODEL_ATTRIBUTION.md"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxtend.team35.yubiboard
+        PRODUCT_NAME: Screact
+        INFOPLIST_FILE: Screact/App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: Screact/Screact-Bridging-Header.h
+        CLANG_ENABLE_MODULES: YES
+        CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Code signing is left unset so `xcodebuild ... -sdk iphonesimulator` builds without a team.
+
+  ScreactTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ScreactTests
+    dependencies:
+      - target: Screact
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxtend.team35.yubiboard.tests
+        GENERATE_INFOPLIST_FILE: YES

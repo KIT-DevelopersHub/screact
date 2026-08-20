@@ -1,0 +1,602 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0AD89897CC3B6C07955B5189 /* ProductionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DF5DD5151099965F187F948 /* ProductionScreen.swift */; };
+		0D54CD81ED7BE6709E9C0152 /* VisionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09FEF0B9A7AAD0BFA42BAA81 /* VisionLogicTests.swift */; };
+		101DFB8D1D8BA9499CC51F66 /* hand_landmarker.task in Resources */ = {isa = PBXBuildFile; fileRef = AD49A5BF30F6C7ACF37810E2 /* hand_landmarker.task */; };
+		108E6BF8613BF3B80EB7FAEF /* CameraProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB32E93E18832A538D4207D /* CameraProfile.swift */; };
+		10F6F24C97503E901C916A20 /* ArucoBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = 87B0547AD0BE37048C5298C2 /* ArucoBridge.mm */; };
+		1EA283037E9A7FDC64433D4F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9CF2043238813CC679D52B46 /* Assets.xcassets */; };
+		21D7D29DDF018A02BD90EC2B /* ProductionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A6E1831EF8C394CED0A645 /* ProductionModels.swift */; };
+		3E33E0344B39942145F764CF /* Messages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9BD321B9997BF57C48BAE6 /* Messages.swift */; };
+		56E657B8B996797D2FCD4F03 /* YubiBoardWebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B91DC75900EC4FB8389A58 /* YubiBoardWebSocketClient.swift */; };
+		772AFDFE0A73FA167C9EF0B6 /* TrustedConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF5F6C15109DC2F8FC129CD /* TrustedConnectionStore.swift */; };
+		79D008E9E65FA8256CE7EEB3 /* BonjourDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFC399B373AAEE91D3965EDE /* BonjourDiscovery.swift */; };
+		7AA04A4D015D7DF5ED507568 /* ConnectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EA9A697723F0D286EBA552 /* ConnectionModels.swift */; };
+		7C00A35FA621AC616F91C478 /* MarkerStabilityTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60A3F462A8D05D521434A68 /* MarkerStabilityTracker.swift */; };
+		85BAEB15E6ED6538538E21E8 /* MainViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B78DE4A08A8F745B8F1B1389 /* MainViewModel.swift */; };
+		9349C013ED0A6DAE81B36124 /* ArucoMarkerProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0AADBAA670CBC38FCDD9D8 /* ArucoMarkerProcessor.swift */; };
+		935729ADD9037CB8EF9B09D3 /* HandDetectionResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F488D0AAF5EE62FB1B6EE8A /* HandDetectionResult.swift */; };
+		9BCA0F5DB99B85C014FFB262 /* MarkerDetectionResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70DC0B1B3A0981C04C143796 /* MarkerDetectionResult.swift */; };
+		9F172622C0946EF227A9923B /* CaptureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80D74C228EA48C60AC40BC15 /* CaptureMode.swift */; };
+		AABE4795554F2EFAD5C307CE /* ProtocolCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D693D848603534FC7128319E /* ProtocolCodecTests.swift */; };
+		AD5B1A41FD317A27967F8268 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C024304F90ACB6B5BDCCE5 /* CameraSession.swift */; };
+		BE489CC2D38592AF3E77CB4B /* ProtocolCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1212BEFF5F8A9C34A1499114 /* ProtocolCodec.swift */; };
+		D7209A46E35C330D408971C4 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED6CE3EB50054125D14C07F /* AppSettings.swift */; };
+		D8E5CC49549343D02371FD8D /* CameraPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE0FABE34CCEE78EB15ADBA /* CameraPreviewView.swift */; };
+		ECF4E6BFACBC54EDFEB660ED /* HandLandmarkerProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4943B2D61A500D4EBA91CA9 /* HandLandmarkerProcessor.swift */; };
+		EE19E23BC5A3F579B8D48F8F /* AppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A804858561539337C47D80 /* AppDiagnostics.swift */; };
+		F1366006054390F8FF589252 /* ScreactApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87B6478B714C682A0C4E54A /* ScreactApp.swift */; };
+		F45F2E2E4FFE9BCD09E2AF6F /* TrackingStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 645BF8CA3A7EEB24DE311D28 /* TrackingStateMachine.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CE0A1767196C1B4643C11C87 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BA4257318D015B860C000616 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD10A668A52643A613936D3E;
+			remoteInfo = Screact;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		01A6E1831EF8C394CED0A645 /* ProductionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionModels.swift; sourceTree = "<group>"; };
+		09FEF0B9A7AAD0BFA42BAA81 /* VisionLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionLogicTests.swift; sourceTree = "<group>"; };
+		11C024304F90ACB6B5BDCCE5 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
+		1212BEFF5F8A9C34A1499114 /* ProtocolCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodec.swift; sourceTree = "<group>"; };
+		1B0AADBAA670CBC38FCDD9D8 /* ArucoMarkerProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArucoMarkerProcessor.swift; sourceTree = "<group>"; };
+		1BB32E93E18832A538D4207D /* CameraProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraProfile.swift; sourceTree = "<group>"; };
+		1E9BD321B9997BF57C48BAE6 /* Messages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Messages.swift; sourceTree = "<group>"; };
+		27CAFC6A3AACF7332631B55E /* Screact.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Screact.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		346DE530EF645EE77941B239 /* ScreactTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ScreactTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3DF5DD5151099965F187F948 /* ProductionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionScreen.swift; sourceTree = "<group>"; };
+		51B91DC75900EC4FB8389A58 /* YubiBoardWebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YubiBoardWebSocketClient.swift; sourceTree = "<group>"; };
+		645BF8CA3A7EEB24DE311D28 /* TrackingStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackingStateMachine.swift; sourceTree = "<group>"; };
+		6AE0FABE34CCEE78EB15ADBA /* CameraPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewView.swift; sourceTree = "<group>"; };
+		70DC0B1B3A0981C04C143796 /* MarkerDetectionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkerDetectionResult.swift; sourceTree = "<group>"; };
+		7F488D0AAF5EE62FB1B6EE8A /* HandDetectionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandDetectionResult.swift; sourceTree = "<group>"; };
+		80D74C228EA48C60AC40BC15 /* CaptureMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureMode.swift; sourceTree = "<group>"; };
+		81A804858561539337C47D80 /* AppDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDiagnostics.swift; sourceTree = "<group>"; };
+		87B0547AD0BE37048C5298C2 /* ArucoBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ArucoBridge.mm; sourceTree = "<group>"; };
+		8ED6CE3EB50054125D14C07F /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		9CF2043238813CC679D52B46 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A4943B2D61A500D4EBA91CA9 /* HandLandmarkerProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandLandmarkerProcessor.swift; sourceTree = "<group>"; };
+		A87B6478B714C682A0C4E54A /* ScreactApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreactApp.swift; sourceTree = "<group>"; };
+		AD49A5BF30F6C7ACF37810E2 /* hand_landmarker.task */ = {isa = PBXFileReference; path = hand_landmarker.task; sourceTree = "<group>"; };
+		AFC399B373AAEE91D3965EDE /* BonjourDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourDiscovery.swift; sourceTree = "<group>"; };
+		B78DE4A08A8F745B8F1B1389 /* MainViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewModel.swift; sourceTree = "<group>"; };
+		BEE713B8A1FCD883FD4424BC /* ArucoBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ArucoBridge.h; sourceTree = "<group>"; };
+		C60A3F462A8D05D521434A68 /* MarkerStabilityTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkerStabilityTracker.swift; sourceTree = "<group>"; };
+		D2EA9A697723F0D286EBA552 /* ConnectionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionModels.swift; sourceTree = "<group>"; };
+		D693D848603534FC7128319E /* ProtocolCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodecTests.swift; sourceTree = "<group>"; };
+		E7025DA213B1A0E4FA8519B8 /* Screact-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Screact-Bridging-Header.h"; sourceTree = "<group>"; };
+		FCF5F6C15109DC2F8FC129CD /* TrustedConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedConnectionStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		05671BA78E7DC8BFE8EC9795 /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+				1BB32E93E18832A538D4207D /* CameraProfile.swift */,
+				11C024304F90ACB6B5BDCCE5 /* CameraSession.swift */,
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
+		135B3DCF978B842E9190DF78 /* Screact */ = {
+			isa = PBXGroup;
+			children = (
+				E7025DA213B1A0E4FA8519B8 /* Screact-Bridging-Header.h */,
+				392665E1A716BD7101E88B8C /* App */,
+				05671BA78E7DC8BFE8EC9795 /* Camera */,
+				5FAF89ACC2BB6BB58567C762 /* Diagnostics */,
+				75E5DF5EA1B7D15751EA0AE8 /* Network */,
+				47D635722E9ACB10506D4330 /* Protocol */,
+				974937F18AF558E7DB9B040B /* Resources */,
+				825969EE0E3E63B8F32C8D26 /* Settings */,
+				B8D94EC0AF961A45ECDF52CE /* UI */,
+				CE616CEF042A0C0623332A11 /* ViewModel */,
+				EC1DD4CC587AC51F127D18DC /* Vision */,
+			);
+			path = Screact;
+			sourceTree = "<group>";
+		};
+		2B126F4BA50773348EAAA2DF = {
+			isa = PBXGroup;
+			children = (
+				135B3DCF978B842E9190DF78 /* Screact */,
+				AF9A751CE39BA16CD16021B3 /* ScreactTests */,
+				D69F9507A8B5AA682ACC0F5F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		392665E1A716BD7101E88B8C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A87B6478B714C682A0C4E54A /* ScreactApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		47D635722E9ACB10506D4330 /* Protocol */ = {
+			isa = PBXGroup;
+			children = (
+				80D74C228EA48C60AC40BC15 /* CaptureMode.swift */,
+				1E9BD321B9997BF57C48BAE6 /* Messages.swift */,
+				1212BEFF5F8A9C34A1499114 /* ProtocolCodec.swift */,
+			);
+			path = Protocol;
+			sourceTree = "<group>";
+		};
+		5FAF89ACC2BB6BB58567C762 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				81A804858561539337C47D80 /* AppDiagnostics.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		75E5DF5EA1B7D15751EA0AE8 /* Network */ = {
+			isa = PBXGroup;
+			children = (
+				AFC399B373AAEE91D3965EDE /* BonjourDiscovery.swift */,
+				D2EA9A697723F0D286EBA552 /* ConnectionModels.swift */,
+				51B91DC75900EC4FB8389A58 /* YubiBoardWebSocketClient.swift */,
+			);
+			path = Network;
+			sourceTree = "<group>";
+		};
+		825969EE0E3E63B8F32C8D26 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				8ED6CE3EB50054125D14C07F /* AppSettings.swift */,
+				FCF5F6C15109DC2F8FC129CD /* TrustedConnectionStore.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		974937F18AF558E7DB9B040B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9CF2043238813CC679D52B46 /* Assets.xcassets */,
+				AD49A5BF30F6C7ACF37810E2 /* hand_landmarker.task */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		AF9A751CE39BA16CD16021B3 /* ScreactTests */ = {
+			isa = PBXGroup;
+			children = (
+				D693D848603534FC7128319E /* ProtocolCodecTests.swift */,
+				09FEF0B9A7AAD0BFA42BAA81 /* VisionLogicTests.swift */,
+			);
+			path = ScreactTests;
+			sourceTree = "<group>";
+		};
+		B8D94EC0AF961A45ECDF52CE /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				6AE0FABE34CCEE78EB15ADBA /* CameraPreviewView.swift */,
+				01A6E1831EF8C394CED0A645 /* ProductionModels.swift */,
+				3DF5DD5151099965F187F948 /* ProductionScreen.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		CE616CEF042A0C0623332A11 /* ViewModel */ = {
+			isa = PBXGroup;
+			children = (
+				B78DE4A08A8F745B8F1B1389 /* MainViewModel.swift */,
+			);
+			path = ViewModel;
+			sourceTree = "<group>";
+		};
+		D69F9507A8B5AA682ACC0F5F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				27CAFC6A3AACF7332631B55E /* Screact.app */,
+				346DE530EF645EE77941B239 /* ScreactTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EC1DD4CC587AC51F127D18DC /* Vision */ = {
+			isa = PBXGroup;
+			children = (
+				BEE713B8A1FCD883FD4424BC /* ArucoBridge.h */,
+				87B0547AD0BE37048C5298C2 /* ArucoBridge.mm */,
+				1B0AADBAA670CBC38FCDD9D8 /* ArucoMarkerProcessor.swift */,
+				7F488D0AAF5EE62FB1B6EE8A /* HandDetectionResult.swift */,
+				A4943B2D61A500D4EBA91CA9 /* HandLandmarkerProcessor.swift */,
+				70DC0B1B3A0981C04C143796 /* MarkerDetectionResult.swift */,
+				C60A3F462A8D05D521434A68 /* MarkerStabilityTracker.swift */,
+				645BF8CA3A7EEB24DE311D28 /* TrackingStateMachine.swift */,
+			);
+			path = Vision;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C770ACC7DC36D5B03AA75FC8 /* ScreactTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 57AFAA2D5B594D282AEF64D3 /* Build configuration list for PBXNativeTarget "ScreactTests" */;
+			buildPhases = (
+				69ED6D2ACB9519F87666F20D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CCA6CFC07AB5AAC6155153E0 /* PBXTargetDependency */,
+			);
+			name = ScreactTests;
+			packageProductDependencies = (
+			);
+			productName = ScreactTests;
+			productReference = 346DE530EF645EE77941B239 /* ScreactTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DD10A668A52643A613936D3E /* Screact */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5C8133756F314CA14AB49890 /* Build configuration list for PBXNativeTarget "Screact" */;
+			buildPhases = (
+				214BFD6FB640F07070917877 /* Sources */,
+				DB96C44498DE2488159B0810 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Screact;
+			packageProductDependencies = (
+			);
+			productName = Screact;
+			productReference = 27CAFC6A3AACF7332631B55E /* Screact.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BA4257318D015B860C000616 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					C770ACC7DC36D5B03AA75FC8 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					DD10A668A52643A613936D3E = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = DAFA8331AF11FE54A0F8F334 /* Build configuration list for PBXProject "Screact" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2B126F4BA50773348EAAA2DF;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D69F9507A8B5AA682ACC0F5F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DD10A668A52643A613936D3E /* Screact */,
+				C770ACC7DC36D5B03AA75FC8 /* ScreactTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		DB96C44498DE2488159B0810 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1EA283037E9A7FDC64433D4F /* Assets.xcassets in Resources */,
+				101DFB8D1D8BA9499CC51F66 /* hand_landmarker.task in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		214BFD6FB640F07070917877 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE19E23BC5A3F579B8D48F8F /* AppDiagnostics.swift in Sources */,
+				D7209A46E35C330D408971C4 /* AppSettings.swift in Sources */,
+				10F6F24C97503E901C916A20 /* ArucoBridge.mm in Sources */,
+				9349C013ED0A6DAE81B36124 /* ArucoMarkerProcessor.swift in Sources */,
+				79D008E9E65FA8256CE7EEB3 /* BonjourDiscovery.swift in Sources */,
+				D8E5CC49549343D02371FD8D /* CameraPreviewView.swift in Sources */,
+				108E6BF8613BF3B80EB7FAEF /* CameraProfile.swift in Sources */,
+				AD5B1A41FD317A27967F8268 /* CameraSession.swift in Sources */,
+				9F172622C0946EF227A9923B /* CaptureMode.swift in Sources */,
+				7AA04A4D015D7DF5ED507568 /* ConnectionModels.swift in Sources */,
+				935729ADD9037CB8EF9B09D3 /* HandDetectionResult.swift in Sources */,
+				ECF4E6BFACBC54EDFEB660ED /* HandLandmarkerProcessor.swift in Sources */,
+				85BAEB15E6ED6538538E21E8 /* MainViewModel.swift in Sources */,
+				9BCA0F5DB99B85C014FFB262 /* MarkerDetectionResult.swift in Sources */,
+				7C00A35FA621AC616F91C478 /* MarkerStabilityTracker.swift in Sources */,
+				3E33E0344B39942145F764CF /* Messages.swift in Sources */,
+				21D7D29DDF018A02BD90EC2B /* ProductionModels.swift in Sources */,
+				0AD89897CC3B6C07955B5189 /* ProductionScreen.swift in Sources */,
+				BE489CC2D38592AF3E77CB4B /* ProtocolCodec.swift in Sources */,
+				F1366006054390F8FF589252 /* ScreactApp.swift in Sources */,
+				F45F2E2E4FFE9BCD09E2AF6F /* TrackingStateMachine.swift in Sources */,
+				772AFDFE0A73FA167C9EF0B6 /* TrustedConnectionStore.swift in Sources */,
+				56E657B8B996797D2FCD4F03 /* YubiBoardWebSocketClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		69ED6D2ACB9519F87666F20D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AABE4795554F2EFAD5C307CE /* ProtocolCodecTests.swift in Sources */,
+				0D54CD81ED7BE6709E9C0152 /* VisionLogicTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CCA6CFC07AB5AAC6155153E0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DD10A668A52643A613936D3E /* Screact */;
+			targetProxy = CE0A1767196C1B4643C11C87 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		124F786CE1367026B69858CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8B83FD978EFE83AFF1472D1B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nxtend.team35.yubiboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Screact.app/Screact";
+			};
+			name = Release;
+		};
+		93627E0AD37821758C87C6B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Screact/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nxtend.team35.yubiboard;
+				PRODUCT_NAME = Screact;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "Screact/Screact-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		966AAE4C07FB375FC6BC0E91 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nxtend.team35.yubiboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Screact.app/Screact";
+			};
+			name = Debug;
+		};
+		B029DF3C47CEED5802A4D678 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D8371F476DF7A8AF23F9BC93 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Screact/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nxtend.team35.yubiboard;
+				PRODUCT_NAME = Screact;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "Screact/Screact-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		57AFAA2D5B594D282AEF64D3 /* Build configuration list for PBXNativeTarget "ScreactTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				966AAE4C07FB375FC6BC0E91 /* Debug */,
+				8B83FD978EFE83AFF1472D1B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5C8133756F314CA14AB49890 /* Build configuration list for PBXNativeTarget "Screact" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D8371F476DF7A8AF23F9BC93 /* Debug */,
+				93627E0AD37821758C87C6B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DAFA8331AF11FE54A0F8F334 /* Build configuration list for PBXProject "Screact" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B029DF3C47CEED5802A4D678 /* Debug */,
+				124F786CE1367026B69858CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = BA4257318D015B860C000616 /* Project object */;
+}
