@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'wifi_ip.dart';
+
 /// Screact のゼロコンフィグ・ペアリング（UDP発見プロトコル）。
 ///
 /// Desktop が「始める」押下から UDP ブロードキャストで offer を投げ、待受を
@@ -263,6 +265,12 @@ class DesktopDiscovery extends ChangeNotifier {
   /// テストでは ['127.0.0.1'] 等に差し替える）。
   final List<String>? broadcastAddresses;
 
+  /// start() 時に列挙した、全物理IFの /24 ディレクテッドブロードキャスト。
+  /// offer/select を `_wifiIp` 由来の1サブネットだけでなく全物理IFへ併送し、
+  /// 実際にスマホと同じL2にあるIFが `ip` と異なる環境でも到達させる。
+  /// broadcastAddresses（テスト差し替え）指定時は使わない。
+  List<String> _autoTargets = const [];
+
   RawDatagramSocket? _socket;
   Timer? _offerTimer;
   Timer? _selectTimer;
@@ -308,7 +316,12 @@ class DesktopDiscovery extends ChangeNotifier {
     final custom = broadcastAddresses;
     if (custom != null) return custom;
     final subnet = subnetBroadcastOf(ip);
-    return ['255.255.255.255', if (subnet != null) subnet];
+    // 255.255.255.255 を先頭に保ちつつ、サブネット/全物理IFの.255を重複排除で併送。
+    return <String>{
+      '255.255.255.255',
+      if (subnet != null) subnet,
+      ..._autoTargets,
+    }.toList();
   }
 
   Future<void> start() async {
@@ -327,6 +340,14 @@ class DesktopDiscovery extends ChangeNotifier {
         }
         s.broadcastEnabled = true;
         _socket = s;
+        // 全物理IFの.255を併送先に加える（ベストエフォート・失敗は無視）。
+        // broadcastAddresses 指定時は _targets が無視するのでここでの結果も影響しない。
+        try {
+          final autoTargets = await localSubnetBroadcasts();
+          if (generation == _generation) _autoTargets = autoTargets;
+        } catch (_) {
+          // 列挙失敗時は 255.255.255.255＋サブネットのみで継続。
+        }
         s.listen(_onSocketEvent, onError: (Object e) => _log('受信エラー: $e'));
         _log(
           'UDPブロードキャスト開始 → ${_targets.join(", ")}:$discoveryPort '
