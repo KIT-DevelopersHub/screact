@@ -18,6 +18,8 @@ object ProtocolCodec {
 
     fun encode(message: CalibrationMarkersMessage): String = json.encodeToString(message)
 
+    fun encode(message: CameraChangedMessage): String = json.encodeToString(message)
+
     fun encode(message: HeartbeatMessage): String = json.encodeToString(message)
 
     fun decodeServerMessage(text: String): ServerMessage? {

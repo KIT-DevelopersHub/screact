@@ -12,24 +12,28 @@ class Hello {
   final String? clientVersion;
   final String? pairingToken;
   final String? interactionProfile;
+  final String? cameraFacing;
   final List<String> capabilities;
   const Hello({
     required this.deviceId,
     this.clientVersion,
     this.pairingToken,
     this.interactionProfile,
+    this.cameraFacing,
     this.capabilities = const [],
   });
 
   static Hello fromJson(Map<String, dynamic> j) => Hello(
-        deviceId: (j['deviceId'] ?? 'unknown') as String,
-        clientVersion: j['clientVersion'] as String?,
-        pairingToken: j['pairingToken'] as String?,
-        interactionProfile: j['interactionProfile'] as String?,
-        capabilities: ((j['capabilities'] as List?) ?? const [])
+    deviceId: (j['deviceId'] ?? 'unknown') as String,
+    clientVersion: j['clientVersion'] as String?,
+    pairingToken: j['pairingToken'] as String?,
+    interactionProfile: j['interactionProfile'] as String?,
+    cameraFacing: j['cameraFacing'] as String?,
+    capabilities:
+        ((j['capabilities'] as List?) ?? const [])
             .map((e) => e.toString())
             .toList(),
-      );
+  );
 }
 
 /// 送信: hello_ack（セッションID・対象画面・位置合わせ要否）。
@@ -50,18 +54,18 @@ class HelloAck {
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': kSchemaVersion,
-        'messageType': 'hello_ack',
-        'sessionId': sessionId,
-        'surface': {
-          'surfaceId': surfaceId,
-          'widthPx': widthPx,
-          'heightPx': heightPx,
-        },
-        'calibrationRequired': calibrationRequired,
-        if (acceptedInteractionProfile != null)
-          'acceptedInteractionProfile': acceptedInteractionProfile,
-      };
+    'schemaVersion': kSchemaVersion,
+    'messageType': 'hello_ack',
+    'sessionId': sessionId,
+    'surface': {
+      'surfaceId': surfaceId,
+      'widthPx': widthPx,
+      'heightPx': heightPx,
+    },
+    'calibrationRequired': calibrationRequired,
+    if (acceptedInteractionProfile != null)
+      'acceptedInteractionProfile': acceptedInteractionProfile,
+  };
 }
 
 /// 送信: hello_error（接続拒否。6桁コード不一致等）。
@@ -76,12 +80,12 @@ class HelloError {
   });
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': kSchemaVersion,
-        'messageType': 'hello_error',
-        'code': code,
-        'message': message,
-        'retryable': retryable,
-      };
+    'schemaVersion': kSchemaVersion,
+    'messageType': 'hello_error',
+    'code': code,
+    'message': message,
+    'retryable': retryable,
+  };
 }
 
 /// 送信: control_message（モード切替 / 切断要求）。
@@ -89,18 +93,19 @@ class ControlMessage {
   final String sessionId;
   final String command; // set_mode | disconnect
   final String? mode; // calibration | tracking
-  const ControlMessage.setMode(this.sessionId, this.mode) : command = 'set_mode';
+  const ControlMessage.setMode(this.sessionId, this.mode)
+    : command = 'set_mode';
   const ControlMessage.disconnect(this.sessionId)
-      : command = 'disconnect',
-        mode = null;
+    : command = 'disconnect',
+      mode = null;
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': kSchemaVersion,
-        'messageType': 'control_message',
-        'sessionId': sessionId,
-        'command': command,
-        if (mode != null) 'mode': mode,
-      };
+    'schemaVersion': kSchemaVersion,
+    'messageType': 'control_message',
+    'sessionId': sessionId,
+    'command': command,
+    if (mode != null) 'mode': mode,
+  };
 }
 
 /// 21点手指骨格（MediaPipe hand・0..20）。
@@ -109,10 +114,10 @@ class Landmark {
   const Landmark(this.x, this.y, this.z);
   Vec2 get xy => Vec2(x, y);
   factory Landmark.fromList(List<dynamic> l) => Landmark(
-        (l[0] as num).toDouble(),
-        (l[1] as num).toDouble(),
-        l.length > 2 ? (l[2] as num).toDouble() : 0,
-      );
+    (l[0] as num).toDouble(),
+    (l[1] as num).toDouble(),
+    l.length > 2 ? (l[2] as num).toDouble() : 0,
+  );
 }
 
 /// 受信: hand_frame。未検出時は detected=false・landmarks空。
@@ -141,8 +146,7 @@ class HandFrame {
   static const int pinkyTip = 20;
   static const int indexMcp = 5;
 
-  Landmark? at(int i) =>
-      (i >= 0 && i < landmarks.length) ? landmarks[i] : null;
+  Landmark? at(int i) => (i >= 0 && i < landmarks.length) ? landmarks[i] : null;
 
   /// 妥当性: 検出時は21点・各値が0..1近傍。
   bool get isValid {
@@ -189,12 +193,12 @@ class HandTrack {
   /// 既存のジェスチャー/操作エンジン（単一手 [HandFrame] を処理）へ渡すための変換。
   /// フレームの時刻/frameId を共有し、検出済み扱いにする。
   HandFrame toHandFrame(int frameId, int capturedAtMonotonicMs) => HandFrame(
-        frameId: frameId,
-        capturedAtMonotonicMs: capturedAtMonotonicMs,
-        detected: true,
-        handedness: handedness,
-        landmarks: landmarks,
-      );
+    frameId: frameId,
+    capturedAtMonotonicMs: capturedAtMonotonicMs,
+    detected: true,
+    handedness: handedness,
+    landmarks: landmarks,
+  );
 }
 
 /// ArUcoマーカー1つ（正規化座標）。
@@ -223,8 +227,7 @@ class SlideCorners {
   const SlideCorners(this.capturedAtMonotonicMs, this.corners);
 
   bool get isValid =>
-      corners.length == 4 &&
-      corners.every((c) => c.x.isFinite && c.y.isFinite);
+      corners.length == 4 && corners.every((c) => c.x.isFinite && c.y.isFinite);
 
   static SlideCorners fromJson(Map<String, dynamic> j) {
     final cs = <Vec2>[];
@@ -232,10 +235,7 @@ class SlideCorners {
       final l = e as List;
       cs.add(Vec2((l[0] as num).toDouble(), (l[1] as num).toDouble()));
     }
-    return SlideCorners(
-      (j['capturedAtMonotonicMs'] as num?)?.toInt() ?? 0,
-      cs,
-    );
+    return SlideCorners((j['capturedAtMonotonicMs'] as num?)?.toInt() ?? 0, cs);
   }
 }
 
@@ -243,7 +243,12 @@ class SlideCorners {
 class CalibrationMarkers {
   final int capturedAtMonotonicMs;
   final List<Marker> markers;
-  const CalibrationMarkers(this.capturedAtMonotonicMs, this.markers);
+  final String? cameraFacing;
+  const CalibrationMarkers(
+    this.capturedAtMonotonicMs,
+    this.markers, {
+    this.cameraFacing,
+  });
 
   static CalibrationMarkers fromJson(Map<String, dynamic> j) =>
       CalibrationMarkers(
@@ -251,5 +256,30 @@ class CalibrationMarkers {
         ((j['markers'] as List?) ?? const [])
             .map((e) => Marker.fromJson((e as Map).cast<String, dynamic>()))
             .toList(),
+        cameraFacing:
+            ((j['source'] as Map?)?.cast<String, dynamic>())?['cameraFacing']
+                as String?,
       );
+}
+
+/// 受信: camera_changed。レンズ切替後は旧Homographyを再利用しない。
+class CameraChanged {
+  final String sessionId;
+  final String cameraFacing;
+  final int changedAtMonotonicMs;
+  const CameraChanged({
+    required this.sessionId,
+    required this.cameraFacing,
+    required this.changedAtMonotonicMs,
+  });
+
+  bool get isValid =>
+      sessionId.isNotEmpty &&
+      (cameraFacing == 'front' || cameraFacing == 'back');
+
+  static CameraChanged fromJson(Map<String, dynamic> j) => CameraChanged(
+    sessionId: j['sessionId'] as String? ?? '',
+    cameraFacing: j['cameraFacing'] as String? ?? '',
+    changedAtMonotonicMs: (j['changedAtMonotonicMs'] as num?)?.toInt() ?? 0,
+  );
 }

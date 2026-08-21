@@ -111,6 +111,13 @@ class MultiHandEngine {
     }
   }
 
+  /// 全入力を解除して、session共有のHomographyを無効化する。
+  Map<int, List<InteractionEvent>> resetCalibration() {
+    final released = releaseAll();
+    _calib.resetCalibration();
+    return released;
+  }
+
   /// カメラ正規化座標を未クリップの画面surface座標へ写す。
   /// 骨格は範囲外を保持し、描画Canvas側で画面矩形へクリップする。
   Vec2 mapToSurface(Vec2 camera) => _calib.homography?.map(camera) ?? camera;

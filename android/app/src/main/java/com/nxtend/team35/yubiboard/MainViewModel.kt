@@ -254,6 +254,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateProduction { it.copy(camera = state, notice = notice) }
     }
 
+    fun setCameraFacing(usingFrontCamera: Boolean) {
+        webSocketClient.setCameraFacing(usingFrontCamera)
+    }
+
+    fun notifyCameraChanged(usingFrontCamera: Boolean) {
+        webSocketClient.notifyCameraChanged(usingFrontCamera)
+        handleModeChanged(CaptureMode.CALIBRATION)
+    }
+
     fun submitHand(result: HandDetectionResult) {
         if (BuildConfig.DEBUG && SystemClock.uptimeMillis() < syntheticHandOverrideUntilMs) return
         publishHand(result.limitHands(currentSettings.maxHands))

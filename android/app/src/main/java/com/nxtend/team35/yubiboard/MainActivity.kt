@@ -208,6 +208,8 @@ class MainActivity : ComponentActivity() {
             previewView = previewView,
             onReady = {
                 cameraStarted = true
+                usingFrontCamera = cameraSession.isFrontFacing
+                viewModel.setCameraFacing(usingFrontCamera)
                 cameraStatus = "カメラ準備完了"
                 viewModel.updateCameraState(CameraUiState.READY)
             },
@@ -225,7 +227,7 @@ class MainActivity : ComponentActivity() {
             },
         )
         cameraSession.setFrameConsumer { image ->
-            // 前面カメラはプレビューがミラー表示されるため、解析画像も水平反転して座標系を一致させる。
+            // ArUco/MediaPipeには元画像を渡し、検出後の座標だけをプレビューに合わせる。
             val mirror = cameraSession.isFrontFacing
             if (currentMode == CaptureMode.CALIBRATION) {
                 arucoMarkerProcessor.process(image, mirror)
@@ -381,10 +383,14 @@ class MainActivity : ComponentActivity() {
             return
         }
         usingFrontCamera = cameraSession.isFrontFacing
+        viewModel.notifyCameraChanged(usingFrontCamera)
         previewView.contentDescription =
             if (usingFrontCamera) "前面カメラのプレビュー" else "背面カメラのプレビュー"
-        transientMessage =
-            if (usingFrontCamera) "前面カメラに切り替えました" else "背面カメラに切り替えました"
+        transientMessage = if (usingFrontCamera) {
+            "前面カメラに切り替えました。位置合わせをし直してください"
+        } else {
+            "背面カメラに切り替えました。位置合わせをし直してください"
+        }
     }
 
     internal fun startSyntheticTwoHandStreamForTest() {

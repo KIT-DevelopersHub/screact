@@ -4,13 +4,13 @@ Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクラ�
 
 ## 接続
 
-Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_active_hands`、`maxHands=2`とし、`capabilities`には従来値に加えて`multi_hand_landmarks_21`と`stable_hand_track_id`を含める。`maxHands`は端末の対応能力を表し、利用設定の既定は1手、任意切替時だけ2手を検出・送信する。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。
+Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_active_hands`、`maxHands=2`、選択中レンズを表す`cameraFacing=front|back`とし、`capabilities`には従来値に加えて`multi_hand_landmarks_21`と`stable_hand_track_id`を含める。`maxHands`は端末の対応能力を表し、利用設定の既定は1手、任意切替時だけ2手を検出・送信する。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。
 
 初回接続では`pairingToken`へPC画面に表示された6桁コードを設定し、`resumeToken`は省略する。認証成功時、PCは暗号学的乱数生成器で32 byteを生成し、パディングなしBase64URLへ変換した`resumeToken`を`hello_ack`へ設定する。Androidはホスト、ポート、`resumeToken`を保存し、次回起動では`pairingToken`を省略して保存済み`resumeToken`を送る。`pairingToken`と`resumeToken`は排他的で、必ずどちらか一方だけを送る。
 
 `calibrationRequired=true`ならAndroidはスマホ固定とPCでの配置確認を案内し、位置合わせモードへ入る。PCは利用者がPC上の`配置OK`を押すまでArUcoマーカーを表示しない。`配置OK`はPC内のUI操作であり、Android・PC間の新しい通信メッセージは必要としない。`calibrationRequired=false`なら通常トラッキングモードへ入る。
 
-PCアプリを起動するたびに位置合わせ状態を未完了から開始し、最初の`hello_ack`では`calibrationRequired=true`を返す。同一PCプロセス内で位置合わせ完了後に一時的な通信断が発生した場合だけ、再接続時に`calibrationRequired=false`を返して確認済み位置合わせを再利用する。Androidは必要に応じ、メモリ上に保持した`calibration_markers`を新しい`sessionId`で再送できる。手動切断、接続先変更、PCプロセス再起動では位置合わせを再利用しない。
+PCアプリを起動するたびに位置合わせ状態を未完了から開始し、最初の`hello_ack`では`calibrationRequired=true`を返す。同一PCプロセス内で位置合わせ完了後に一時的な通信断が発生し、`cameraFacing`も前回位置合わせ時と同じ場合だけ、再接続時に`calibrationRequired=false`を返して確認済み位置合わせを再利用する。Androidは必要に応じ、メモリ上に保持した`calibration_markers`を新しい`sessionId`で再送できる。手動切断、接続先変更、PCプロセス再起動では位置合わせを再利用しない。
 
 6桁の`pairingToken`はアプリ終了後に保存しない。Androidは`resumeToken`をAndroid Keystoreの非エクスポート鍵で暗号化して保存する。PCは`SHA-256(resumeToken)`だけを`deviceId`へ紐づけて永続化し、受信値のハッシュを定数時間比較する。MVPでは自動ローテーションを行わず、再ペアリング時だけ旧トークンを失効して新しい値を発行する。利用者が`接続先を変更`または`このPCを忘れる`を選んだ場合、Androidは保存したホスト、ポート、`resumeToken`を削除する。
 
@@ -27,13 +27,13 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 初回接続例:
 
 ```json
-{"schemaVersion":1,"messageType":"hello","deviceId":"android-a1b2c3d4","client":"yubiboard-android","clientVersion":"0.1.0","pairingToken":"123456","interactionProfile":"two_users_two_active_hands","maxHands":2,"coordinateSpace":"normalized_camera","capabilities":["aruco_calibration","hand_landmarks_21","multi_hand_landmarks_21","stable_hand_track_id","calibration_status","hello_error","trusted_reconnect"]}
+{"schemaVersion":1,"messageType":"hello","deviceId":"android-a1b2c3d4","client":"yubiboard-android","clientVersion":"0.1.0","pairingToken":"123456","interactionProfile":"two_users_two_active_hands","maxHands":2,"coordinateSpace":"normalized_camera","cameraFacing":"back","capabilities":["aruco_calibration","hand_landmarks_21","multi_hand_landmarks_21","stable_hand_track_id","calibration_status","hello_error","trusted_reconnect"]}
 ```
 
 信頼済み再接続例:
 
 ```json
-{"schemaVersion":1,"messageType":"hello","deviceId":"android-a1b2c3d4","client":"yubiboard-android","clientVersion":"0.1.0","resumeToken":"opaque-high-entropy-token","interactionProfile":"two_users_two_active_hands","maxHands":2,"coordinateSpace":"normalized_camera","capabilities":["aruco_calibration","hand_landmarks_21","multi_hand_landmarks_21","stable_hand_track_id","calibration_status","hello_error","trusted_reconnect"]}
+{"schemaVersion":1,"messageType":"hello","deviceId":"android-a1b2c3d4","client":"yubiboard-android","clientVersion":"0.1.0","resumeToken":"opaque-high-entropy-token","interactionProfile":"two_users_two_active_hands","maxHands":2,"coordinateSpace":"normalized_camera","cameraFacing":"back","capabilities":["aruco_calibration","hand_landmarks_21","multi_hand_landmarks_21","stable_hand_track_id","calibration_status","hello_error","trusted_reconnect"]}
 ```
 
 `hello_ack`は既存フィールドに任意の`resumeToken`と`acceptedInteractionProfile`を追加できる。2手対応PCは`acceptedInteractionProfile=two_users_two_active_hands`を返す。省略する旧PCでも接続は継続し、Androidは1手互換モードを案内する。
@@ -79,6 +79,8 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 
 完全な2手JSON例とAndroid・PCの責任分界は[2人同時操作・最大2手連携 共有シート](../two-person-two-hand-integration-sheet.md)を参照する。
 - `calibration_markers`: Android側で4 IDの配置と安定性を確認した後、ArUco ID、中心、時計回りの4頂点を正規化座標で送る。安定判定の進捗は端末UIだけに表示し、通信フィールドには含めない。
+- `source.cameraFacing`: `hand_frame`と`calibration_markers`を取得したレンズを`front|back`で送る。前面カメラでは検出後のx座標を左右反転済みとし、`mirrorCorrected=true`を送る。
+- `camera_changed`: 接続中に前面／背面を切り替えた直後、`sessionId`、`cameraFacing`、`changedAtMonotonicMs`を送る。PCは押下・描画を安全解除して旧Homographyを破棄し、`set_mode=calibration`を返して位置合わせを必須にする。
 - `slide_corners`: Android側で検出したスライドの四隅を正規化カメラ座標で送る（ArUcoを使わない位置合わせ経路）。四隅の順序は任意で、PC側が TL/TR/BR/BL に並べ替えて射影変換（ホモグラフィ）を作る。斜め・下から等、見る角度による台形歪みはこの4点に含めたまま送ってよい。位置合わせ成功時、PCは`control_message`で`tracking`への切替を返す。
 
 ```json

@@ -3,6 +3,7 @@ package com.nxtend.team35.yubiboard.network
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.CalibrationMarkersMessage
+import com.nxtend.team35.yubiboard.protocol.CameraChangedMessage
 import com.nxtend.team35.yubiboard.protocol.ControlMessage
 import com.nxtend.team35.yubiboard.protocol.HandFrameMessage
 import com.nxtend.team35.yubiboard.protocol.HandPayload
@@ -66,6 +67,8 @@ class YubiBoardWebSocketClient(
     private var pendingErrorCode: ConnectionErrorCode? = null
     private var calibrationConfirmed = false
     private var calibrationRequested = false
+    @Volatile
+    private var cameraFacing = "back"
 
     init {
         scheduler.scheduleAtFixedRate(::flushLatestHand, 0, SENDER_TICK_MS, TimeUnit.MILLISECONDS)
@@ -111,6 +114,35 @@ class YubiBoardWebSocketClient(
                 AppDiagnostics.increment("network.calibration_replaced")
             }
         }
+    }
+
+    fun notifyCameraChanged(usingFrontCamera: Boolean) {
+        synchronized(lock) {
+            cameraFacing = if (usingFrontCamera) "front" else "back"
+            latestHand.set(null)
+            latestCalibration.set(null)
+            lastStableCalibration.set(null)
+            calibrationConfirmed = false
+            calibrationRequested = true
+            val socket = webSocket ?: return
+            val activeSession = sessionId ?: return
+            val encoded = ProtocolCodec.encode(
+                CameraChangedMessage(
+                    sessionId = activeSession,
+                    cameraFacing = cameraFacing,
+                    changedAtMonotonicMs = monotonicMs(),
+                ),
+            )
+            if (socket.send(encoded)) {
+                AppDiagnostics.event("network", "camera_changed", mapOf("facing" to cameraFacing))
+            } else {
+                AppDiagnostics.increment("network.send_failures")
+            }
+        }
+    }
+
+    fun setCameraFacing(usingFrontCamera: Boolean) {
+        cameraFacing = if (usingFrontCamera) "front" else "back"
     }
 
     fun setMaxFrameRate(framesPerSecond: Int) {
@@ -269,6 +301,7 @@ class YubiBoardWebSocketClient(
                 result.sourceWidth,
                 result.sourceHeight,
                 mirrorCorrected = result.mirrorCorrected,
+                cameraFacing = result.cameraFacing,
             ),
             hands = hands,
             hand = if (primary != null) {
@@ -367,6 +400,7 @@ class YubiBoardWebSocketClient(
                 result.sourceWidth,
                 result.sourceHeight,
                 mirrorCorrected = result.mirrorCorrected,
+                cameraFacing = result.cameraFacing,
             ),
             markers = result.markers.map { marker ->
                 MarkerPayload(
@@ -634,6 +668,7 @@ class YubiBoardWebSocketClient(
                             clientVersion = clientVersion,
                             pairingToken = config.pairingToken,
                             resumeToken = config.resumeToken,
+                            cameraFacing = cameraFacing,
                         ),
                     )
                 webSocket.send(encoded)

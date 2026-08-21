@@ -11,6 +11,7 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.nxtend.team35.yubiboard.camera.toCorrectedBitmap
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 
 class HandLandmarkerProcessor(
     context: Context,
@@ -25,6 +26,7 @@ class HandLandmarkerProcessor(
     private var handLandmarker: HandLandmarker? = null
     private val frameTimes = ArrayDeque<Long>()
     private val trackingStateMachine = TrackingStateMachine()
+    private val pendingMirrorByTimestamp = ConcurrentHashMap<Long, Boolean>()
 
     init {
         require(maxHands in 1..HandTrackAssigner.MAX_HANDS)
@@ -55,10 +57,16 @@ class HandLandmarkerProcessor(
 
         val capturedAt = SystemClock.uptimeMillis()
         AppDiagnostics.increment("hand.frames_submitted")
-        val correctedBitmap = image.toCorrectedBitmap(mirror)
+        // MediaPipeには鏡像化していない画像を渡す。撮影時のレンズ状態を時刻へ
+        // 紐付け、非同期結果の座標だけをミラープレビュー座標へ反転する。
+        val correctedBitmap = image.toCorrectedBitmap()
         val mpImage = BitmapImageBuilder(correctedBitmap).build()
+        pendingMirrorByTimestamp[capturedAt] = mirror
         runCatching { detector.detectAsync(mpImage, capturedAt) }
-            .onFailure(onError)
+            .onFailure {
+                pendingMirrorByTimestamp.remove(capturedAt)
+                onError(it)
+            }
     }
 
     private fun handleResult(result: HandLandmarkerResult, input: com.google.mediapipe.framework.image.MPImage) {
@@ -68,6 +76,14 @@ class HandLandmarkerProcessor(
             frameTimes.removeFirst()
         }
 
+        val mirror = pendingMirrorByTimestamp.remove(result.timestampMs()) ?: run {
+            AppDiagnostics.event(
+                "vision",
+                "hand_result_context_missing",
+                mapOf("timestampMs" to result.timestampMs()),
+            )
+            return
+        }
         val candidates = result.landmarks().mapIndexedNotNull { index, rawLandmarks ->
             val landmarks = rawLandmarks.map { point ->
                 LandmarkPoint(point.x(), point.y(), point.z())
@@ -78,11 +94,12 @@ class HandLandmarkerProcessor(
                 null
             } else {
                 val category = result.handedness().getOrNull(index)?.firstOrNull()
-                HandCandidate(
+                val candidate = HandCandidate(
                     landmarks = landmarks,
                     handedness = category?.categoryName()?.uppercase(),
                     handednessScore = category?.score(),
                 )
+                if (mirror) candidate.mirrorHorizontally() else candidate
             }
         }
         val hands = trackAssigner.assign(candidates, result.timestampMs())
@@ -106,6 +123,7 @@ class HandLandmarkerProcessor(
                 "fps" to frameTimes.size * 1000f / FPS_WINDOW_MS,
                 "inferenceMs" to (now - result.timestampMs()).coerceAtLeast(0),
                 "trackingState" to trackingState,
+                "mirrored" to mirror,
                 "indexTips" to hands.joinToString("|") { hand ->
                     hand.landmarks.getOrNull(8)?.let { "${hand.trackId}:${it.x},${it.y},${it.z}" }.orEmpty()
                 },
@@ -120,6 +138,7 @@ class HandLandmarkerProcessor(
                 trackingState = trackingState,
                 inferenceTimeMs = (now - result.timestampMs()).coerceAtLeast(0),
                 framesPerSecond = frameTimes.size * 1000f / FPS_WINDOW_MS,
+                cameraFacing = if (mirror) "front" else "back",
             ),
         )
     }
@@ -127,6 +146,7 @@ class HandLandmarkerProcessor(
     override fun close() {
         handLandmarker?.close()
         handLandmarker = null
+        pendingMirrorByTimestamp.clear()
     }
 
     companion object {

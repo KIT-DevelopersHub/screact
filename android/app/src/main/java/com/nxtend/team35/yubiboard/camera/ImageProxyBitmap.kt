@@ -5,15 +5,7 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import androidx.camera.core.ImageProxy
 
-/**
- * 解析用ビットマップを取り出し、回転とミラーを補正して返す。
- *
- * Androidは前面カメラのプレビューを左右反転（ミラー）して表示するが、解析ストリーム
- * （手検出やArUcoに渡す画像）はミラーされない。補正しないと前面カメラ時だけランドマークの
- * x座標が見た目と左右逆になる。[mirror] が true のとき、回転後の表示座標系で水平反転し、
- * ミラープレビューと座標系を一致させる。背面カメラでは [mirror] は false で従来どおり。
- */
-fun ImageProxy.toCorrectedBitmap(mirror: Boolean = false): Bitmap {
+fun ImageProxy.toCorrectedBitmap(): Bitmap {
     val rotationDegrees = imageInfo.rotationDegrees
     val crop = Rect(cropRect)
     // CameraX's conversion handles the RGBA plane's channel order and stride.
@@ -31,19 +23,14 @@ fun ImageProxy.toCorrectedBitmap(mirror: Boolean = false): Bitmap {
     } else {
         Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height())
     }
-    if (rotationDegrees == 0 && !mirror) return cropped
-    val matrix = Matrix().apply {
-        if (rotationDegrees != 0) postRotate(rotationDegrees.toFloat())
-        // 回転後（＝表示座標系）で水平反転し、前面カメラのミラープレビューに合わせる。
-        if (mirror) postScale(-1f, 1f)
-    }
+    if (rotationDegrees == 0) return cropped
     return Bitmap.createBitmap(
         cropped,
         0,
         0,
         cropped.width,
         cropped.height,
-        matrix,
+        Matrix().apply { postRotate(rotationDegrees.toFloat()) },
         true,
     )
 }
