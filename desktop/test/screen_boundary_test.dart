@@ -26,10 +26,8 @@ HandFrame _withLandmark(HandFrame source, int index, Vec2 point) {
   );
 }
 
-HandFrame _scrollHand(int frameId, Vec2 tip) {
-  final source = _hand(frameId, tip);
-  return _withLandmark(source, HandFrame.middleTip, Vec2(tip.x + 0.12, tip.y));
-}
+HandFrame _scrollHand(int frameId, Vec2 center) =>
+    MockHand.goodSign(frameId: frameId, center: center);
 
 Iterable<InteractionKind> _kinds(List<InteractionEvent> events) =>
     events.map((event) => event.kind);
@@ -138,17 +136,25 @@ void main() {
       expect(draw.screen.y, closeTo(0.5, 1e-9));
     });
 
-    test('画面外でスクロール差分を生成せず、再入場後はアンカーを作り直す', () {
+    test('グッドサインは画面内でスクロールし、画面外では出さず再入場後に再開する', () {
       final engine = _engine();
-      expect(engine.onFrame(_scrollHand(1, const Vec2(0.4, 0.5))), isEmpty);
-      final moving = engine.onFrame(_scrollHand(2, const Vec2(0.45, 0.5)));
-      expect(_kinds(moving), contains(InteractionKind.scroll));
+      // 画面内: グッドサインの各フレームでスクロールを送る（一定量）。
+      expect(
+        _kinds(engine.onFrame(_scrollHand(1, const Vec2(0.4, 0.5)))),
+        contains(InteractionKind.scroll),
+      );
+      expect(
+        _kinds(engine.onFrame(_scrollHand(2, const Vec2(0.45, 0.5)))),
+        contains(InteractionKind.scroll),
+      );
 
-      final exit = engine.onFrame(_scrollHand(3, const Vec2(-0.05, 0.5)));
+      // 画面外: スクロールを出さず pointerExit だけ。
+      final exit = engine.onFrame(_scrollHand(3, const Vec2(-0.2, 0.5)));
       expect(_kinds(exit), [InteractionKind.pointerExit]);
+
+      // 再入場は安定フレームを待ってから再開する（最初の1フレームは待機）。
       expect(engine.onFrame(_scrollHand(4, const Vec2(0.6, 0.5))), isEmpty);
-      expect(engine.onFrame(_scrollHand(5, const Vec2(0.6, 0.5))), isEmpty);
-      final resumed = engine.onFrame(_scrollHand(6, const Vec2(0.62, 0.5)));
+      final resumed = engine.onFrame(_scrollHand(5, const Vec2(0.62, 0.5)));
       expect(_kinds(resumed), contains(InteractionKind.scroll));
     });
   });

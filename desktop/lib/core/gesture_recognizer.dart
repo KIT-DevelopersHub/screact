@@ -10,6 +10,8 @@ class HandPose {
   final bool indexUp;
   final bool middleUp;
   final int extendedFingers;
+  final bool thumbExtended; // 親指だけを立てているか（グッドサイン判定用）
+  final bool goodSign; // グッドサイン＝親指を立て、他4指を折り曲げた状態（スクロール）
   const HandPose({
     required this.indexTip,
     required this.middleTip,
@@ -18,6 +20,8 @@ class HandPose {
     required this.indexUp,
     required this.middleUp,
     required this.extendedFingers,
+    required this.thumbExtended,
+    required this.goodSign,
   });
 
   /// 描画の筆点＝人差し指先端と中指先端の中間点。
@@ -116,6 +120,7 @@ class GestureRecognizer {
     }
     final wrist = f.at(HandFrame.wrist)!.xy;
     final indexMcp = f.at(HandFrame.indexMcp)!.xy;
+    final thumbMcp = f.at(HandFrame.thumbMcp)!.xy;
     final thumbTip = f.at(HandFrame.thumbTip)!.xy;
     final indexTip = f.at(HandFrame.indexTip)!.xy;
     final middleTip = f.at(HandFrame.middleTip)!.xy;
@@ -148,6 +153,13 @@ class GestureRecognizer {
     final extended =
         [indexUp, middleUp, ringUp, pinkyUp].where((e) => e).length;
 
+    // 親指の伸展: 親指先端が付け根(thumbMcp)から手のスケール比で十分伸びているか。
+    // 親指は上下左右どの向きにも立つため、手首からの距離ではなく親指自身の長さで
+    // 判定する（向きに依存せずグッドサインを検出できる）。
+    final thumbExtended = thumbTip.distanceTo(thumbMcp) > scale * 0.8;
+    // グッドサイン: 親指だけ立て、人差し指〜小指の4本は折り曲げている。
+    final goodSign = thumbExtended && extended == 0;
+
     return HandPose(
       indexTip: indexTip,
       middleTip: middleTip,
@@ -156,6 +168,8 @@ class GestureRecognizer {
       indexUp: indexUp,
       middleUp: middleUp,
       extendedFingers: extended,
+      thumbExtended: thumbExtended,
+      goodSign: goodSign,
     );
   }
 }
