@@ -232,6 +232,10 @@ class YubiBoardWebSocketClient(
         val listener = SocketListener(config, reconnecting)
         val openedSocket = httpClient.newWebSocket(request, listener)
         webSocket = openedSocket
+    }
+
+    /** hello_ack の待ち時間はTCP/WebSocket接続ではなく、hello送信後から数える。 */
+    private fun scheduleHelloAckTimeout(openedSocket: WebSocket) {
         scheduler.schedule(
             {
                 synchronized(lock) {
@@ -569,6 +573,7 @@ class YubiBoardWebSocketClient(
             if (webSocket !== socket || manuallyStopped) return
             AppDiagnostics.increment("network.disconnects")
             AppDiagnostics.event("network", "socket_ended", mapOf("detail" to detail))
+            webSocket = null
             sessionId = null
             heartbeatTask?.cancel(false)
             val errorCode = pendingErrorCode ?: ConnectionErrorCode.UNREACHABLE
@@ -656,6 +661,11 @@ class YubiBoardWebSocketClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             synchronized(lock) {
                 if (this@YubiBoardWebSocketClient.webSocket !== webSocket || manuallyStopped) return
+                AppDiagnostics.event(
+                    "network",
+                    "websocket_opened",
+                    mapOf("responseCode" to response.code),
+                )
                 publish(
                     ConnectionSnapshot(
                         ConnectionStatus.AWAITING_ACK,
@@ -674,6 +684,7 @@ class YubiBoardWebSocketClient(
                 webSocket.send(encoded)
                 AppDiagnostics.increment("network.bytes_sent", encoded.toByteArray().size.toLong())
                 AppDiagnostics.event("network", "hello_sent", mapOf("bytes" to encoded.toByteArray().size))
+                scheduleHelloAckTimeout(webSocket)
             }
         }
 
@@ -686,6 +697,14 @@ class YubiBoardWebSocketClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            AppDiagnostics.event(
+                "network",
+                "websocket_failure",
+                mapOf(
+                    "exception" to t.javaClass.simpleName,
+                    "responseCode" to response?.code,
+                ),
+            )
             handleSocketEnded(webSocket, t.message ?: "通信エラー")
         }
     }

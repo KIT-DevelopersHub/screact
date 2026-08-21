@@ -133,6 +133,53 @@ class YubiBoardWebSocketClientTest {
     }
 
     @Test
+    fun `hello ack timeout starts after a delayed websocket upgrade`() {
+        val server = MockWebServer()
+        val connected = CountDownLatch(1)
+        val serverSocket = AtomicReference<WebSocket>()
+        server.enqueue(
+            MockResponse()
+                .setHeadersDelay(6, TimeUnit.SECONDS)
+                .withWebSocketUpgrade(
+                    object : WebSocketListener() {
+                        override fun onOpen(webSocket: WebSocket, response: Response) {
+                            serverSocket.set(webSocket)
+                        }
+
+                        override fun onMessage(webSocket: WebSocket, text: String) {
+                            if (text.contains("\"messageType\":\"hello\"")) {
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"delayed-upgrade","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":false}""",
+                                )
+                            }
+                        }
+                    },
+                )
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {
+                if (it.status == ConnectionStatus.CONNECTED) connected.countDown()
+            },
+            onModeChanged = {},
+        )
+        try {
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, pairingToken = "123456"))
+
+            // 旧実装はnewWebSocket直後から5秒を数え、upgrade完了前に切断していた。
+            assertTrue(connected.await(9, TimeUnit.SECONDS))
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            client.close()
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `invalid resume token stops automatic retry and returns to initial connection`() {
         val server = MockWebServer()
         val invalidated = CountDownLatch(1)

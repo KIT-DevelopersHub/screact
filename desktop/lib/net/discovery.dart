@@ -219,13 +219,27 @@ Future<void> triggerLocalNetworkPrompt({
   );
 }
 
-/// サブネットのブロードキャストアドレス（/24 前提の簡易版）。
-/// 255.255.255.255 が届かないAP向けの補助として併送する。
+/// サブネットのブロードキャストアドレス。
+///
+/// 通常は既存互換の/24簡易計算を使う。iPhoneテザリングで固定的に使われる
+/// 172.20.10.0/28だけは正しいdirected broadcast（.15）を返し、limited
+/// broadcastが間欠的に落ちる環境でもofferを到達させる。
 String? subnetBroadcastOf(String? ip) {
   if (ip == null) return null;
   final parts = ip.split('.');
   if (parts.length != 4) return null;
-  return '${parts[0]}.${parts[1]}.${parts[2]}.255';
+  final octets = parts.map(int.tryParse).toList();
+  if (octets.any((part) => part == null || part < 0 || part > 255)) {
+    return null;
+  }
+  if (octets[0] == 172 &&
+      octets[1] == 20 &&
+      octets[2] == 10 &&
+      octets[3]! >= 1 &&
+      octets[3]! <= 14) {
+    return '172.20.10.15';
+  }
+  return '${octets[0]}.${octets[1]}.${octets[2]}.255';
 }
 
 /// UDP offerを出す物理IFをOSの経路選択任せにしないためのbind先。

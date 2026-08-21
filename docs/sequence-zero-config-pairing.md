@@ -149,9 +149,9 @@ WindowsではiPhoneのWi-FiテザリングとApple Mobile Device Ethernetが同�
 画面に表示したWi-Fi IPv4へbindし、limited broadcastがUSB側へ誤配送されることを
 避けます。Wi-Fi IPv4へbindできない場合だけ`0.0.0.0`へフォールバックします。
 
-この対策は送信インターフェースの選択だけを限定的に変えます。UDPメッセージ、ポート、
-認証、WebSocket経路は変更しません。サブネット補助宛先の`/24`仮定も残りますが、
-limited broadcastが利用できるiPhoneテザリングでは自動発見できます。
+この対策は送信インターフェースの選択と補助broadcast宛先だけを限定的に変えます。
+iPhoneテザリングの`172.20.10.0/28`ではdirected broadcast `172.20.10.15`も併送します。
+UDPメッセージ、ポート、認証、WebSocket経路は変更しません。
 
 ## legacy select / ACK
 
@@ -171,10 +171,22 @@ legacy select/ACKは互換試験に限定します。
 ## 既知の制約
 
 - UDP broadcastはルータ、企業Wi-Fi、ゲストネットワーク、VPN、OS権限で遮断され得る。
-- サブネット補助宛先は現在`/24`を仮定して計算する。
+- サブネット補助宛先はiPhoneテザリングの`172.20.10.0/28`以外では`/24`を仮定する。
 - 6桁tokenは同一LANへbroadcastされるため、高機密な認証方式ではない。
 - PCは単一WebSocket端末のみを受理し、AirDrop風の事前選択は行わない。
 - 自動発見失敗時は手動接続が必要。
+
+## iPhoneテザリング実機の反復結果（2026-08-22）
+
+WindowsとXiaomi 25118PC98GをiPhoneテザリングへ接続し、debug専用の無操作ハーネスで
+Android先行5回、Desktop先行5回を実行した。成功6回のoffer受信から`hello_ack`までは
+158〜594ms、`hello_ack_timeout`は0回だった。一方、4回は45秒以内にofferを受信できず、
+Wi-Fi無効化・再有効化後の復帰も0/3だった。このため自動接続はまだ実機合格扱いにしない。
+
+復帰失敗時はWi-Fi再参加後にWebSocket upgradeと`hello`送信まで進むが、新ソケットが
+閉じられた。Desktopが切断済みの旧ソケットを接続枠として保持している可能性が高い、
+というのが現時点のログからの推定である。初回UDP不達とstale session解消は後続課題で、
+デモ時のフォールバックは引き続き手動IP・ポート・6桁コード入力とする。
 
 ## 回帰テスト
 

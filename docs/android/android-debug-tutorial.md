@@ -56,6 +56,20 @@ Desktopも`flutter run -d windows --dart-define=YUBI_AUTOFLOW=true`で起動す�
 画面操作なしでWebSocket待受とUDP offer送信を開始できる。Androidの`YubiBoardDiag`ログで
 `listen_started`、`offer_received`、`connect_from_offer`、`hello_ack`の順を確認する。
 
+iPhoneテザリングで接続順を入れ替えた反復試験とWi-Fi再接続試験まで自動実行する場合は、
+既存のFlutter／Gradle／ADBだけを使う次のスクリプトを実行する。結果はIP、6桁コード、
+session IDを含めず`android/debug-results/autoconnect-日時/`へ保存され、Git差分には入らない。
+
+```powershell
+.\android\tools\iphone-hotspot-autoconnect-smoke.ps1 -Build
+```
+
+既定の合格条件はAndroid先行5回、Desktop先行5回の全成功、offer受信から各10秒以内、
+`hello_ack_timeout`なし、Wi-Fi再接続3回の全成功である。ログでは
+`websocket_opened`と`hello_sent`も分けて記録するため、UDP、WebSocket upgrade、
+認証応答のどこで失敗したかをCSVから切り分けられる。Windows debugアプリのcold startは
+環境によって20秒を超えるため、offer開始までの猶予は45秒とし、接続時間とは分けて記録する。
+
 ## 3. debug APKの画面構成
 
 debug APKは初回にデバッグ画面を開く。release APKは常に本番画面で、デバッグ切替を表示しない。

@@ -159,10 +159,13 @@ void main() {
       );
     });
 
-    test('subnetBroadcastOf は /24 のブロードキャストを作る', () {
+    test('subnetBroadcastOf は通常/24、iPhoneテザリングは/28で作る', () {
       expect(subnetBroadcastOf('192.168.1.23'), '192.168.1.255');
+      expect(subnetBroadcastOf('172.20.10.3'), '172.20.10.15');
+      expect(subnetBroadcastOf('172.20.10.14'), '172.20.10.15');
       expect(subnetBroadcastOf(null), isNull);
       expect(subnetBroadcastOf('bad'), isNull);
+      expect(subnetBroadcastOf('192.168.1.999'), isNull);
     });
 
     test('discoveryBindAddress は表示中のIPv4を優先し不正値ではanyへ戻る', () {
