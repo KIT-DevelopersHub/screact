@@ -400,6 +400,26 @@ void main() {
       expect(e.primaryTrackIdOf(stillOutside), isNull);
     });
 
+    test('最初からピンチ中でも主トラックを選びpressDownを補完する', () {
+      final e = calibrated();
+      InputFrame pinching(int frameId) => InputFrame.parse(
+        multiHandFrame(frameId, [
+          pointerTrack(7, const Vec2(0.4, 0.5), pinch: true),
+        ]),
+      )!;
+
+      final first = e.onInputFrame(pinching(1))!;
+      expect(e.primaryTrackId, isNull);
+      expect(e.primaryEventsOf(first), isNull);
+
+      final second = e.onInputFrame(pinching(2))!;
+      expect(e.primaryTrackId, 7);
+      expect(
+        e.primaryEventsOf(second)!.map((event) => event.kind),
+        [InteractionKind.pressDown, InteractionKind.pressMove],
+      );
+    });
+
     test('主トラック消失フレームは旧解除だけを選び、次候補を後で引き継ぐ', () {
       final e = calibrated();
       e.onInputFrame(twoPointerHands(1));

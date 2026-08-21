@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "desktop_input_controller.h"
 #include "overlay_mode_controller.h"
 #include "win32_window.h"
 
@@ -32,6 +33,9 @@ class FlutterWindow : public Win32Window {
 
   // スライドの上にインクを重ねるオーバーレイモード（yubiboard/overlay_window）。
   std::unique_ptr<OverlayModeController> overlay_mode_;
+
+  // OS への実マウス入力注入（SendInput・yubiboard/desktop_input）。
+  std::unique_ptr<DesktopInputController> desktop_input_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
