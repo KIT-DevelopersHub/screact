@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'wifi_ip.dart';
+
 /// Screact のゼロコンフィグ・ペアリング（UDP発見プロトコル）。
 ///
 /// Desktop が「始める」押下から UDP ブロードキャストで offer を投げ、待受を
@@ -263,6 +265,16 @@ class DesktopDiscovery extends ChangeNotifier {
   /// テストでは ['127.0.0.1'] 等に差し替える）。
   final List<String>? broadcastAddresses;
 
+  /// OSのIF列挙。テストでは遅延させ、停止と競合してもUDP送信が復活しないことを
+  /// 検証する。明示送信先がある場合は呼び出さない。
+  final Future<List<String>> Function()? subnetBroadcastsProvider;
+
+  /// start() 時に列挙した、全物理IFの /24 ディレクテッドブロードキャスト。
+  /// offer/select を `_wifiIp` 由来の1サブネットだけでなく全物理IFへ併送し、
+  /// 実際にスマホと同じL2にあるIFが `ip` と異なる環境でも到達させる。
+  /// broadcastAddresses（テスト差し替え）指定時は使わない。
+  List<String> _autoTargets = const [];
+
   RawDatagramSocket? _socket;
   Timer? _offerTimer;
   Timer? _selectTimer;
@@ -283,6 +295,7 @@ class DesktopDiscovery extends ChangeNotifier {
     this.selectResendInterval = const Duration(milliseconds: 300),
     this.selectMaxAttempts = 20,
     this.broadcastAddresses,
+    this.subnetBroadcastsProvider,
     this.onLog,
   });
 
@@ -308,7 +321,12 @@ class DesktopDiscovery extends ChangeNotifier {
     final custom = broadcastAddresses;
     if (custom != null) return custom;
     final subnet = subnetBroadcastOf(ip);
-    return ['255.255.255.255', if (subnet != null) subnet];
+    // 255.255.255.255 を先頭に保ちつつ、サブネット/全物理IFの.255を重複排除で併送。
+    return <String>{
+      '255.255.255.255',
+      if (subnet != null) subnet,
+      ..._autoTargets,
+    }.toList();
   }
 
   Future<void> start() async {
@@ -327,6 +345,24 @@ class DesktopDiscovery extends ChangeNotifier {
         }
         s.broadcastEnabled = true;
         _socket = s;
+        _autoTargets = const [];
+        // 全物理IFの.255を併送先に加える（ベストエフォート・失敗は無視）。
+        // broadcastAddresses 指定時はテストの決定性を保つため列挙自体を行わない。
+        if (broadcastAddresses == null) {
+          try {
+            final autoTargets =
+                await (subnetBroadcastsProvider ?? localSubnetBroadcasts)();
+            if (generation == _generation) _autoTargets = autoTargets;
+          } catch (_) {
+            // 列挙失敗時は 255.255.255.255＋サブネットのみで継続。
+          }
+        }
+        // IF列挙を待つ間に停止された場合、閉じたsocketへlistenやTimerを
+        // 再登録しない。start直後の「接続を止める」で発見が復活する競合を防ぐ。
+        if (generation != _generation || !identical(_socket, s)) {
+          s.close();
+          return;
+        }
         s.listen(_onSocketEvent, onError: (Object e) => _log('受信エラー: $e'));
         _log(
           'UDPブロードキャスト開始 → ${_targets.join(", ")}:$discoveryPort '

@@ -62,6 +62,21 @@ void main() {
     });
   });
 
+  group('directedBroadcastsOf（UDP offerの併送先）', () {
+    test('物理IFの/24宛先を重複排除し、仮想IFと不正IPv4を除外する', () {
+      expect(
+        directedBroadcastsOf(const [
+          InterfaceAddrs('Wi-Fi', ['192.168.10.42']),
+          InterfaceAddrs('Ethernet', ['10.2.3.4', '192.168.10.5']),
+          InterfaceAddrs('VirtualBox Host-Only Network', ['192.168.56.1']),
+          InterfaceAddrs('utun4', ['100.64.0.1']),
+          InterfaceAddrs('Ethernet 2', ['999.1.2.3', 'not-an-ip']),
+        ]),
+        ['192.168.10.255', '10.2.3.255'],
+      );
+    });
+  });
+
   group('6桁コード', () {
     test('generatePairingCode は6桁の数字', () {
       for (var i = 0; i < 20; i++) {

@@ -178,7 +178,14 @@ class _HomePageState extends State<HomePage> {
     _connLog.addListener(_handleLogChanged);
     _connLog.init();
     _refreshWifiIp();
-    if (Platform.isMacOS) unawaited(_refreshAccessibility());
+    if (Platform.isMacOS) {
+      unawaited(_refreshAccessibility());
+      // 起動直後にLAN宛て送信を1回行い、macOSの「ローカルネットワーク」権限
+      // プロンプトを先出しする（許可が遅れると offer/select が黙って落ち、
+      // 「PCは検索中・スマホは待ちのまま」になる）。_wifiIp は init時点で未取得
+      // でも良い（その場合は 255.255.255.255 宛てに送られる）。ベストエフォート。
+      unawaited(triggerLocalNetworkPrompt(ip: _wifiIp, onLog: _handleServerLog));
+    }
     if (_autoFlow) scheduleMicrotask(_startPairing);
   }
 
@@ -756,11 +763,22 @@ class _HomePageState extends State<HomePage> {
                   borderColor: const Color(0xFFB8B8B8),
                   child: Column(
                     children: [
-                      // UDP不可環境向けフォールバック: QRを自動表示（この手動接続
-                      // パネル自体がUDPタイムアウトで自動展開されるため、QRも自動で
-                      // 出る）。読み取れない場合の手入力用にIP/ポートも併記する。
-                      if (_pairingUri case final uri?) ...[
-                        PairingQrPanel(uri: uri),
+                      // UDP不可環境向けフォールバック: QRは固定配置のボタン群に
+                      // 隠れないよう、インライン表示ではなくダイアログで開く。
+                      // 読み取れない場合の手入力用にIP/ポートも下に併記する。
+                      if (_pairingUri != null) ...[
+                        ProductionButton(
+                          key: const ValueKey('show-qr'),
+                          width: 520,
+                          height: 64,
+                          label: 'QRコードを表示',
+                          icon: Icons.qr_code_2_rounded,
+                          onPressed: _showPairingQr,
+                          textStyle: const TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                         const Divider(height: 24, thickness: 1.5),
                       ],
                       const Text(
@@ -933,7 +951,8 @@ class _HomePageState extends State<HomePage> {
         PairingPhase.searching => 'スマホを検索しています…（スマホ側のアプリを開いてください）',
         PairingPhase.waitingConnect => 'スマホが見つかりました。接続しています…',
         PairingPhase.timeout =>
-          'スマホが見つかりません。同じWi-Fiにつないで「もう一度さがす」を押してください',
+          'スマホが見つかりません。同じWi-Fiにつないで「もう一度さがす」を押してください'
+              '${Platform.isMacOS ? '\n\nつながらないときは、システム設定 > プライバシーとセキュリティ > ローカルネットワーク でこのアプリの通信を許可してください。' : ''}',
         PairingPhase.idle => 'スマホからの接続を待っています…',
       };
     }
@@ -1694,6 +1713,47 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
+    );
+  }
+
+  /// QRを固定ボタン群に隠さないよう、ダイアログで前面に表示する。
+  /// スマホのカメラで `screact://pair?...` を読み取らせ、読めない場合の
+  /// 手入力用に IP/ポートも併記する（認証は hello の pairingToken 1本のまま）。
+  Future<void> _showPairingQr() async {
+    final uri = _pairingUri;
+    if (uri == null) return;
+    await showDialog<void>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('QRコードで接続'),
+            content: SizedBox(
+              width: 380,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PairingQrPanel(uri: uri),
+                    const Divider(height: 24, thickness: 1.5),
+                    const Text(
+                      '読み取れないときは、次の値を手で入力してください',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    _diagnosticRow('IPアドレス', _displayIp),
+                    _diagnosticRow('ポート', '$_displayPort'),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('閉じる'),
+              ),
+            ],
+          ),
     );
   }
 
