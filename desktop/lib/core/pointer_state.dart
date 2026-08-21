@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset, Path, Size;
+
 import 'package:flutter/foundation.dart';
 
 import 'geom.dart';
@@ -14,6 +16,43 @@ class InkStroke {
     this.trackId = OverlayModel.legacyTrackId,
     this.colorSlot = 0,
   });
+
+  // 描画Pathのキャッシュ。完了ストロークは点数が変化しないため、一度構築した
+  // Pathを再利用して毎フレームの再構築（O(全点数)）を避ける。描画中の
+  // ストロークだけ点数が増えるので、そのフレームだけ再構築される。
+  Path? _cachedPath;
+  Size? _cachedSize;
+  int _cachedCount = -1;
+
+  /// 画面サイズに合わせた2次ベジェPath（中点スムージング）。点が2つ未満の
+  /// ストロークは呼び出し側が点／円で描くため、ここでは扱わない。
+  Path pathFor(Size size) {
+    if (_cachedPath != null &&
+        _cachedSize == size &&
+        _cachedCount == points.length) {
+      return _cachedPath!;
+    }
+    final path = _buildPath(size);
+    _cachedPath = path;
+    _cachedSize = size;
+    _cachedCount = points.length;
+    return path;
+  }
+
+  Path _buildPath(Size size) {
+    Offset at(Vec2 v) => Offset(v.x * size.width, v.y * size.height);
+    final path = Path();
+    final first = at(points.first);
+    path.moveTo(first.dx, first.dy);
+    for (var i = 1; i < points.length - 1; i++) {
+      final c = at(points[i]);
+      final n = at(points[i + 1]);
+      path.quadraticBezierTo(c.dx, c.dy, (c.dx + n.dx) / 2, (c.dy + n.dy) / 2);
+    }
+    final last = at(points.last);
+    path.lineTo(last.dx, last.dy);
+    return path;
+  }
 }
 
 /// 1トラック分の表示状態（カーソル・押下・骨格）。
@@ -42,6 +81,11 @@ class OverlayModel extends ChangeNotifier {
 
   /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
   static const double _minPointDist = 0.002;
+
+  /// 保持するインクストロークの上限。長時間デモで無制限に増えると、毎フレーム
+  /// の再描画コストとメモリが増え続けるため、古い完了ストロークから捨てる。
+  /// 描画中（_active）のストロークは対象外。
+  static const int _maxRetainedStrokes = 240;
 
   Iterable<int> get trackIds => _tracks.keys;
   TrackVisual? track(int id) => _tracks[id];
@@ -101,6 +145,7 @@ class OverlayModel extends ChangeNotifier {
         );
         _active[trackId] = stroke;
         strokes.add(stroke);
+        _capHistory();
         break;
       case InteractionKind.drawMove:
         v.cursor = e.screen;
@@ -155,6 +200,19 @@ class OverlayModel extends ChangeNotifier {
     }
     _pruneEmpty();
     notifyListeners();
+  }
+
+  /// 上限を超えた分だけ、古い完了ストロークを先頭から捨てる。描画中の
+  /// ストロークは保持する。
+  void _capHistory() {
+    if (strokes.length <= _maxRetainedStrokes) return;
+    final activeStrokes = _active.values.toSet();
+    var removable = strokes.length - _maxRetainedStrokes;
+    strokes.removeWhere((s) {
+      if (removable <= 0 || activeStrokes.contains(s)) return false;
+      removable--;
+      return true;
+    });
   }
 
   void _pruneEmpty() {
