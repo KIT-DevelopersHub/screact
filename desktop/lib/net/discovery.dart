@@ -228,6 +228,18 @@ String? subnetBroadcastOf(String? ip) {
   return '${parts[0]}.${parts[1]}.${parts[2]}.255';
 }
 
+/// UDP offerを出す物理IFをOSの経路選択任せにしないためのbind先。
+///
+/// iPhoneテザリングではWi-FiとApple Mobile Device Ethernetが同じ
+/// 172.20.10.0/28に存在する場合がある。Wi-Fi IPへbindしてからlimited
+/// broadcastを送ることで、別IFへ出てAndroidへ届かない経路選択を防ぐ。
+InternetAddress discoveryBindAddress(String? ip) {
+  final parsed = ip == null ? null : InternetAddress.tryParse(ip);
+  return parsed?.type == InternetAddressType.IPv4
+      ? parsed!
+      : InternetAddress.anyIPv4;
+}
+
 /// 発見済みのAndroid端末。
 class DiscoveredDevice {
   final String deviceId;
@@ -338,7 +350,18 @@ class DesktopDiscovery extends ChangeNotifier {
     // アプリを落とさない。
     await runZonedGuarded(
       () async {
-        final s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+        final preferredBindAddress = discoveryBindAddress(ip);
+        late final RawDatagramSocket s;
+        try {
+          s = await RawDatagramSocket.bind(preferredBindAddress, 0);
+        } on SocketException catch (error) {
+          if (preferredBindAddress == InternetAddress.anyIPv4) rethrow;
+          _log(
+            '送信元IP ${preferredBindAddress.address} へのbind失敗: $error '
+            '— 0.0.0.0へフォールバック',
+          );
+          s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+        }
         if (generation != _generation) {
           s.close();
           return;

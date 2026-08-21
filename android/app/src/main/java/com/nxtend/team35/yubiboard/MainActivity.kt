@@ -163,6 +163,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
         AppDiagnostics.event("app", "activity_created")
+        if (BuildConfig.DEBUG &&
+            savedInstanceState == null &&
+            intent.getBooleanExtra(EXTRA_DEBUG_AUTO_DISCOVERY, false)
+        ) {
+            // ADBだけでUDP実機E2Eを再現するためのdebug APK限定導線。
+            // 保存済み接続の自動再利用を止め、必ずdiscovery_offer経路を通す。
+            viewModel.changeConnectionSettings()
+            viewModel.startAutoPairing()
+            AppDiagnostics.event("debug", "auto_discovery_started")
+        }
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         runCatching {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
@@ -466,6 +476,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val EXTRA_DEBUG_AUTO_DISCOVERY = "debugAutoDiscovery"
         private const val PROCESSOR_CLOSE_DELAY_MS = 1_000L
     }
 }

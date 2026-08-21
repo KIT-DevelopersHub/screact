@@ -142,6 +142,17 @@ sequenceDiagram
 「LAN向け送信全体が制限される」という異なる観測がありました。現行仕様は特定の
 TCC挙動を保証として扱わず、offer失敗時にタイムアウトと手動フォールバックを提供します。
 
+## WindowsとiPhoneテザリング
+
+WindowsではiPhoneのWi-FiテザリングとApple Mobile Device Ethernetが同じ
+`172.20.10.0/28`へ同時接続されることがあります。Desktopはoffer送信用UDP socketを
+画面に表示したWi-Fi IPv4へbindし、limited broadcastがUSB側へ誤配送されることを
+避けます。Wi-Fi IPv4へbindできない場合だけ`0.0.0.0`へフォールバックします。
+
+この対策は送信インターフェースの選択だけを限定的に変えます。UDPメッセージ、ポート、
+認証、WebSocket経路は変更しません。サブネット補助宛先の`/24`仮定も残りますが、
+limited broadcastが利用できるiPhoneテザリングでは自動発見できます。
+
 ## legacy select / ACK
 
 `discovery_select`、`discovery_select_ack`、select再送APIとその回帰テストは、

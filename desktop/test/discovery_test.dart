@@ -165,6 +165,13 @@ void main() {
       expect(subnetBroadcastOf('bad'), isNull);
     });
 
+    test('discoveryBindAddress は表示中のIPv4を優先し不正値ではanyへ戻る', () {
+      expect(discoveryBindAddress('172.20.10.3').address, '172.20.10.3');
+      expect(discoveryBindAddress(null), InternetAddress.anyIPv4);
+      expect(discoveryBindAddress('bad'), InternetAddress.anyIPv4);
+      expect(discoveryBindAddress('::1'), InternetAddress.anyIPv4);
+    });
+
     test('ln_probe（権限トリガ）は既存パーサに無視され例外も出さない', () async {
       // 受け側: probe が届いても発見メッセージとしては解釈されない
       final sock = await RawDatagramSocket.bind(
