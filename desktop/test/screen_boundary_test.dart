@@ -102,6 +102,30 @@ void main() {
       expect(exit.any((event) => event.screen.x == 0), isFalse);
     });
 
+    test('消しゴム中の画面外遷移は最後の有効点で安全に終了する', () {
+      final engine = _engine();
+      final down = engine.onFrame(
+        MockHand.fist(frameId: 1, tip: const Vec2(0.4, 0.5)),
+      );
+      expect(_kinds(down), contains(InteractionKind.eraseDown));
+      final start = down.singleWhere(
+        (event) => event.kind == InteractionKind.eraseDown,
+      );
+
+      final exit = engine.onFrame(
+        MockHand.fist(frameId: 2, tip: const Vec2(-0.05, 0.5)),
+      );
+      expect(
+        _kinds(exit),
+        containsAll([InteractionKind.eraseUp, InteractionKind.pointerExit]),
+      );
+      final up = exit.singleWhere(
+        (event) => event.kind == InteractionKind.eraseUp,
+      );
+      expect(up.screen.x, closeTo(start.screen.x, 1e-9));
+      expect(up.screen.y, closeTo(start.screen.y, 1e-9));
+    });
+
     test('再入場は2フレーム待ち、保持中のピンチでは再押下しない', () {
       final engine = _engine();
       engine.onFrame(_hand(1, const Vec2(0.4, 0.5), pinch: true));

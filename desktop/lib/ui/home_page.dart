@@ -20,6 +20,7 @@ import '../platform/desktop_bridge.dart';
 import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
 import 'calibration_target.dart';
+import 'color_palette.dart';
 import 'overlay_canvas.dart';
 import 'pairing_controller.dart';
 import 'pairing_qr_panel.dart';
@@ -1206,6 +1207,37 @@ class _HomePageState extends State<HomePage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    const Text(
+                      '描画色',
+                      style: TextStyle(
+                        color: ProductionDesign.textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    ColorPalette(model: _overlay),
+                    const SizedBox(width: 40),
+                    const Text(
+                      '骨格表示',
+                      style: TextStyle(
+                        color: ProductionDesign.textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Switch(
+                      key: const ValueKey('workspace-show-skeleton'),
+                      value: _showSkeleton,
+                      onChanged: _setShowSkeleton,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
                     ProductionButton(
                       key: const ValueKey('overlay-enter'),
                       width: 420,
@@ -1531,9 +1563,20 @@ class _HomePageState extends State<HomePage> {
 
   /// 骨格表示トグルの永続化先（プラグイン不要のプレーンファイル。connection_log と同流儀）。
   File? _showSkeletonPrefsFile() {
+    if (Platform.isWindows) {
+      final appData =
+          Platform.environment['LOCALAPPDATA'] ??
+          Platform.environment['APPDATA'];
+      if (appData == null || appData.isEmpty) return null;
+      return File('$appData\\yubiboard\\show_skeleton');
+    }
     final home = Platform.environment['HOME'];
-    if (home == null) return null;
-    return File('$home/Library/Application Support/yubiboard/show_skeleton');
+    if (home == null || home.isEmpty) return null;
+    if (Platform.isMacOS) {
+      return File('$home/Library/Application Support/yubiboard/show_skeleton');
+    }
+    final configHome = Platform.environment['XDG_CONFIG_HOME'];
+    return File('${configHome ?? '$home/.config'}/yubiboard/show_skeleton');
   }
 
   void _loadShowSkeleton() {
