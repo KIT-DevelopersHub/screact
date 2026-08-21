@@ -20,6 +20,10 @@ class MultiHandEngine {
 
   double _sensitivity;
   bool _smoothing;
+  bool _clickEnabled;
+  bool _penEnabled;
+  bool _eraserEnabled;
+  bool _scrollEnabled;
 
   /// 直近に採用した frameId（単調増加の検証用）。session開始/切断でリセット。
   int? _lastFrameId;
@@ -51,7 +55,11 @@ class MultiHandEngine {
 
   MultiHandEngine._(this._calib)
     : _sensitivity = _calib.recognitionSensitivity,
-      _smoothing = _calib.smoothingEnabled;
+      _smoothing = _calib.smoothingEnabled,
+      _clickEnabled = _calib.clickEnabled,
+      _penEnabled = _calib.penEnabled,
+      _eraserEnabled = _calib.eraserEnabled,
+      _scrollEnabled = _calib.scrollEnabled;
 
   // ---- 単一手エンジン互換のファサード（UI/サーバはこの形で扱う） ----
 
@@ -83,6 +91,42 @@ class MultiHandEngine {
     _calib.smoothingEnabled = value;
     for (final e in _tracks.values) {
       e.smoothingEnabled = value;
+    }
+  }
+
+  bool get clickEnabled => _clickEnabled;
+  set clickEnabled(bool value) {
+    _clickEnabled = value;
+    _calib.clickEnabled = value;
+    for (final e in _tracks.values) {
+      e.clickEnabled = value;
+    }
+  }
+
+  bool get penEnabled => _penEnabled;
+  set penEnabled(bool value) {
+    _penEnabled = value;
+    _calib.penEnabled = value;
+    for (final e in _tracks.values) {
+      e.penEnabled = value;
+    }
+  }
+
+  bool get eraserEnabled => _eraserEnabled;
+  set eraserEnabled(bool value) {
+    _eraserEnabled = value;
+    _calib.eraserEnabled = value;
+    for (final e in _tracks.values) {
+      e.eraserEnabled = value;
+    }
+  }
+
+  bool get scrollEnabled => _scrollEnabled;
+  set scrollEnabled(bool value) {
+    _scrollEnabled = value;
+    _calib.scrollEnabled = value;
+    for (final e in _tracks.values) {
+      e.scrollEnabled = value;
     }
   }
 
@@ -127,6 +171,10 @@ class MultiHandEngine {
       config: _calib.config,
       mode: _calib.mode,
       smoothingEnabled: _smoothing,
+      clickEnabled: _clickEnabled,
+      penEnabled: _penEnabled,
+      eraserEnabled: _eraserEnabled,
+      scrollEnabled: _scrollEnabled,
     );
     e.recognitionSensitivity = _sensitivity;
     e.adoptCalibration(_calib.homography, _calib.mode);

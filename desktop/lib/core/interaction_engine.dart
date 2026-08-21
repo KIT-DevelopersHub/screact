@@ -11,7 +11,11 @@ import '../protocol/messages.dart';
 ///   筆点は人差し指先端。トリガー条件（人差し指＋中指のくっつき）は不変。オーバーレイのインク専用。
 /// - OSクリック/ドラッグ = 親指と人差し指のピンチ（pressDown/pressMove/pressUp/click）
 ///   OSの実マウスイベントとして注入する。
-/// - スクロール = 二本指を立てて動かす（scroll）
+/// - スクロール = グッドサイン（親指だけを立て他4指を折る）で、親指の向きにスクロール
+///   （親指が上→上/下→下/右→右/左→左）。scroll を一定量ずつ送出する。
+///
+/// 各ジェスチャーは設定から個別にON/OFFできる（既定は全てON）。OFFのジェスチャーは
+/// 認識・実行せず、その手はポインタ移動として扱う。
 enum InteractionKind {
   pointerMove,
   drawDown, // 2本指くっつき開始（インク描画の開始）
@@ -50,6 +54,20 @@ class InteractionEngine {
   final Vec2Filter _screenFilter;
   bool _smoothingEnabled;
 
+  // ジェスチャー個別の有効/無効（既定は全てON）。OFFのジェスチャーはトリガーを
+  // 無視し、その手はポインタ移動として扱う（誤作動の抑制）。
+  bool _clickEnabled;
+  bool _penEnabled;
+  bool _eraserEnabled;
+  bool _scrollEnabled;
+
+  /// グッドサインで送るスクロールの1フレームあたりの量（画面正規化）。
+  /// ネイティブ側でピクセルへ換算する。実測で調整可能。
+  static const double _scrollStepMagnitude = 0.03;
+
+  /// 親指の向きが微小すぎてスクロール方向を確定できない不感帯（画面正規化）。
+  static const double _scrollDirDeadzone = 1e-4;
+
   /// キャリブレーションの調整値（インセット補正・安定判定・受付ソース）。
   /// UIの設定パネルから同一インスタンスを書き換えて反映する。
   final CalibrationConfig config;
@@ -75,8 +93,6 @@ class InteractionEngine {
   // グー状態機械（消しゴム）
   bool _erasing = false;
   Vec2? _lastScreen;
-  // スクロール状態
-  Vec2? _lastScrollAnchor;
   // 画面境界状態
   Vec2? _lastRawSurface;
   bool _outside = false;
@@ -93,9 +109,17 @@ class InteractionEngine {
     this.mode = EngineMode.calibration,
     CalibrationConfig? config,
     bool smoothingEnabled = true,
+    bool clickEnabled = true,
+    bool penEnabled = true,
+    bool eraserEnabled = true,
+    bool scrollEnabled = true,
   }) : _rec = recognizer ?? GestureRecognizer(),
        _screenFilter = Vec2Filter(),
        _smoothingEnabled = smoothingEnabled,
+       _clickEnabled = clickEnabled,
+       _penEnabled = penEnabled,
+       _eraserEnabled = eraserEnabled,
+       _scrollEnabled = scrollEnabled,
        config = config ?? CalibrationConfig();
 
   bool get isCalibrated => _homography != null;
@@ -144,13 +168,44 @@ class InteractionEngine {
     _resetRuntimeFilters();
   }
 
+  /// OSクリック/ドラッグ（ピンチ）を認識するか。
+  bool get clickEnabled => _clickEnabled;
+  set clickEnabled(bool value) {
+    if (value == _clickEnabled) return;
+    _clickEnabled = value;
+    _resetRuntimeFilters();
+  }
+
+  /// インク描画（人差し指＋中指のくっつき）を認識するか。
+  bool get penEnabled => _penEnabled;
+  set penEnabled(bool value) {
+    if (value == _penEnabled) return;
+    _penEnabled = value;
+    _resetRuntimeFilters();
+  }
+
+  /// 消しゴム（グー）を認識するか。消しゴムジェスチャーが有効な構成でのみ効く。
+  bool get eraserEnabled => _eraserEnabled;
+  set eraserEnabled(bool value) {
+    if (value == _eraserEnabled) return;
+    _eraserEnabled = value;
+    _resetRuntimeFilters();
+  }
+
+  /// スクロール（グッドサイン）を認識するか。
+  bool get scrollEnabled => _scrollEnabled;
+  set scrollEnabled(bool value) {
+    if (value == _scrollEnabled) return;
+    _scrollEnabled = value;
+    _resetRuntimeFilters();
+  }
+
   /// 設定変更前のヒステリシスや平滑化履歴を次フレームへ持ち越さない。
   /// 押下状態自体は保持し、次フレームの新しい設定による判定で安全に
   /// pressMove / pressUpへ遷移させる。
   void _resetRuntimeFilters() {
     _rec.reset();
     _screenFilter.reset();
-    _lastScrollAnchor = null;
   }
 
   /// ArUcoマーカーからホモグラフィを作成（位置合わせ）。
@@ -220,10 +275,13 @@ class InteractionEngine {
   ///
   /// 優先順位（相互排他）:
   ///   0. 消しゴム（グー＝全指を折り畳む・近傍のインクを消す）
-  ///   1. スクロール（2本指を立てて移動・くっつき/ピンチなし）
+  ///      ただし親指を立てたグッドサインは消しゴムから除外する
+  ///   1. スクロール（グッドサイン＝親指だけ立て・親指の向きへ一定量）
   ///   2. インク描画（人差し指＋中指がくっつく・筆点は人差し指先端）
   ///   3. OSクリック/ドラッグ（親指＋人差し指のピンチ）
   ///   4. ポインタ移動（人差し指先端）
+  ///
+  /// 各ジェスチャーが設定でOFFのときはそのトリガーを無視し、下位分岐へ流す。
   List<InteractionEvent> onFrame(HandFrame f) {
     if (mode != EngineMode.tracking) return const [];
     if (!f.detected) return _releaseAll();
@@ -246,8 +304,9 @@ class InteractionEngine {
     if (!pose.pinching) _blockPressUntilNeutral = false;
 
     // 0) 消しゴム: グー（全指を折り畳む）で近傍のインクを消す。他の全ジェスチャーに
-    // 優先し、排他的に扱う（描画/クリックが同時に走らないよう先に閉じる）。
-    if (pose.fist) {
+    // 優先し、排他的に扱う。ただし4指を折るグッドサインも fist になるため、
+    // 親指を立てた姿勢はスクロールのON/OFFにかかわらず消しゴムから除外する。
+    if (_eraserEnabled && pose.fist && !pose.goodSign) {
       final rawErase = _toSurface(pose.erasePoint);
       final screen = _filteredScreen(
         _isInside(rawErase) ? rawErase : rawIndex,
@@ -257,7 +316,6 @@ class InteractionEngine {
       if (_pressed) {
         events.addAll(_endPress(screen: screen, tMs: t, allowClick: false));
       }
-      _lastScrollAnchor = null;
       _primaryNeutral = false;
       if (!_erasing) {
         _erasing = true;
@@ -272,36 +330,39 @@ class InteractionEngine {
       events.addAll(_endErase(_filteredScreen(rawIndex, t)));
     }
 
-    // 1) スクロール: 人差し指＋中指を立てて動かす（くっつき/ピンチしていない時）。
-    final scrolling =
-        !pose.fingersTogether &&
+    // 1) スクロール: グッドサイン（親指だけを立て他4指を折る）で親指の向きへ一定量。
+    //    設定でOFFなら無視する。
+    // グッドサインは4指を折るため、指先が近づいて fingersTogether を巻き込む
+    // ことがある。goodSign を最優先にし、描画へ落とさない。
+    final scrolling = _scrollEnabled && pose.goodSign && !pose.pinching;
+    _primaryNeutral =
         !pose.pinching &&
-        pose.indexUp &&
-        pose.middleUp &&
-        pose.extendedFingers >= 2;
-    _primaryNeutral = !pose.pinching && !pose.fingersTogether && !scrolling;
+        !(pose.fingersTogether && !pose.goodSign && !pose.fist) &&
+        !scrolling;
     if (scrolling) {
-      final screen = _filteredScreen(rawIndex, t);
+      final screen = _lastScreen ?? _filteredScreen(rawIndex, t);
       if (_drawing) events.addAll(_endDraw(screen));
-      if (_pressed) events.addAll(_endPress(screen: screen, tMs: t));
-      if (_lastScrollAnchor != null) {
+      if (_erasing) events.addAll(_endErase(screen));
+      if (_pressed) {
+        events.addAll(_endPress(screen: screen, tMs: t, allowClick: false));
+      }
+      final step = _scrollStep(f);
+      if (step != null) {
         events.add(
-          InteractionEvent(
-            InteractionKind.scroll,
-            screen,
-            delta: screen - _lastScrollAnchor!,
-          ),
+          InteractionEvent(InteractionKind.scroll, screen, delta: step),
         );
       }
-      _lastScrollAnchor = screen;
       _lastScreen = screen;
       return events;
     }
-    _lastScrollAnchor = null;
 
     // 2) インク描画: 人差し指と中指がくっついている（トリガーは不変） → 人差し指先端で線を引く。
-    if (pose.fingersTogether) {
-      if (_pressed) events.addAll(_endPress(screen: null, tMs: t)); // 排他解除
+    //    設定でOFFなら描画せず、下位分岐（クリック/移動）へ流す。
+    //    グッドサイン（4指折り）は指先が近く together を巻き込むため描画から除外する。
+    if (_penEnabled && pose.fingersTogether && !pose.goodSign && !pose.fist) {
+      if (_pressed) {
+        events.addAll(_endPress(screen: null, tMs: t, allowClick: false));
+      }
       final rawDraw = _toSurface(pose.indexTip);
       final screen = _filteredScreen(
         _isInside(rawDraw) ? rawDraw : rawIndex,
@@ -323,8 +384,9 @@ class InteractionEngine {
     }
 
     // 3) OSクリック/ドラッグ（ピンチ）／4) ポインタ移動（人差し指先端）。
+    //    クリックが設定でOFFなら、ピンチしていても押下せずポインタ移動のみ。
     final screen = _filteredScreen(rawIndex, t);
-    if (pose.pinching && !_blockPressUntilNeutral) {
+    if (_clickEnabled && pose.pinching && !_blockPressUntilNeutral) {
       if (!_pressed) {
         _pressed = true;
         _pressStart = screen;
@@ -335,7 +397,9 @@ class InteractionEngine {
       }
     } else {
       if (_pressed) {
-        events.addAll(_endPress(screen: screen, tMs: t));
+        events.addAll(
+          _endPress(screen: screen, tMs: t, allowClick: _clickEnabled),
+        );
       } else {
         events.add(InteractionEvent(InteractionKind.pointerMove, screen));
       }
@@ -359,9 +423,27 @@ class InteractionEngine {
     _insideStreak = 0;
     _blockPressUntilNeutral = pose.pinching;
     _primaryNeutral = false;
-    _lastScrollAnchor = null;
     _screenFilter.reset();
     return events;
+  }
+
+  /// グッドサインの親指の向きから、1フレーム分のスクロール量（画面正規化）を作る。
+  /// 親指先端と付け根(thumbMcp)を画面座標へ写し、優勢な軸へ一定量だけ送る。
+  /// 画面座標で判定するのでキャリブレーションのミラー/回転にも追従する。
+  /// 親指が上→上/下→下/右→右/左→左（縦は用途上重要・横の極性は実測で調整可能）。
+  Vec2? _scrollStep(HandFrame f) {
+    final tip = f.at(HandFrame.thumbTip);
+    final base = f.at(HandFrame.thumbMcp);
+    if (tip == null || base == null) return null;
+    final d = _toSurface(tip.xy) - _toSurface(base.xy);
+    if (!d.x.isFinite || !d.y.isFinite) return null;
+    const k = _scrollStepMagnitude;
+    if (d.x.abs() >= d.y.abs()) {
+      if (d.x.abs() < _scrollDirDeadzone) return null;
+      return Vec2(d.x > 0 ? k : -k, 0); // 右／左
+    }
+    if (d.y.abs() < _scrollDirDeadzone) return null;
+    return Vec2(0, d.y > 0 ? k : -k); // 下／上（画面座標はyが下向き）
   }
 
   /// 描画（2本指くっつき）の終了。インクを確定する。
@@ -411,7 +493,6 @@ class InteractionEngine {
     _pressStart = null;
     _drawing = false;
     _erasing = false;
-    _lastScrollAnchor = null;
     _lastRawSurface = null;
     _outside = false;
     _insideStreak = 0;

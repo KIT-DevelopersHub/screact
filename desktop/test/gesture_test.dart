@@ -52,9 +52,8 @@ void main() {
 
     test('グー（全指折り畳み）を fist として検出する', () {
       final rec = GestureRecognizer();
-      final pose = rec.recognize(
-        MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)),
-      )!;
+      final pose =
+          rec.recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!;
       expect(pose.fist, isTrue);
       expect(pose.extendedFingers, 0);
     });
@@ -63,29 +62,33 @@ void main() {
       final rec = GestureRecognizer();
       // グーで確実に fist=true にする。
       expect(
-        rec.recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!.fist,
+        rec
+            .recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!
+            .fist,
         isTrue,
       );
       // 人差し指1本だけ伸ばす（extendedFingers==1・不感帯）→ fist を維持。
-      final mid = rec.recognize(
-        MockHand.at(
-          frameId: 1,
-          tip: const Vec2(0.5, 0.5),
-          pinch: false,
-          together: false,
-        ),
-      )!;
+      final mid =
+          rec.recognize(
+            MockHand.at(
+              frameId: 1,
+              tip: const Vec2(0.5, 0.5),
+              pinch: false,
+              together: false,
+            ),
+          )!;
       expect(mid.extendedFingers, 1);
       expect(mid.fist, isTrue);
       // 2本立てて明確に開く（extendedFingers>=2）→ fist 解除。
-      final open = rec.recognize(
-        MockHand.at(
-          frameId: 2,
-          tip: const Vec2(0.5, 0.5),
-          pinch: false,
-          together: true,
-        ),
-      )!;
+      final open =
+          rec.recognize(
+            MockHand.at(
+              frameId: 2,
+              tip: const Vec2(0.5, 0.5),
+              pinch: false,
+              together: true,
+            ),
+          )!;
       expect(open.extendedFingers, greaterThanOrEqualTo(2));
       expect(open.fist, isFalse);
     });
@@ -238,6 +241,207 @@ void main() {
       expect(draw, isNotNull);
       expect(draw!.screen.x, closeTo(0.5, 0.02));
       expect(draw.screen.x, lessThan(0.51));
+    });
+  });
+
+  group('グッドサインでスクロール', () {
+    InteractionEngine calibrated() {
+      final e = InteractionEngine(smoothingEnabled: false);
+      expect(e.calibrate(MockHand.markers()), isTrue);
+      return e;
+    }
+
+    InteractionEvent scrollOf(List<InteractionEvent> events) =>
+        events.singleWhere((e) => e.kind == InteractionKind.scroll);
+
+    test('親指だけを立てた手をグッドサインとして認識する', () {
+      final rec = GestureRecognizer();
+      final pose =
+          rec.recognize(
+            MockHand.goodSign(frameId: 0, thumbDir: const Vec2(0, -1)),
+          )!;
+      expect(pose.goodSign, isTrue);
+      expect(pose.thumbExtended, isTrue);
+      expect(pose.extendedFingers, 0);
+      expect(pose.fist, isTrue);
+      expect(pose.pinching, isFalse);
+    });
+
+    test('通常のポインタ姿勢（人差し指を立てる）はグッドサインではない', () {
+      final rec = GestureRecognizer();
+      final pose =
+          rec.recognize(
+            MockHand.at(frameId: 0, tip: const Vec2(0.5, 0.5), pinch: false),
+          )!;
+      expect(pose.goodSign, isFalse);
+    });
+
+    test('親指が上ならスクロールは上向き（delta.y<0・水平成分なし）', () {
+      final e = calibrated();
+      final ev = scrollOf(
+        e.onFrame(MockHand.goodSign(frameId: 1, thumbDir: const Vec2(0, -1))),
+      );
+      expect(ev.delta.y, lessThan(0));
+      expect(ev.delta.x, closeTo(0, 1e-9));
+    });
+
+    test('親指が下ならスクロールは下向き（delta.y>0）', () {
+      final e = calibrated();
+      final ev = scrollOf(
+        e.onFrame(MockHand.goodSign(frameId: 1, thumbDir: const Vec2(0, 1))),
+      );
+      expect(ev.delta.y, greaterThan(0));
+      expect(ev.delta.x, closeTo(0, 1e-9));
+    });
+
+    test('親指が右ならスクロールは水平（delta.x!=0・垂直成分なし）', () {
+      final e = calibrated();
+      final ev = scrollOf(
+        e.onFrame(MockHand.goodSign(frameId: 1, thumbDir: const Vec2(1, 0))),
+      );
+      expect(ev.delta.x.abs(), greaterThan(0));
+      expect(ev.delta.y, closeTo(0, 1e-9));
+    });
+
+    test('グッドサインは描画（drawDown）を生成しない', () {
+      final e = calibrated();
+      final kinds = e
+          .onFrame(MockHand.goodSign(frameId: 1, thumbDir: const Vec2(0, -1)))
+          .map((e) => e.kind);
+      expect(kinds, contains(InteractionKind.scroll));
+      expect(kinds, isNot(contains(InteractionKind.drawDown)));
+      expect(kinds, isNot(contains(InteractionKind.eraseDown)));
+    });
+  });
+
+  group('ジェスチャー個別ON/OFF', () {
+    InteractionEngine calibrated({
+      bool clickEnabled = true,
+      bool penEnabled = true,
+      bool eraserEnabled = true,
+      bool scrollEnabled = true,
+    }) {
+      final e = InteractionEngine(
+        smoothingEnabled: false,
+        clickEnabled: clickEnabled,
+        penEnabled: penEnabled,
+        eraserEnabled: eraserEnabled,
+        scrollEnabled: scrollEnabled,
+      );
+      expect(e.calibrate(MockHand.markers()), isTrue);
+      return e;
+    }
+
+    Iterable<InteractionKind> kinds(List<InteractionEvent> events) =>
+        events.map((e) => e.kind);
+
+    test('scrollEnabled=false: グッドサインはスクロールせずポインタ移動になる', () {
+      final e = calibrated(scrollEnabled: false);
+      final k = kinds(
+        e.onFrame(MockHand.goodSign(frameId: 1, thumbDir: const Vec2(0, -1))),
+      );
+      expect(k, isNot(contains(InteractionKind.scroll)));
+      expect(k, contains(InteractionKind.pointerMove));
+    });
+
+    test('penEnabled=false: くっつきでも描画せずポインタ移動になる', () {
+      final e = calibrated(penEnabled: false);
+      final k = kinds(
+        e.onFrame(
+          MockHand.at(
+            frameId: 1,
+            tip: const Vec2(0.5, 0.5),
+            pinch: false,
+            together: true,
+          ),
+        ),
+      );
+      expect(k, isNot(contains(InteractionKind.drawDown)));
+      expect(k, contains(InteractionKind.pointerMove));
+    });
+
+    test('clickEnabled=false: ピンチでも押下せずポインタ移動になる', () {
+      final e = calibrated(clickEnabled: false);
+      final k = kinds(
+        e.onFrame(
+          MockHand.at(
+            frameId: 1,
+            tip: const Vec2(0.5, 0.5),
+            pinch: true,
+            together: false,
+          ),
+        ),
+      );
+      expect(k, isNot(contains(InteractionKind.pressDown)));
+      expect(k, contains(InteractionKind.pointerMove));
+    });
+
+    test('eraserEnabled=false: グーでも消去せずポインタ移動になる', () {
+      final e = calibrated(eraserEnabled: false);
+      final k = kinds(
+        e.onFrame(MockHand.fist(frameId: 1, tip: const Vec2(0.5, 0.5))),
+      );
+      expect(k, isNot(contains(InteractionKind.eraseDown)));
+      expect(k, contains(InteractionKind.pointerMove));
+    });
+
+    test('クリックを押下中にOFFにするとclickなしで安全解除する', () {
+      final e = calibrated();
+      e.onFrame(
+        MockHand.at(frameId: 1, tip: const Vec2(0.5, 0.5), pinch: true),
+      );
+      e.clickEnabled = false;
+      final k = kinds(
+        e.onFrame(
+          MockHand.at(frameId: 2, tip: const Vec2(0.5, 0.5), pinch: true),
+        ),
+      );
+      expect(k, contains(InteractionKind.pressUp));
+      expect(k, isNot(contains(InteractionKind.click)));
+    });
+
+    test('描画中にペンをOFFにするとdrawUpで安全に閉じる', () {
+      final e = calibrated();
+      e.onFrame(
+        MockHand.at(
+          frameId: 1,
+          tip: const Vec2(0.5, 0.5),
+          pinch: false,
+          together: true,
+        ),
+      );
+      e.penEnabled = false;
+      final k = kinds(
+        e.onFrame(
+          MockHand.at(
+            frameId: 2,
+            tip: const Vec2(0.5, 0.5),
+            pinch: false,
+            together: true,
+          ),
+        ),
+      );
+      expect(k, contains(InteractionKind.drawUp));
+      expect(k, isNot(contains(InteractionKind.drawDown)));
+    });
+
+    test('消去中に消しゴムをOFFにするとeraseUpで安全に閉じる', () {
+      final e = calibrated();
+      e.onFrame(MockHand.fist(frameId: 1, tip: const Vec2(0.5, 0.5)));
+      e.eraserEnabled = false;
+      final k = kinds(
+        e.onFrame(MockHand.fist(frameId: 2, tip: const Vec2(0.5, 0.5))),
+      );
+      expect(k, contains(InteractionKind.eraseUp));
+      expect(k, isNot(contains(InteractionKind.eraseDown)));
+    });
+
+    test('既定は全ジェスチャーが有効', () {
+      final e = InteractionEngine();
+      expect(e.clickEnabled, isTrue);
+      expect(e.penEnabled, isTrue);
+      expect(e.eraserEnabled, isTrue);
+      expect(e.scrollEnabled, isTrue);
     });
   });
 }
