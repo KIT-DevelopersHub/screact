@@ -85,6 +85,8 @@ class _HomePageState extends State<HomePage> {
   String? _serverError;
   late int _configuredPort;
   bool _enforcePairing = true;
+  // 手の骨格（ランドマーク）をオーバーレイに描画するか。既定OFF・永続化する。
+  bool _showSkeleton = false;
   bool _startingServer = false;
   // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
   // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
@@ -151,6 +153,7 @@ class _HomePageState extends State<HomePage> {
     _draftSensitivity = _engine.recognitionSensitivity;
     _draftSmoothing = _engine.smoothingEnabled;
     _syncCalibrationDraftFromConfig();
+    _loadShowSkeleton();
 
     _pairing =
         widget.pairingController ??
@@ -259,7 +262,8 @@ class _HomePageState extends State<HomePage> {
         for (final lm in track.landmarks) _engine.mapToSurface(lm.xy),
       ];
     }
-    _overlay.showSkeletons(byTrack);
+    // 骨格表示がONのときだけ描画する。OFFなら空を渡して既存の骨格も消す。
+    _overlay.showSkeletons(_showSkeleton ? byTrack : const {});
   }
 
   DesktopDiscovery _createDiscovery() {
@@ -1519,6 +1523,39 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 骨格表示トグルの永続化先（プラグイン不要のプレーンファイル。connection_log と同流儀）。
+  File? _showSkeletonPrefsFile() {
+    final home = Platform.environment['HOME'];
+    if (home == null) return null;
+    return File('$home/Library/Application Support/yubiboard/show_skeleton');
+  }
+
+  void _loadShowSkeleton() {
+    try {
+      final f = _showSkeletonPrefsFile();
+      if (f != null && f.existsSync()) {
+        _showSkeleton = f.readAsStringSync().trim() == '1';
+      }
+    } catch (_) {
+      // 読めなければ既定OFFのまま。
+    }
+  }
+
+  void _setShowSkeleton(bool value) {
+    setState(() => _showSkeleton = value);
+    // OFFにした瞬間、既に描かれている骨格も消す。
+    if (!value) _overlay.showSkeletons(const {});
+    try {
+      final f = _showSkeletonPrefsFile();
+      if (f != null) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(value ? '1' : '0', flush: true);
+      }
+    } catch (_) {
+      // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
+    }
+  }
+
   void _saveSettings() {
     final parsedPort = int.tryParse(_portController.text);
     if (parsedPort == null || parsedPort < 1 || parsedPort > 65535) {
@@ -1809,6 +1846,16 @@ class _HomePageState extends State<HomePage> {
                               _enforcePairing = value;
                               _server?.enforcePairing = value;
                             });
+                            setDialogState(() {});
+                          },
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('骨格を表示'),
+                          subtitle: const Text('手のランドマーク（骨格）をオーバーレイに重ねる'),
+                          value: _showSkeleton,
+                          onChanged: (value) {
+                            _setShowSkeleton(value);
                             setDialogState(() {});
                           },
                         ),
