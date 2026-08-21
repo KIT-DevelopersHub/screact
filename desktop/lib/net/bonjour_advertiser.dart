@@ -40,11 +40,13 @@ class BonjourAdvertiser {
     if (!supported) return;
     try {
       await _channel.invokeMethod('publish', {'port': port, 'token': token});
-      onLog?.call('[Bonjour] _screact._tcp をポート $port で広告開始（iOS自動接続用）');
-    } on MissingPluginException {
-      // ネイティブ未登録（旧ビルド等）。UDP 経路のみで継続する。
+      onLog?.call('[Bonjour] _screact._tcp をポート $port で広告要求（iOS自動接続用）');
+    } on MissingPluginException catch (e) {
+      onLog?.call('[Bonjour] ネイティブ未登録 MissingPluginException: $e');
     } on PlatformException catch (e) {
       onLog?.call('[Bonjour] 広告開始に失敗（UDP経路は継続）: ${e.message}');
+    } catch (e) {
+      onLog?.call('[Bonjour] start() 予期せぬ例外: $e');
     }
   }
 
