@@ -52,9 +52,8 @@ void main() {
 
     test('グー（全指折り畳み）を fist として検出する', () {
       final rec = GestureRecognizer();
-      final pose = rec.recognize(
-        MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)),
-      )!;
+      final pose =
+          rec.recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!;
       expect(pose.fist, isTrue);
       expect(pose.extendedFingers, 0);
     });
@@ -63,29 +62,33 @@ void main() {
       final rec = GestureRecognizer();
       // グーで確実に fist=true にする。
       expect(
-        rec.recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!.fist,
+        rec
+            .recognize(MockHand.fist(frameId: 0, tip: const Vec2(0.5, 0.5)))!
+            .fist,
         isTrue,
       );
       // 人差し指1本だけ伸ばす（extendedFingers==1・不感帯）→ fist を維持。
-      final mid = rec.recognize(
-        MockHand.at(
-          frameId: 1,
-          tip: const Vec2(0.5, 0.5),
-          pinch: false,
-          together: false,
-        ),
-      )!;
+      final mid =
+          rec.recognize(
+            MockHand.at(
+              frameId: 1,
+              tip: const Vec2(0.5, 0.5),
+              pinch: false,
+              together: false,
+            ),
+          )!;
       expect(mid.extendedFingers, 1);
       expect(mid.fist, isTrue);
       // 2本立てて明確に開く（extendedFingers>=2）→ fist 解除。
-      final open = rec.recognize(
-        MockHand.at(
-          frameId: 2,
-          tip: const Vec2(0.5, 0.5),
-          pinch: false,
-          together: true,
-        ),
-      )!;
+      final open =
+          rec.recognize(
+            MockHand.at(
+              frameId: 2,
+              tip: const Vec2(0.5, 0.5),
+              pinch: false,
+              together: true,
+            ),
+          )!;
       expect(open.extendedFingers, greaterThanOrEqualTo(2));
       expect(open.fist, isFalse);
     });
@@ -248,14 +251,15 @@ void main() {
       return e;
     }
 
-    InteractionEvent scrollOf(List<InteractionEvent> events) => events
-        .singleWhere((e) => e.kind == InteractionKind.scroll);
+    InteractionEvent scrollOf(List<InteractionEvent> events) =>
+        events.singleWhere((e) => e.kind == InteractionKind.scroll);
 
     test('親指だけを立てた手をグッドサインとして認識する', () {
       final rec = GestureRecognizer();
-      final pose = rec.recognize(
-        MockHand.goodSign(frameId: 0, thumbDir: const Vec2(0, -1)),
-      )!;
+      final pose =
+          rec.recognize(
+            MockHand.goodSign(frameId: 0, thumbDir: const Vec2(0, -1)),
+          )!;
       expect(pose.goodSign, isTrue);
       expect(pose.thumbExtended, isTrue);
       expect(pose.extendedFingers, 0);
@@ -265,9 +269,10 @@ void main() {
 
     test('通常のポインタ姿勢（人差し指を立てる）はグッドサインではない', () {
       final rec = GestureRecognizer();
-      final pose = rec.recognize(
-        MockHand.at(frameId: 0, tip: const Vec2(0.5, 0.5), pinch: false),
-      )!;
+      final pose =
+          rec.recognize(
+            MockHand.at(frameId: 0, tip: const Vec2(0.5, 0.5), pinch: false),
+          )!;
       expect(pose.goodSign, isFalse);
     });
 
@@ -374,9 +379,7 @@ void main() {
     test('eraserEnabled=false: グーでも消去せずポインタ移動になる', () {
       final e = calibrated(eraserEnabled: false);
       final k = kinds(
-        e.onFrame(
-          MockHand.fist(frameId: 1, tip: const Vec2(0.5, 0.5)),
-        ),
+        e.onFrame(MockHand.fist(frameId: 1, tip: const Vec2(0.5, 0.5))),
       );
       expect(k, isNot(contains(InteractionKind.eraseDown)));
       expect(k, contains(InteractionKind.pointerMove));
@@ -385,20 +388,12 @@ void main() {
     test('クリックを押下中にOFFにするとclickなしで安全解除する', () {
       final e = calibrated();
       e.onFrame(
-        MockHand.at(
-          frameId: 1,
-          tip: const Vec2(0.5, 0.5),
-          pinch: true,
-        ),
+        MockHand.at(frameId: 1, tip: const Vec2(0.5, 0.5), pinch: true),
       );
       e.clickEnabled = false;
       final k = kinds(
         e.onFrame(
-          MockHand.at(
-            frameId: 2,
-            tip: const Vec2(0.5, 0.5),
-            pinch: true,
-          ),
+          MockHand.at(frameId: 2, tip: const Vec2(0.5, 0.5), pinch: true),
         ),
       );
       expect(k, contains(InteractionKind.pressUp));

@@ -336,7 +336,9 @@ class InteractionEngine {
     // ことがある。goodSign を最優先にし、描画へ落とさない。
     final scrolling = _scrollEnabled && pose.goodSign && !pose.pinching;
     _primaryNeutral =
-        !pose.pinching && !(pose.fingersTogether && !pose.goodSign) && !scrolling;
+        !pose.pinching &&
+        !(pose.fingersTogether && !pose.goodSign && !pose.fist) &&
+        !scrolling;
     if (scrolling) {
       final screen = _lastScreen ?? _filteredScreen(rawIndex, t);
       if (_drawing) events.addAll(_endDraw(screen));
@@ -346,7 +348,9 @@ class InteractionEngine {
       }
       final step = _scrollStep(f);
       if (step != null) {
-        events.add(InteractionEvent(InteractionKind.scroll, screen, delta: step));
+        events.add(
+          InteractionEvent(InteractionKind.scroll, screen, delta: step),
+        );
       }
       _lastScreen = screen;
       return events;
@@ -355,7 +359,7 @@ class InteractionEngine {
     // 2) インク描画: 人差し指と中指がくっついている（トリガーは不変） → 人差し指先端で線を引く。
     //    設定でOFFなら描画せず、下位分岐（クリック/移動）へ流す。
     //    グッドサイン（4指折り）は指先が近く together を巻き込むため描画から除外する。
-    if (_penEnabled && pose.fingersTogether && !pose.goodSign) {
+    if (_penEnabled && pose.fingersTogether && !pose.goodSign && !pose.fist) {
       if (_pressed) {
         events.addAll(_endPress(screen: null, tMs: t, allowClick: false));
       }
