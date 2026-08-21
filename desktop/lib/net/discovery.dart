@@ -8,9 +8,9 @@ import 'wifi_ip.dart';
 
 /// Screact のゼロコンフィグ・ペアリング（UDP発見プロトコル）。
 ///
-/// Desktop が「始める」押下から UDP ブロードキャストで offer を投げ、待受を
-/// 明示的に開始した Android が response を返したうえで、offer 内の接続情報を
-/// 使って既存の WebSocket (/ws/v1/input) へ自動接続する。
+/// Desktop が「始める」押下から UDP ブロードキャストで offer を投げる。待受を
+/// 明示的に開始した Android もprobeを送り、Desktopは同じofferをユニキャストで
+/// 返信する。Androidは届いたoffer内の接続情報を使って既存のWebSocketへ接続する。
 ///
 /// discovery_select/select_ack は旧Androidとのプロトコル互換のため残すが、
 /// 現行の接続成立条件には使用しない。
@@ -29,6 +29,26 @@ bool _isDiscoveryMessage(Map<String, dynamic> json, String messageType) {
 bool _isValidPort(int? port) => port != null && port >= 1 && port <= 65535;
 bool _isValidPairingToken(String? token) =>
     token != null && RegExp(r'^\d{6}$').hasMatch(token);
+
+/// Android→broadcast: Desktop の offer をユニキャストで要求する探索通知。
+class DiscoveryProbe {
+  final String deviceId;
+  const DiscoveryProbe({required this.deviceId});
+
+  Map<String, dynamic> toJson() => {
+    'app': kDiscoveryApp,
+    'schemaVersion': kDiscoverySchemaVersion,
+    'messageType': 'discovery_probe',
+    'deviceId': deviceId,
+  };
+
+  static DiscoveryProbe? tryParse(Map<String, dynamic> j) {
+    if (!_isDiscoveryMessage(j, 'discovery_probe')) return null;
+    final id = j['deviceId'] as String?;
+    if (id == null || id.trim().isEmpty || id.length > 128) return null;
+    return DiscoveryProbe(deviceId: id);
+  }
+}
 
 /// Desktop→broadcast: 接続情報の広告。
 class DiscoveryOffer {
@@ -291,6 +311,10 @@ class DesktopDiscovery extends ChangeNotifier {
   /// テストでは ['127.0.0.1'] 等に差し替える）。
   final List<String>? broadcastAddresses;
 
+  /// Androidからのprobeを固定ポートで受けるか。nullなら本番構成で有効、
+  /// 明示送信先を使う既存テストでは無効にしてポート競合を避ける。
+  final bool? enableProbeListener;
+
   /// OSのIF列挙。テストでは遅延させ、停止と競合してもUDP送信が復活しないことを
   /// 検証する。明示送信先がある場合は呼び出さない。
   final Future<List<String>> Function()? subnetBroadcastsProvider;
@@ -302,6 +326,7 @@ class DesktopDiscovery extends ChangeNotifier {
   List<String> _autoTargets = const [];
 
   RawDatagramSocket? _socket;
+  RawDatagramSocket? _probeSocket;
   Timer? _offerTimer;
   Timer? _selectTimer;
   DiscoveredDevice? _selectTarget;
@@ -321,11 +346,14 @@ class DesktopDiscovery extends ChangeNotifier {
     this.selectResendInterval = const Duration(milliseconds: 300),
     this.selectMaxAttempts = 20,
     this.broadcastAddresses,
+    this.enableProbeListener,
     this.subnetBroadcastsProvider,
     this.onLog,
   });
 
   bool get running => _socket != null;
+  bool get _shouldListenForProbes =>
+      enableProbeListener ?? broadcastAddresses == null;
 
   /// 選択した端末から select の ACK を受信済みか（到達確認）。
   bool get selectAcked => _selectAcked;
@@ -382,6 +410,29 @@ class DesktopDiscovery extends ChangeNotifier {
         }
         s.broadcastEnabled = true;
         _socket = s;
+        if (_shouldListenForProbes) {
+          try {
+            final probeSocket = await RawDatagramSocket.bind(
+              InternetAddress.anyIPv4,
+              discoveryPort,
+              reuseAddress: true,
+            );
+            if (generation != _generation || !identical(_socket, s)) {
+              probeSocket.close();
+              s.close();
+              return;
+            }
+            probeSocket.broadcastEnabled = true;
+            _probeSocket = probeSocket;
+            probeSocket.listen(
+              (event) => _onSocketEvent(probeSocket, event),
+              onError: (Object e) => _log('probe受信エラー: $e'),
+            );
+            _log('Androidからのprobe待受開始 ← UDP :$discoveryPort');
+          } catch (error) {
+            _log('probe待受を開始できません（offer送信は継続）: $error');
+          }
+        }
         _autoTargets = const [];
         // 全物理IFの.255を併送先に加える（ベストエフォート・失敗は無視）。
         // broadcastAddresses 指定時はテストの決定性を保つため列挙自体を行わない。
@@ -400,7 +451,10 @@ class DesktopDiscovery extends ChangeNotifier {
           s.close();
           return;
         }
-        s.listen(_onSocketEvent, onError: (Object e) => _log('受信エラー: $e'));
+        s.listen(
+          (event) => _onSocketEvent(s, event),
+          onError: (Object e) => _log('受信エラー: $e'),
+        );
         _log(
           'UDPブロードキャスト開始 → ${_targets.join(", ")}:$discoveryPort '
           '(wsPort=$wsPort)',
@@ -420,12 +474,20 @@ class DesktopDiscovery extends ChangeNotifier {
     );
   }
 
-  void _onSocketEvent(RawSocketEvent e) {
+  void _onSocketEvent(RawDatagramSocket source, RawSocketEvent e) {
     if (e != RawSocketEvent.read) return;
-    final dg = _socket?.receive();
+    final dg = source.receive();
     if (dg == null) return;
     final j = decodeDiscoveryDatagram(dg.data);
     if (j == null) return;
+    final probe = DiscoveryProbe.tryParse(j);
+    if (probe != null) {
+      _sendOfferTo(source, dg.address, dg.port);
+      _log(
+        'probe受信 (${dg.address.address}:${dg.port}) — offerをユニキャスト返信',
+      );
+      return;
+    }
     final ack = DiscoverySelectAck.tryParse(j);
     if (ack != null) {
       _onSelectAck(ack);
@@ -445,6 +507,21 @@ class DesktopDiscovery extends ChangeNotifier {
     if (existing == null) {
       _log('スマホ発見: ${res.deviceName} (${dg.address.address})');
       notifyListeners();
+    }
+  }
+
+  void _sendOfferTo(
+    RawDatagramSocket source,
+    InternetAddress address,
+    int port,
+  ) {
+    final bytes = utf8.encode(
+      jsonEncode(DiscoveryOffer(ip: ip, wsPort: wsPort, token: token).toJson()),
+    );
+    try {
+      source.send(bytes, address, port);
+    } catch (error) {
+      _log('offerユニキャスト返信失敗 (${address.address}:$port): $error');
     }
   }
 
@@ -587,6 +664,8 @@ class DesktopDiscovery extends ChangeNotifier {
     _selectTarget = null;
     _socket?.close();
     _socket = null;
+    _probeSocket?.close();
+    _probeSocket = null;
     _devices.clear();
   }
 

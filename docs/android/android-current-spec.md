@@ -60,7 +60,10 @@ flowchart LR
 
 ### 2.2 本番利用フロー
 
-初回はhost、port、6桁コードで接続し、`hello_ack.resumeToken`をAndroid Keystore鍵で保護して保存する。次回起動時は保存済みPCへ入力なしで接続する。`calibrationRequired=true`では配置待ちを表示し、マーカーが1つ以上見えるまで`0/4`をエラー表示しない。有効5フレーム送信後もPC確認中に留まり、`set_mode=tracking`を受信して初めて操作可能となる。
+初回は「画面認識開始」後、UDP `8766`でDesktopからのofferを待ちながら、limited broadcastと
+現在のIPv4 prefixから算出したdirected broadcastへprobeを送る。いずれかでofferを受信すると、
+その送信元へ6桁コードでWebSocket接続する。自動発見できない場合はhost、port、6桁コードを
+手入力する。`hello_ack.resumeToken`はAndroid Keystore鍵で保護して保存し、次回起動時は保存済みPCへ入力なしで接続する。`calibrationRequired=true`では配置待ちを表示し、マーカーが1つ以上見えるまで`0/4`をエラー表示しない。有効5フレーム送信後もPC確認中に留まり、`set_mode=tracking`を受信して初めて操作可能となる。
 
 モックPCは信頼済み端末をデバッグ用ファイルへ保持する一方、位置合わせ完了状態はプロセス内だけに保持する。そのため、同一プロセスの一時切断では位置合わせを再利用し、モック再起動ではresume認証後に配置確認と位置合わせを再要求できる。
 

@@ -54,7 +54,8 @@ adb shell am start `
 
 Desktopも`flutter run -d windows --dart-define=YUBI_AUTOFLOW=true`で起動すると、
 画面操作なしでWebSocket待受とUDP offer送信を開始できる。Androidの`YubiBoardDiag`ログで
-`listen_started`、`offer_received`、`connect_from_offer`、`hello_ack`の順を確認する。
+`listen_started`、`probe_sent`、`offer_received`、`connect_from_offer`、`hello_ack`を確認する。
+offerは従来のDesktop発broadcastと、Android発probeへのunicast返信のどちらでもよい。
 
 iPhoneテザリングで接続順を入れ替えた反復試験とWi-Fi再接続試験まで自動実行する場合は、
 既存のFlutter／Gradle／ADBだけを使う次のスクリプトを実行する。結果はIP、6桁コード、

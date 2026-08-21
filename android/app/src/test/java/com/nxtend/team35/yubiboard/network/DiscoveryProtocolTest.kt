@@ -4,8 +4,31 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.InetAddress
 
 class DiscoveryProtocolTest {
+
+    @Test
+    fun `probe のエンコードは Desktop と共通の形になる`() {
+        val encoded = DiscoveryCodec.encode(DiscoveryProbe(deviceId = "android-abc"))
+        val decoded = DiscoveryCodec.parse(encoded)
+        assertTrue(decoded is DiscoveryProbe)
+        assertEquals("android-abc", (decoded as DiscoveryProbe).deviceId)
+        assertTrue(encoded.contains("\"messageType\":\"discovery_probe\""))
+    }
+
+    @Test
+    fun `実プレフィックスから通常LANとテザリングのbroadcastを計算する`() {
+        fun broadcast(ip: String, prefix: Int) =
+            ipv4DirectedBroadcast(InetAddress.getByName(ip), prefix)?.hostAddress
+
+        assertEquals("192.168.1.255", broadcast("192.168.1.23", 24))
+        assertEquals("172.20.10.15", broadcast("172.20.10.2", 28))
+        assertEquals("10.20.31.255", broadcast("10.20.17.3", 20))
+        assertNull(ipv4DirectedBroadcast(InetAddress.getByName("10.20.17.3"), 32))
+        assertNull(ipv4DirectedBroadcast(InetAddress.getByName("::1"), 64))
+        assertNull(ipv4DirectedBroadcast(InetAddress.getByName("10.0.0.1"), 33))
+    }
 
     @Test
     fun `offer をデスクトップ実送信と同じJSONから読める（未知フィールドは無視）`() {
@@ -97,8 +120,11 @@ class DiscoveryProtocolTest {
                 """{"app":"screact","schemaVersion":1,"messageType":"discovery_response","deviceId":"$deviceId","deviceName":"Pixel","model":"Pixel"}"""
             val ack =
                 """{"app":"screact","schemaVersion":1,"messageType":"discovery_select_ack","deviceId":"$deviceId"}"""
+            val probe =
+                """{"app":"screact","schemaVersion":1,"messageType":"discovery_probe","deviceId":"$deviceId"}"""
             assertNull(DiscoveryCodec.parse(response))
             assertNull(DiscoveryCodec.parse(ack))
+            assertNull(DiscoveryCodec.parse(probe))
         }
     }
 
