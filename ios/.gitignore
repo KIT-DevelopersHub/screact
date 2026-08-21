@@ -1,0 +1,15 @@
+# Xcode / build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.moved-aside
+
+# CocoaPods (dependencies are declared in Podfile; run `pod install` locally)
+Pods/
+Screact.xcworkspace/
+Podfile.lock
+
+# macOS
+.DS_Store

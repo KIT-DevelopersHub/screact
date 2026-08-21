@@ -5,6 +5,7 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   private var overlayMode: OverlayModeController?
   private var desktopInput: DesktopInputController?
+  private var bonjour: BonjourAdvertiser?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -17,6 +18,8 @@ class MainFlutterWindow: NSWindow {
     // OSクリック/ドラッグ/スクロールの実注入（CGEvent）。channel: desktop_input。
     desktopInput = DesktopInputController(
       messenger: flutterViewController.engine.binaryMessenger)
+    // iOS 自動接続用の Bonjour(_screact._tcp) 広告。channel: yubiboard/bonjour。
+    bonjour = BonjourAdvertiser(messenger: flutterViewController.engine.binaryMessenger)
 
     // 起動処理の最後に製品名タイトルとデモ向け初期サイズを確定させる
     // （起動中に FlutterAppDelegate がタイトルを実行ファイル名で上書きし、

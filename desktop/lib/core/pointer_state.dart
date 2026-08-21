@@ -82,6 +82,11 @@ class OverlayModel extends ChangeNotifier {
   /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
   static const double _minPointDist = 0.002;
 
+  /// ペンモード解除（人差し指と中指を離す）直前は、指を離す動作で手がブレて
+  /// 不要な線が描かれやすい。drawUp 時に末尾のこの点数ぶんを削ってブレ線をカットする。
+  /// 保守的な既定値。0 で無効。実測に応じて調整可能（フレーム間引き後の点数基準）。
+  int penReleaseTrimPoints = 3;
+
   /// 保持するインクストロークの上限。長時間デモで無制限に増えると、毎フレーム
   /// の再描画コストとメモリが増え続けるため、古い完了ストロークから捨てる。
   /// 描画中（_active）のストロークは対象外。
@@ -158,7 +163,18 @@ class OverlayModel extends ChangeNotifier {
         break;
       case InteractionKind.drawUp:
         v.pressed = false;
-        _active.remove(trackId);
+        final ending = _active.remove(trackId);
+        // ペンモード終了直前のブレ線をカット: 末尾の penReleaseTrimPoints 点を落とす。
+        // 少なくとも1点は残す（点を消しすぎてストローク自体を壊さない）。
+        if (ending != null &&
+            penReleaseTrimPoints > 0 &&
+            ending.points.length > 1) {
+          final drop = penReleaseTrimPoints.clamp(0, ending.points.length - 1);
+          ending.points.removeRange(
+            ending.points.length - drop,
+            ending.points.length,
+          );
+        }
         break;
       // OSクリック/ドラッグ（ピンチ）はインクを引かない。カーソルの押下表示のみ。
       case InteractionKind.pressDown:

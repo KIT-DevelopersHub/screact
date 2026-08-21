@@ -35,7 +35,7 @@
 	<string>同じWi-Fi上のスマートフォン（Screactアプリ）を自動検出して接続するために、ローカルネットワークへのアクセスを使用します。</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_screact._udp</string>
+		<string>_screact._tcp</string>
 	</array>
 </dict>
 </plist>
