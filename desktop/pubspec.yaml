@@ -47,6 +47,23 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
 
+  # Generates the desktop app icons (macOS/Windows) from a single source PNG.
+  # Run: flutter pub run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.4
+
+# App icon generation config (matches the Android launcher: one-eyed ghost on #AEC8D0).
+# Source: assets/app_icon.png (1024x1024). Regenerate with:
+#   flutter pub run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/app_icon.png"
+  macos:
+    generate: true
+    image_path: "assets/app_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/app_icon.png"
+    icon_size: 256
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
