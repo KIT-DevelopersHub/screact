@@ -237,7 +237,7 @@ void main() {
       // ※トリガー条件（together=true・人差し指＋中指くっつき）は不変。
       expect(draw, isNotNull);
       expect(draw!.screen.x, closeTo(0.5, 0.02));
-      expect(draw!.screen.x, lessThan(0.51));
+      expect(draw.screen.x, lessThan(0.51));
     });
   });
 }

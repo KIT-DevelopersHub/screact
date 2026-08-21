@@ -101,6 +101,11 @@ void main() {
     await navigateFromDrawer(tester, 'nav-workspace');
     expect(find.byKey(const ValueKey('workspace-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('overlay-enter')), findsOneWidget);
+    expect(find.byKey(const ValueKey('color-swatch-0')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('workspace-show-skeleton')),
+      findsOneWidget,
+    );
     expect(
       find.byType(OverlayCanvas),
       findsNothing,

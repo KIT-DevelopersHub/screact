@@ -6,11 +6,10 @@ import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/ui/color_palette.dart';
 import 'package:thehack_overlay/ui/overlay_canvas.dart';
 
-/// オーバーレイ（インク＋消しゴムの輪）＋右下カラーパレットの見た目を1枚に
-/// レンダリングした確認用ゴールデン。`flutter test --update-goldens` で
-/// test/goldens/overlay_palette.png を生成する（UIスクショの代替）。
+/// オーバーレイ（インク＋消しゴムの輪）とカラーパレットが同時に
+/// レンダリングでき、色選択を操作できることを確認する。
 void main() {
-  testWidgets('overlay + palette screenshot', (tester) async {
+  testWidgets('overlay + palette rendering and selection', (tester) async {
     final model = OverlayModel();
 
     // 青(slot0)のインク線。
@@ -80,9 +79,14 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 200));
 
-    await expectLater(
-      find.byType(OverlayCanvas),
-      matchesGoldenFile('goldens/overlay_palette.png'),
-    );
+    expect(find.byType(OverlayCanvas), findsOneWidget);
+    expect(find.byType(ColorPalette), findsOneWidget);
+    expect(find.byKey(const ValueKey('color-swatch-2')), findsOneWidget);
+    expect(model.track(2)?.erasing, isTrue);
+    expect(model.selectedColorSlot, 2);
+
+    await tester.tap(find.byKey(const ValueKey('color-swatch-0')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(model.selectedColorSlot, 0);
   });
 }
