@@ -375,8 +375,8 @@ class InputServer {
   /// 安定して保持する主トラックのイベントをOS入力へ、全トラックをオーバーレイへ。
   void _dispatch(Map<int, List<InteractionEvent>> byTrack) {
     if (byTrack.isEmpty) return;
-    final primary = engine.primaryTrackIdOf(byTrack);
-    if (primary != null) onEvents(byTrack[primary]!);
+    final primaryEvents = engine.primaryEventsOf(byTrack);
+    if (primaryEvents != null) onEvents(primaryEvents);
     onTrackEvents?.call(byTrack);
   }
 
