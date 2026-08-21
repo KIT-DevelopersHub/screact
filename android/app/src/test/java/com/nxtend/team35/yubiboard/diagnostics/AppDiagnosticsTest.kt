@@ -39,7 +39,8 @@ class AppDiagnosticsTest {
 
     @Test
     fun `disabled mode does not collect diagnostics`() {
-        AppDiagnostics.setEnabled(false)
+        AppDiagnostics.setEnabled(false, debugBuild = false)
+        AppDiagnostics.clear()
 
         AppDiagnostics.event("test", "hidden")
         AppDiagnostics.increment("frames")
@@ -51,5 +52,22 @@ class AppDiagnosticsTest {
         assertTrue(snapshot.counters.isEmpty())
         assertTrue(snapshot.gauges.isEmpty())
         assertTrue(snapshot.metrics.isEmpty())
+    }
+
+    @Test
+    fun `debug build keeps production UI diagnostics enabled`() {
+        AppDiagnostics.setEnabled(false, debugBuild = true)
+        AppDiagnostics.clear()
+
+        AppDiagnostics.event("app", "production_ui")
+        AppDiagnostics.increment("frames")
+        AppDiagnostics.gauge("mode", "tracking")
+        AppDiagnostics.metric("latency", 10)
+
+        val snapshot = AppDiagnostics.snapshot()
+        assertEquals(1, snapshot.events.size)
+        assertEquals(1L, snapshot.counters["frames"])
+        assertEquals("tracking", snapshot.gauges["mode"])
+        assertEquals(1, snapshot.metrics.getValue("latency").samples)
     }
 }

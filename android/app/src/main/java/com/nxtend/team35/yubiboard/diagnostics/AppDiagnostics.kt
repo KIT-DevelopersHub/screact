@@ -39,9 +39,11 @@ object AppDiagnostics {
     @Volatile
     private var enabled = BuildConfig.DEBUG
 
-    fun setEnabled(value: Boolean) {
-        enabled = value
-        if (value) event("app", "debug_mode_enabled")
+    fun setEnabled(value: Boolean, debugBuild: Boolean = BuildConfig.DEBUG) {
+        // debug APKは本番UIでも実機診断を継続する。release APKでは従来どおり
+        // 明示的なdebug modeが無効なら、イベント・集計とも収集しない。
+        enabled = value || debugBuild
+        if (enabled) event("app", "diagnostics_enabled")
     }
 
     fun isEnabled(): Boolean = enabled
