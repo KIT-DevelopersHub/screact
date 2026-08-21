@@ -25,7 +25,17 @@ bool _isVirtual(String name) {
     'stf',
     'ap',
   ];
-  return prefixes.any(n.startsWith);
+  const fragments = [
+    'virtualbox',
+    'vmware',
+    'hyper-v',
+    'vethernet',
+    'docker',
+    'tailscale',
+    'zerotier',
+    'wsl',
+  ];
+  return prefixes.any(n.startsWith) || fragments.any(n.contains);
 }
 
 bool _isWifi(String name) {
@@ -59,6 +69,47 @@ String? pickWifiIp(List<InterfaceAddrs> interfaces) {
     if (!_isVirtual(i.name)) return i.v4.first;
   }
   return null;
+}
+
+/// 非仮想な物理IPv4インターフェースの /24 ディレクテッドブロードキャスト(.255)を
+/// 列挙する（loopback・仮想IF は除外・重複排除）。
+///
+/// UDP offer を単一サブネット（`_wifiIp` 由来）だけでなく、接続中の全物理IFへ
+/// 併送するために使う。macOSで有線/Wi-Fiが同時に上がっている等、実際にスマホと
+/// 同じL2にあるIFが `_wifiIp` と異なる場合でも offer を届かせる。
+/// `.255` の作り方は subnetBroadcastOf（/24 前提）を踏襲する。
+Future<List<String>> localSubnetBroadcasts() async {
+  try {
+    final ifs = await NetworkInterface.list(type: InternetAddressType.IPv4);
+    return directedBroadcastsOf([
+      for (final i in ifs)
+        InterfaceAddrs(i.name, [
+          for (final a in i.addresses)
+            if (!a.isLoopback) a.address,
+        ]),
+    ]);
+  } catch (_) {
+    return const [];
+  }
+}
+
+/// 列挙済みIPv4インターフェースから、offerの併送先を決める純関数。
+/// OS列挙に依存せず、仮想IF除外と重複排除を単体テストできるよう分離する。
+List<String> directedBroadcastsOf(List<InterfaceAddrs> interfaces) {
+  final out = <String>{};
+  for (final i in interfaces) {
+    if (_isVirtual(i.name)) continue;
+    for (final address in i.v4) {
+      final parts = address.split('.');
+      if (parts.length != 4) continue;
+      final octets = parts.map(int.tryParse).toList();
+      if (octets.any((part) => part == null || part < 0 || part > 255)) {
+        continue;
+      }
+      out.add('${octets[0]}.${octets[1]}.${octets[2]}.255');
+    }
+  }
+  return out.toList();
 }
 
 /// 現在の Wi-Fi IPv4 を取得（`ipconfig getifaddr en0` 相当・フォールバック付き）。

@@ -85,6 +85,7 @@ class _MethodChannelBridge implements DesktopBridge {
     InteractionKind.drawDown,
     InteractionKind.drawMove,
     InteractionKind.drawUp,
+    InteractionKind.pointerExit,
   };
 
   @override

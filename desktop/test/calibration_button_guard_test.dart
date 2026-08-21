@@ -168,25 +168,19 @@ void main() {
       }),
     );
 
-    // hello完了で位置合わせ画面へ自動遷移し、開始ボタンが有効になる。
+    // hello完了で「位置合わせ開始」ボタンを待たず、自動で位置合わせ（ArUcoターゲット）
+    // 表示へ遷移する（2クリック廃止）。ネイティブの全画面突入拒否時も、ウィンドウ内
+    // ターゲットへフォールバックする。
     await waitFor(
       tester,
       () =>
-          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
+          find
+              .byKey(const ValueKey('calibration-target-image'))
+              .evaluate()
+              .isNotEmpty,
     );
-    expect(enabled(tester, calibrationStart), isTrue);
-    expect(find.byKey(const ValueKey('calibration-preview')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('calibration-target-image')),
-      findsNothing,
-    );
-    expect(find.byKey(const ValueKey('desktop-header-menu')), findsOneWidget);
-
-    // ネイティブの全画面突入拒否時も、ウィンドウ内ターゲットへフォールバックする。
-    await tester.tap(calibrationStart);
-    await settle(tester);
     expect(tester.takeException(), isNull);
-    expect(find.textContaining('キャリブレーション中: スマホのカメラで'), findsOneWidget);
+    expect(find.textContaining('位置合わせ中: スマホのカメラで'), findsOneWidget);
     expect(find.byKey(const ValueKey('calibration-cancel')), findsOneWidget);
     expect(find.byKey(const ValueKey('calibration-preview')), findsNothing);
     expect(find.byKey(const ValueKey('desktop-header-menu')), findsNothing);
@@ -274,6 +268,15 @@ void main() {
     expect(enabled(tester, productionButton('server-toggle')), isTrue);
     expect(enabled(tester, productionButton('server-stop')), isTrue);
 
+    expect(find.byKey(const ValueKey('show-qr')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('show-qr')));
+    await settle(tester);
+    expect(find.text('QRコードで接続'), findsOneWidget);
+    expect(find.textContaining('スマホのカメラでこのQR'), findsOneWidget);
+    await tester.tap(find.text('閉じる'));
+    await settle(tester);
+    expect(find.text('QRコードで接続'), findsNothing);
+
     await tester.tap(find.byKey(const ValueKey('pairing-retry')));
     await settle(tester, const Duration(milliseconds: 40));
     expect(find.textContaining('スマホを検索'), findsOneWidget);
@@ -316,15 +319,17 @@ void main() {
         'pairingToken': code,
       }),
     );
+    // hello完了で自動的に位置合わせ（ArUcoターゲット表示）へ遷移する。
     await waitFor(
       tester,
       () =>
-          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
+          find
+              .byKey(const ValueKey('calibration-target-image'))
+              .evaluate()
+              .isNotEmpty,
     );
 
     final calibrationStart = productionButton('calibration-start');
-    await tester.tap(calibrationStart);
-    await settle(tester);
     socket.add(jsonEncode(calibrationMarkersMessage()));
     await waitFor(
       tester,
@@ -406,13 +411,7 @@ void main() {
         'pairingToken': code,
       }),
     );
-    await waitFor(
-      tester,
-      () =>
-          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
-    );
-
-    await tester.tap(productionButton('calibration-start'));
+    // hello完了で自動的に位置合わせへ遷移し、透明オーバーレイへ突入する（2クリック廃止）。
     await waitFor(
       tester,
       () =>
@@ -508,13 +507,7 @@ void main() {
         'pairingToken': code,
       }),
     );
-    await waitFor(
-      tester,
-      () =>
-          find.byKey(const ValueKey('calibration-page')).evaluate().isNotEmpty,
-    );
-
-    await tester.tap(productionButton('calibration-start'));
+    // hello完了で自動的に位置合わせへ遷移し、enterOverlayが呼ばれる（2クリック廃止）。
     await waitFor(tester, () => nativeCalls.contains('enterOverlay'));
     await socket.close();
     await waitFor(

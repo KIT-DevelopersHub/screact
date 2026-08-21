@@ -43,6 +43,7 @@ docs/
 ### Desktop
 
 - [デスクトップアプリ要件定義書](./desktop/desktop-app-requirements.md): PC側の機能・非機能要件
+- [PR #24後の手座標・ジェスチャー精度改善レビュー](./hand-coordinate-and-gesture-precision-review.md): 2手対応後の画面境界、安全解除、主トラック、ジェスチャー精度の実装順と評価基準
 
 ## 編集ルール
 

@@ -22,6 +22,7 @@ enum InteractionKind {
   pressUp, // 押下解除
   click, // 短いピンチ＝クリック（オーバーレイ表示用・OS側は down/up で表現）
   scroll,
+  pointerExit, // 画面外遷移。カーソルだけ隠し、検出中の骨格は保持する
   release, // トラッキング喪失などで安全解除
 }
 
@@ -71,9 +72,16 @@ class InteractionEngine {
   Vec2? _lastScreen;
   // スクロール状態
   Vec2? _lastScrollAnchor;
+  // 画面境界状態
+  Vec2? _lastRawSurface;
+  bool _outside = false;
+  int _insideStreak = 0;
+  bool _blockPressUntilNeutral = false;
+  bool _primaryNeutral = false;
 
   static const int _clickMaxMs = 260;
   static const double _clickMaxMove = 0.02;
+  static const int _reentryStableFrames = 2;
 
   InteractionEngine({
     GestureRecognizer? recognizer,
@@ -86,6 +94,9 @@ class InteractionEngine {
        config = config ?? CalibrationConfig();
 
   bool get isCalibrated => _homography != null;
+  Vec2? get lastRawSurfacePoint => _lastRawSurface;
+  bool get isPointerInside => !_outside && _lastScreen != null;
+  bool get canAcquirePrimary => isPointerInside && _primaryNeutral;
 
   /// 現在の位置合わせ（ホモグラフィ）。session内の全トラックで共有するため
   /// MultiHandEngine が読み出し、新規トラックのエンジンへ配布する。
@@ -175,15 +186,21 @@ class InteractionEngine {
   }
 
   /// 未校正時は恒等（カメラ座標をそのまま画面座標とみなす）。
-  Vec2 _toScreen(Vec2 cam) {
-    final s = _homography?.map(cam) ?? cam;
-    return Vec2(s.x.clamp(0.0, 1.0), s.y.clamp(0.0, 1.0));
-  }
+  /// 範囲外を保持し、画面内外判定より前にクリップしない。
+  Vec2 _toSurface(Vec2 cam) => _homography?.map(cam) ?? cam;
 
-  Vec2 _filteredScreen(Vec2 cameraPoint, int timestampMs) {
-    final raw = _toScreen(cameraPoint);
-    return _smoothingEnabled ? _screenFilter.filter(raw, timestampMs) : raw;
-  }
+  Vec2 _filteredScreen(Vec2 surfacePoint, int timestampMs) =>
+      _smoothingEnabled
+          ? _screenFilter.filter(surfacePoint, timestampMs)
+          : surfacePoint;
+
+  static bool _isInside(Vec2 point) =>
+      point.x.isFinite &&
+      point.y.isFinite &&
+      point.x >= 0 &&
+      point.x <= 1 &&
+      point.y >= 0 &&
+      point.y <= 1;
 
   /// 1フレーム処理。安全解除も含め、UI/OSへ渡すイベント列を返す。
   ///
@@ -200,6 +217,18 @@ class InteractionEngine {
 
     final t = f.capturedAtMonotonicMs;
     final events = <InteractionEvent>[];
+    final rawIndex = _toSurface(pose.indexTip);
+    _lastRawSurface = rawIndex;
+    if (!_isInside(rawIndex)) return _onPointerOutside(pose);
+
+    if (_outside) {
+      _insideStreak++;
+      _primaryNeutral = false;
+      if (_insideStreak < _reentryStableFrames) return const [];
+      _outside = false;
+      _insideStreak = 0;
+    }
+    if (!pose.pinching) _blockPressUntilNeutral = false;
 
     // 1) スクロール: 人差し指＋中指を立てて動かす（くっつき/ピンチしていない時）。
     final scrolling =
@@ -208,8 +237,9 @@ class InteractionEngine {
         pose.indexUp &&
         pose.middleUp &&
         pose.extendedFingers >= 2;
+    _primaryNeutral = !pose.pinching && !pose.fingersTogether && !scrolling;
     if (scrolling) {
-      final screen = _filteredScreen(pose.indexTip, t);
+      final screen = _filteredScreen(rawIndex, t);
       if (_drawing) events.addAll(_endDraw(screen));
       if (_pressed) events.addAll(_endPress(screen: screen, tMs: t));
       if (_lastScrollAnchor != null) {
@@ -230,7 +260,11 @@ class InteractionEngine {
     // 2) インク描画: 人差し指と中指がくっついている → 中間点で線を引く。
     if (pose.fingersTogether) {
       if (_pressed) events.addAll(_endPress(screen: null, tMs: t)); // 排他解除
-      final screen = _filteredScreen(pose.drawPoint, t);
+      final rawDraw = _toSurface(pose.drawPoint);
+      final screen = _filteredScreen(
+        _isInside(rawDraw) ? rawDraw : rawIndex,
+        t,
+      );
       if (!_drawing) {
         _drawing = true;
         events.add(InteractionEvent(InteractionKind.drawDown, screen));
@@ -241,13 +275,14 @@ class InteractionEngine {
       return events;
     } else if (_drawing) {
       // くっつきが解けた: インクを確定（drawUp）。同フレームで下の分岐も評価する。
-      final endAt = _filteredScreen(pose.drawPoint, t);
+      final rawDraw = _toSurface(pose.drawPoint);
+      final endAt = _filteredScreen(_isInside(rawDraw) ? rawDraw : rawIndex, t);
       events.addAll(_endDraw(endAt));
     }
 
     // 3) OSクリック/ドラッグ（ピンチ）／4) ポインタ移動（人差し指先端）。
-    final screen = _filteredScreen(pose.indexTip, t);
-    if (pose.pinching) {
+    final screen = _filteredScreen(rawIndex, t);
+    if (pose.pinching && !_blockPressUntilNeutral) {
       if (!_pressed) {
         _pressed = true;
         _pressStart = screen;
@@ -267,18 +302,41 @@ class InteractionEngine {
     return events;
   }
 
+  List<InteractionEvent> _onPointerOutside(HandPose pose) {
+    final events = <InteractionEvent>[];
+    final at = _lastScreen ?? const Vec2(0, 0);
+    if (!_outside) {
+      if (_drawing) events.addAll(_endDraw(at));
+      if (_pressed) {
+        events.addAll(_endPress(screen: at, allowClick: false));
+      }
+      events.add(InteractionEvent(InteractionKind.pointerExit, at));
+    }
+    _outside = true;
+    _insideStreak = 0;
+    _blockPressUntilNeutral = pose.pinching;
+    _primaryNeutral = false;
+    _lastScrollAnchor = null;
+    _screenFilter.reset();
+    return events;
+  }
+
   /// 描画（2本指くっつき）の終了。インクを確定する。
   List<InteractionEvent> _endDraw(Vec2 screen) {
     _drawing = false;
     return [InteractionEvent(InteractionKind.drawUp, screen)];
   }
 
-  List<InteractionEvent> _endPress({Vec2? screen, int? tMs}) {
+  List<InteractionEvent> _endPress({
+    Vec2? screen,
+    int? tMs,
+    bool allowClick = true,
+  }) {
     final at = screen ?? _lastScreen ?? const Vec2(0, 0);
     final events = <InteractionEvent>[];
     final dur = (tMs ?? _pressStartMs) - _pressStartMs;
     final moved = (_pressStart ?? at).distanceTo(at);
-    if (dur <= _clickMaxMs && moved <= _clickMaxMove) {
+    if (allowClick && dur <= _clickMaxMs && moved <= _clickMaxMove) {
       events.add(InteractionEvent(InteractionKind.click, at));
     }
     events.add(InteractionEvent(InteractionKind.pressUp, at));
@@ -301,6 +359,11 @@ class InteractionEngine {
     _pressStart = null;
     _drawing = false;
     _lastScrollAnchor = null;
+    _lastRawSurface = null;
+    _outside = false;
+    _insideStreak = 0;
+    _blockPressUntilNeutral = false;
+    _primaryNeutral = false;
     _screenFilter.reset();
     _rec.reset();
     return events;

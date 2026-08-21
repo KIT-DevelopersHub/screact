@@ -74,6 +74,20 @@ void main() {
       findsOneWidget,
     );
 
+    // 初期画面はIP/ポートを常時表示せず、控えめな手動接続リンクだけを出す。
+    expect(find.byKey(const ValueKey('manual-connect-toggle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('connection-info')), findsNothing);
+    // リンクを押した時だけ手動接続情報（IP/ポート）が開く。
+    await tester.tap(find.byKey(const ValueKey('manual-connect-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('connection-info')), findsOneWidget);
+    expect(find.text('IPアドレス'), findsOneWidget);
+    expect(find.text('IPポート'), findsOneWidget);
+    // もう一度押すと閉じる。
+    await tester.tap(find.byKey(const ValueKey('manual-connect-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('connection-info')), findsNothing);
+
     await navigateFromDrawer(tester, 'nav-calibration');
     expect(find.byKey(const ValueKey('calibration-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('calibration-start')), findsOneWidget);
@@ -120,9 +134,15 @@ void main() {
           find.byKey(const ValueKey('connection-page')),
           viewport,
         );
+        // IP/ポートは常時表示せず、手動接続の控えめなリンクだけを出す。
+        expect(
+          find.byKey(const ValueKey('connection-info')),
+          findsNothing,
+          reason: '初期画面ではIP/ポートを中央に常時表示しない',
+        );
         expectInViewport(
           tester,
-          find.byKey(const ValueKey('connection-info')),
+          find.byKey(const ValueKey('manual-connect-toggle')),
           viewport,
         );
         expectInViewport(

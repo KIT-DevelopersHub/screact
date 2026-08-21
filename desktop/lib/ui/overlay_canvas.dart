@@ -26,10 +26,9 @@ class OverlayCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: model,
-      builder: (_, __) => CustomPaint(
-        painter: _OverlayPainter(model),
-        size: Size.infinite,
-      ),
+      builder:
+          (_, __) =>
+              CustomPaint(painter: _OverlayPainter(model), size: Size.infinite),
     );
   }
 }
@@ -42,19 +41,26 @@ class _OverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+
     // インク（トラック別の色）。
     for (final stroke in model.strokes) {
       final color = OverlayCanvas.colorForSlot(stroke.colorSlot);
-      final ink = Paint()
-        ..color = color
-        ..strokeWidth = 4
-        ..strokeCap = StrokeCap.round
-        ..style = PaintingStyle.stroke;
+      final ink =
+          Paint()
+            ..color = color
+            ..strokeWidth = 4
+            ..strokeCap = StrokeCap.round
+            ..style = PaintingStyle.stroke;
       final pts = stroke.points;
       if (pts.isEmpty) continue;
       if (pts.length == 1) {
         canvas.drawCircle(
-            _p(pts.first, size), ink.strokeWidth / 2, Paint()..color = color);
+          _p(pts.first, size),
+          ink.strokeWidth / 2,
+          Paint()..color = color,
+        );
         continue;
       }
       // 中点スムージング: 各点を制御点に、隣接中点を終点にした2次ベジェで
@@ -65,7 +71,12 @@ class _OverlayPainter extends CustomPainter {
       for (var i = 1; i < pts.length - 1; i++) {
         final c = _p(pts[i], size);
         final n = _p(pts[i + 1], size);
-        path.quadraticBezierTo(c.dx, c.dy, (c.dx + n.dx) / 2, (c.dy + n.dy) / 2);
+        path.quadraticBezierTo(
+          c.dx,
+          c.dy,
+          (c.dx + n.dx) / 2,
+          (c.dy + n.dy) / 2,
+        );
       }
       final last = _p(pts.last, size);
       path.lineTo(last.dx, last.dy);
@@ -101,20 +112,23 @@ class _OverlayPainter extends CustomPainter {
         );
       }
     }
+    canvas.restore();
   }
 
   void _paintSkeleton(Canvas canvas, Size size, List<Vec2> lm, Color color) {
-    final bone = Paint()
-      ..color = color.withValues(alpha: 0.85)
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    final bone =
+        Paint()
+          ..color = color.withValues(alpha: 0.85)
+          ..strokeWidth = 3
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
     for (final c in HandSkeleton.connections) {
       canvas.drawLine(_p(lm[c[0]], size), _p(lm[c[1]], size), bone);
     }
-    final joint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    final joint =
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.fill;
     for (final p in lm) {
       canvas.drawCircle(_p(p, size), 3, joint);
     }

@@ -81,6 +81,15 @@ class PairingController extends ChangeNotifier {
         _selected == null &&
         discovery.devices.isNotEmpty) {
       _selected = discovery.devices.first;
+    } else if (_phase == PairingPhase.timeout && discovery.devices.isNotEmpty) {
+      // タイムアウト後も offer を流し続けているため、遅れて待受を始めたスマホが
+      // 現れることがある。その場合は再検索を挟まず接続待ちへ戻す。
+      _selected = discovery.devices.first;
+      _phase = PairingPhase.waitingConnect;
+      // 発見後もWebSocket接続が成立しなければ、再び手動接続案内へ戻せるよう
+      // 待機時間を取り直す。接続不能時に waitingConnect へ固定しない。
+      _timeoutTimer?.cancel();
+      _timeoutTimer = Timer(searchTimeout, _onSearchTimeout);
     }
     notifyListeners();
   }
@@ -90,7 +99,11 @@ class PairingController extends ChangeNotifier {
         _phase != PairingPhase.waitingConnect) {
       return;
     }
-    _teardown();
+    // 発見（offerブロードキャスト）は止めない。15秒はあくまでUIの見切りで、
+    // ここで teardown するとスマホが後から待受を始めても offer が届かず永久に
+    // つながらない。offer は1秒間隔で流し続け、UIだけ手動/QR案内へ切り替える。
+    // 一度きりのタイムアウトタイマーは発火済みなので参照だけ落とす（リークなし）。
+    _timeoutTimer = null;
     _phase = PairingPhase.timeout;
     notifyListeners();
   }

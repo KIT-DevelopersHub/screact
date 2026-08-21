@@ -372,7 +372,7 @@ class InputServer {
     _processing = false;
   }
 
-  /// 主トラック（最小trackId）のイベントをOS入力へ、全トラックをオーバーレイへ。
+  /// 安定して保持する主トラックのイベントをOS入力へ、全トラックをオーバーレイへ。
   void _dispatch(Map<int, List<InteractionEvent>> byTrack) {
     if (byTrack.isEmpty) return;
     final primary = engine.primaryTrackIdOf(byTrack);

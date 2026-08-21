@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasNoScrollAction
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -135,6 +137,22 @@ class ProductionScreenComposeTest {
 
         assertTrue(disconnectClicked)
         assertDebugControlsAbsent()
+    }
+
+    @Test
+    fun helpDefaultsToSingleHandAndCanSelectDualHand() {
+        var selectedHands = 0
+        setScreen(
+            state = connectedState().copy(tracking = TrackingUiState.READY_NO_HAND),
+            maxHands = 1,
+            onMaxHandsChange = { selectedHands = it },
+        )
+
+        composeRule.onNodeWithTag("production_help_button").performClick()
+        composeRule.onNodeWithTag("hand_mode_single").assertIsSelected()
+        composeRule.onNodeWithTag("hand_mode_dual").performClick()
+
+        assertEquals(2, selectedHands)
     }
 
     @Test
@@ -344,30 +362,36 @@ class ProductionScreenComposeTest {
 
     private fun setScreen(
         state: ProductionUiState,
+        maxHands: Int = 1,
         onConnect: (String, String, String) -> String? = { _, _, _ -> null },
         onStartAutoPairing: () -> Unit = {},
         onCancelAutoPairing: () -> Unit = {},
         onDisconnect: () -> Unit = {},
         onRetryNow: () -> Unit = {},
         onChangeConnectionSettings: () -> Unit = {},
+        onMaxHandsChange: (Int) -> Unit = {},
     ) = setScreenContent(
         stateProvider = { state },
+        maxHands = maxHands,
         onConnect = onConnect,
         onStartAutoPairing = onStartAutoPairing,
         onCancelAutoPairing = onCancelAutoPairing,
         onDisconnect = onDisconnect,
         onRetryNow = onRetryNow,
         onChangeConnectionSettings = onChangeConnectionSettings,
+        onMaxHandsChange = onMaxHandsChange,
     )
 
     private fun setScreenContent(
         stateProvider: () -> ProductionUiState,
+        maxHands: Int = 1,
         onConnect: (String, String, String) -> String? = { _, _, _ -> null },
         onStartAutoPairing: () -> Unit = {},
         onCancelAutoPairing: () -> Unit = {},
         onDisconnect: () -> Unit = {},
         onRetryNow: () -> Unit = {},
         onChangeConnectionSettings: () -> Unit = {},
+        onMaxHandsChange: (Int) -> Unit = {},
     ) {
         composeRule.setContent {
             MaterialTheme {
@@ -376,6 +400,7 @@ class ProductionScreenComposeTest {
                     savedHost = "127.0.0.1",
                     savedPort = 8080,
                     hasTrustedPc = false,
+                    maxHands = maxHands,
                     cameraPermissionPermanentlyDenied = false,
                     previewContent = { Box(Modifier.fillMaxSize()) },
                     onRequestCameraPermission = {},
@@ -389,6 +414,7 @@ class ProductionScreenComposeTest {
                     onRetryNow = onRetryNow,
                     onChangeConnectionSettings = onChangeConnectionSettings,
                     onForgetTrustedPc = {},
+                    onMaxHandsChange = onMaxHandsChange,
                 )
             }
         }
