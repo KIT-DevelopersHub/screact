@@ -203,6 +203,11 @@ WebSocket失敗が2〜3回あったが、Androidの再試行で30秒以内に復
 初回接続の短縮回帰はAndroid先行2回・Desktop先行2回の4/4成功、offer受信から
 `hello_ack`は160〜257msだった。デモ時のフォールバックは引き続き手動IP・ポート・6桁コード入力とする。
 
+同日の通常Wi-Fi `/24`実機確認では、Android先行1回・Desktop先行1回の初回自動接続が
+2/2成功した。offer受信から`hello_ack`は241〜309ms、10秒超過と`hello_ack_timeout`は
+どちらも0だった。これによりiPhoneテザリング固有の`/28`だけでなく、通常LANでも従来の
+自動接続経路が維持されていることを確認した。
+
 ## 回帰テスト
 
 - Desktop codec: probe、app/schema、port、6桁token、legacy select/ACK
