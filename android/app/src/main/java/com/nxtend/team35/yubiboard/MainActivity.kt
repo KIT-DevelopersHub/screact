@@ -225,10 +225,12 @@ class MainActivity : ComponentActivity() {
             },
         )
         cameraSession.setFrameConsumer { image ->
+            // 前面カメラはプレビューがミラー表示されるため、解析画像も水平反転して座標系を一致させる。
+            val mirror = cameraSession.isFrontFacing
             if (currentMode == CaptureMode.CALIBRATION) {
-                arucoMarkerProcessor.process(image)
+                arucoMarkerProcessor.process(image, mirror)
             } else {
-                handLandmarkerProcessor.process(image)
+                handLandmarkerProcessor.process(image, mirror)
             }
         }
 

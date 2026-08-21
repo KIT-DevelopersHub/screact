@@ -46,7 +46,7 @@ class HandLandmarkerProcessor(
         }.onFailure(onError)
     }
 
-    fun process(image: ImageProxy) {
+    fun process(image: ImageProxy, mirror: Boolean = false) {
         val detector = handLandmarker
         if (detector == null) {
             image.close()
@@ -55,7 +55,7 @@ class HandLandmarkerProcessor(
 
         val capturedAt = SystemClock.uptimeMillis()
         AppDiagnostics.increment("hand.frames_submitted")
-        val correctedBitmap = image.toCorrectedBitmap()
+        val correctedBitmap = image.toCorrectedBitmap(mirror)
         val mpImage = BitmapImageBuilder(correctedBitmap).build()
         runCatching { detector.detectAsync(mpImage, capturedAt) }
             .onFailure(onError)

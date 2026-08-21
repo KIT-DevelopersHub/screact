@@ -265,7 +265,11 @@ class YubiBoardWebSocketClient(
             sessionId = activeSession,
             frameId = frameId.incrementAndGet(),
             capturedAtMonotonicMs = result.capturedAtMonotonicMs,
-            source = SourceInfo(result.sourceWidth, result.sourceHeight),
+            source = SourceInfo(
+                result.sourceWidth,
+                result.sourceHeight,
+                mirrorCorrected = result.mirrorCorrected,
+            ),
             hands = hands,
             hand = if (primary != null) {
                 HandPayload(
@@ -359,7 +363,11 @@ class YubiBoardWebSocketClient(
         val message = CalibrationMarkersMessage(
             sessionId = activeSession,
             capturedAtMonotonicMs = result.capturedAtMonotonicMs,
-            source = SourceInfo(result.sourceWidth, result.sourceHeight),
+            source = SourceInfo(
+                result.sourceWidth,
+                result.sourceHeight,
+                mirrorCorrected = result.mirrorCorrected,
+            ),
             markers = result.markers.map { marker ->
                 MarkerPayload(
                     id = marker.id,

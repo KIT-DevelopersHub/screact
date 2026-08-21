@@ -25,7 +25,7 @@ class ArucoMarkerProcessor(
         }.onFailure(onError).getOrNull()
     }
 
-    fun process(image: ImageProxy) {
+    fun process(image: ImageProxy, mirror: Boolean = false) {
         val activeDetector = detector
         if (activeDetector == null) {
             image.close()
@@ -33,7 +33,7 @@ class ArucoMarkerProcessor(
         }
         val capturedAt = SystemClock.uptimeMillis()
         runCatching {
-            val bitmap = image.toCorrectedBitmap()
+            val bitmap = image.toCorrectedBitmap(mirror)
             val rgba = Mat()
             val gray = Mat()
             val ids = Mat()

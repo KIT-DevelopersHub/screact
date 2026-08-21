@@ -19,4 +19,6 @@ data class MarkerDetectionResult(
     val stable: Boolean,
     val stableFrameCount: Int = 0,
     val requiredStableFrames: Int = MarkerStabilityTracker.DEFAULT_REQUIRED_STABLE_FRAMES,
+    /** マーカー座標が表示（ミラー補正済み）座標系か。前面カメラも補正するため常に true。 */
+    val mirrorCorrected: Boolean = true,
 )
