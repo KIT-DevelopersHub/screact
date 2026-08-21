@@ -5,7 +5,7 @@ import 'package:thehack_overlay/core/interaction_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 
 /// ジェスチャー仕様変更のテスト:
-/// - 描画 = 人差し指と中指がくっつく（drawDown/drawMove）・筆点は中間点
+/// - 描画 = 人差し指と中指がくっつく（drawDown/drawMove）・筆点は人差し指先端
 /// - OSクリック = つまむ（ピンチ）→ pressDown/pressUp（インクは引かない）
 void main() {
   group('GestureRecognizer', () {
@@ -149,7 +149,7 @@ void main() {
       expect(up.any((x) => x.kind == InteractionKind.pressUp), isTrue);
     });
 
-    test('描画中の筆点は中間点（人差し指先端と一致しない）', () {
+    test('描画中の筆点は人差し指先端（中指との中間点は使わない）', () {
       final e = calibrated();
       InteractionEvent? draw;
       for (var i = 0; i < 3; i++) {
@@ -167,10 +167,12 @@ void main() {
           }
         }
       }
-      // 中間点(0.51,0.5)→homography（0.1..0.9→0..1）で 0.5125 付近。人差し指
-      // 先端0.5とは異なる（中間点が使われている証拠）。
+      // 人差し指先端(0.5,0.5)→homography（0.1..0.9→0..1）で 0.5 付近。
+      // 中間点(0.51)由来の 0.5125 とは異なる＝人差し指先端が使われている証拠。
+      // ※トリガー条件（together=true・人差し指＋中指くっつき）は不変。
       expect(draw, isNotNull);
-      expect(draw!.screen.x, greaterThan(0.5));
+      expect(draw!.screen.x, closeTo(0.5, 0.02));
+      expect(draw!.screen.x, lessThan(0.51));
     });
   });
 }
