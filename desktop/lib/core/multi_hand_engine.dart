@@ -27,6 +27,7 @@ class MultiHandEngine {
   // OS入力は単一カーソルなので、イベント発生有無とは独立して所有者を保持する。
   int? _primaryTrackId;
   int? _dispatchPrimaryTrackId;
+  bool _primaryAcquiredThisFrame = false;
   int? _primaryCandidateTrackId;
   int _primaryCandidateStreak = 0;
 
@@ -136,6 +137,7 @@ class MultiHandEngine {
 
     final previousPrimary = _primaryTrackId;
     _dispatchPrimaryTrackId = null;
+    _primaryAcquiredThisFrame = false;
     final result = <int, List<InteractionEvent>>{};
     final seen = <int>{};
     for (final track in frame.tracks) {
@@ -180,7 +182,11 @@ class MultiHandEngine {
 
   void _advancePrimaryCandidate() {
     final candidates = _tracks.entries
-      .where((entry) => entry.value.canAcquirePrimary)
+      // 実機では画面へ入った最初の姿勢がscroll/pinch/drawと判定されることが
+      // ある。neutral限定では主トラックが永久に選ばれず、OS入力が全停止する。
+      // 画面内に安定して存在するtrackIdを所有者にし、ジェスチャー途中の安全は
+      // primaryEventsOf側で補う。
+      .where((entry) => entry.value.isPointerInside)
       .map((entry) => entry.key)
       .toList(growable: false)..sort();
     if (candidates.isEmpty) {
@@ -199,6 +205,7 @@ class MultiHandEngine {
 
     _primaryTrackId = candidate;
     _dispatchPrimaryTrackId = candidate;
+    _primaryAcquiredThisFrame = true;
     _resetPrimaryCandidate();
   }
 
@@ -228,5 +235,27 @@ class MultiHandEngine {
   int? primaryTrackIdOf(Map<int, List<InteractionEvent>> byTrack) {
     final id = _dispatchPrimaryTrackId;
     return id != null && byTrack.containsKey(id) ? id : null;
+  }
+
+  /// OS単一カーソルへ流すイベント。主トラックの安定選出がピンチ開始後に
+  /// 完了した場合は、pressMoveだけを送って押下なしドラッグにしないよう
+  /// 現在位置でpressDownを補完する。
+  List<InteractionEvent>? primaryEventsOf(
+    Map<int, List<InteractionEvent>> byTrack,
+  ) {
+    final id = primaryTrackIdOf(byTrack);
+    if (id == null) return null;
+    final events = byTrack[id]!;
+    if (!_primaryAcquiredThisFrame ||
+        !events.any((event) => event.kind == InteractionKind.pressMove)) {
+      return events;
+    }
+    final move = events.firstWhere(
+      (event) => event.kind == InteractionKind.pressMove,
+    );
+    return [
+      InteractionEvent(InteractionKind.pressDown, move.screen),
+      ...events,
+    ];
   }
 }

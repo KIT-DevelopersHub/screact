@@ -268,6 +268,15 @@ void main() {
     expect(enabled(tester, productionButton('server-toggle')), isTrue);
     expect(enabled(tester, productionButton('server-stop')), isTrue);
 
+    expect(find.byKey(const ValueKey('show-qr')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('show-qr')));
+    await settle(tester);
+    expect(find.text('QRコードで接続'), findsOneWidget);
+    expect(find.textContaining('スマホのカメラでこのQR'), findsOneWidget);
+    await tester.tap(find.text('閉じる'));
+    await settle(tester);
+    expect(find.text('QRコードで接続'), findsNothing);
+
     await tester.tap(find.byKey(const ValueKey('pairing-retry')));
     await settle(tester, const Duration(milliseconds: 40));
     expect(find.textContaining('スマホを検索'), findsOneWidget);

@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        AppDiagnostics.event("app", "activity_created")
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         runCatching {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
