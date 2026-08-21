@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -198,6 +199,32 @@ void main() {
   });
 
   group('DesktopDiscovery（loopback実ソケット往復）', () {
+    test('IF列挙中に停止してもsocketとofferタイマーが復活しない', () async {
+      final providerStarted = Completer<void>();
+      final providerResult = Completer<List<String>>();
+      var logCount = 0;
+      final discovery = DesktopDiscovery(
+        token: '123456',
+        wsPort: 8765,
+        subnetBroadcastsProvider: () {
+          providerStarted.complete();
+          return providerResult.future;
+        },
+        onLog: (_) => logCount++,
+      );
+
+      final starting = discovery.start();
+      await providerStarted.future;
+      discovery.stop();
+      providerResult.complete(const ['192.168.1.255']);
+      await starting;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(discovery.running, isFalse);
+      expect(logCount, 0);
+      discovery.dispose();
+    });
+
     /// テスト用のAndroid応答シミュレータ。1ソケットで複数deviceIdを演じられる。
     Future<(RawDatagramSocket, List<Map<String, dynamic>>)> startResponder(
       List<String> deviceIds,

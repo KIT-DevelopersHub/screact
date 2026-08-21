@@ -86,6 +86,10 @@ class PairingController extends ChangeNotifier {
       // 現れることがある。その場合は再検索を挟まず接続待ちへ戻す。
       _selected = discovery.devices.first;
       _phase = PairingPhase.waitingConnect;
+      // 発見後もWebSocket接続が成立しなければ、再び手動接続案内へ戻せるよう
+      // 待機時間を取り直す。接続不能時に waitingConnect へ固定しない。
+      _timeoutTimer?.cancel();
+      _timeoutTimer = Timer(searchTimeout, _onSearchTimeout);
     }
     notifyListeners();
   }
