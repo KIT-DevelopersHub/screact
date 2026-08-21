@@ -50,10 +50,19 @@ enum TrackingUiState {
     case longLost
 }
 
+/// ゼロコンフィグ・ペアリング（自動発見）の状態。Android の PairingUiState と一致。
+enum PairingUiState {
+    /// 待受していない（「画面認識開始」待ち）。
+    case idle
+    /// PC を自動発見中（「画面認識開始」を押した後）。
+    case waiting
+}
+
 enum ProductionStage {
     case cameraPermission
     case cameraError
     case connect
+    case discoveryWaiting
     case connecting
     case autoConnecting
     case connectionError
@@ -66,6 +75,7 @@ enum ProductionVisualState {
     case cameraPermission
     case cameraError
     case connectionForm
+    case discoveryWaiting
     case connectionProgress
     case reconnecting
     case placement
@@ -80,6 +90,7 @@ struct ProductionUiState {
     var captureMode: CaptureMode = .tracking
     var calibration: CalibrationUiState = .inactive
     var tracking: TrackingUiState = .inactive
+    var pairing: PairingUiState = .idle
     var indexTip: LandmarkPoint?
     var markers: [DetectedMarker] = []
     var sourceWidth: Int = 0
@@ -93,7 +104,7 @@ struct ProductionUiState {
         case .error: return .connectionError
         case .reconnecting: return .reconnecting
         case .connecting, .awaitingAck: return connection.automatic ? .autoConnecting : .connecting
-        case .disconnected: return .connect
+        case .disconnected: return pairing == .waiting ? .discoveryWaiting : .connect
         case .connected:
             return captureMode == .calibration ? .calibration : .ready
         }
@@ -104,6 +115,7 @@ struct ProductionUiState {
         case .cameraPermission: return .cameraPermission
         case .cameraError: return .cameraError
         case .connect, .connectionError: return .connectionForm
+        case .discoveryWaiting: return .discoveryWaiting
         case .connecting, .autoConnecting: return .connectionProgress
         case .reconnecting: return .reconnecting
         case .calibration:

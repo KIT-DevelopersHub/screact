@@ -24,6 +24,8 @@ struct ProductionScreen<Preview: View>: View {
     let onOpenSystemSettings: () -> Void
     let onRetryCamera: () -> Void
     let onConnect: (String, String, String) -> String?
+    let onStartAutoPairing: () -> Void
+    let onCancelAutoPairing: () -> Void
     let onCancelConnection: () -> Void
     let onDisconnect: () -> Void
     let onRetryNow: () -> Void
@@ -36,6 +38,9 @@ struct ProductionScreen<Preview: View>: View {
     @State private var formError: String?
     @State private var showHelp = false
     @State private var initialized = false
+    // 手動接続（IP・6桁コード入力）は自動発見が届かない環境向けのフォールバック。
+    // 既定は Bonjour 自動発見（autoConnectPanel）で、このトグルを立てた時だけ手入力フォームを出す。
+    @State private var showManual = false
 
     var body: some View {
         GeometryReader { geo in
@@ -109,7 +114,12 @@ struct ProductionScreen<Preview: View>: View {
         switch state.visualState {
         case .cameraPermission: cameraPermissionPanel
         case .cameraError: cameraErrorPanel
-        case .connectionForm: connectionFormPanel
+        // Step 1（Android と同じ前段）: 起動直後の既定は「画面認識をはじめましょう」。
+        // IP・6桁コードの手入力フォームは「手動で接続する」を押した時だけ前面に出す。
+        case .connectionForm:
+            if showManual { connectionFormPanel } else { autoPairingStartPanel }
+        // Step 2: 「画面認識開始」を押した後の自動発見待受画面。
+        case .discoveryWaiting: discoveryWaitingPanel
         case .connectionProgress: connectionProgressPanel
         case .reconnecting: reconnectingPanel
         case .placement: placementPanel
@@ -140,6 +150,50 @@ struct ProductionScreen<Preview: View>: View {
         }
     }
 
+    /// Step 1（Android AutoPairingStartPanel 相当）: 起動直後の既定画面。
+    /// 「画面認識開始」を押すと自動発見（Step 2）へ進む。手動接続はリンクの奥に隠す。
+    private var autoPairingStartPanel: some View {
+        VStack(spacing: 12) {
+            titleText(stageTitle)
+            character(size: 116)
+            bodyText(stageMessage)
+            filledButton("画面認識開始", action: onStartAutoPairing)
+            manualToggleButton(title: "手動で接続する（IP・6桁コード）") {
+                onCancelAutoPairing()
+                formError = nil
+                showManual = true
+            }
+        }
+    }
+
+    /// Step 2（Android DiscoveryWaitingPanel 相当）: 「画面認識開始」後の自動発見待受。
+    private var discoveryWaitingPanel: some View {
+        VStack(spacing: 12) {
+            titleText(stageTitle)
+            character(size: 108)
+            bodyText(stageMessage)
+            ProgressView()
+                .progressViewStyle(.linear)
+                .tint(GuideColors.ink)
+                .frame(maxWidth: 220)
+                .padding(.vertical, 2)
+            outlinedButton("キャンセル", action: onCancelAutoPairing)
+            manualToggleButton(title: "手動で接続する（IP・6桁コード）") {
+                onCancelAutoPairing()
+                formError = nil
+                showManual = true
+            }
+        }
+    }
+
+    private func manualToggleButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(GuideColors.bodyInk)
+        }
+    }
+
     private var connectionFormPanel: some View {
         VStack(spacing: 12) {
             ZStack(alignment: .leading) {
@@ -157,6 +211,10 @@ struct ProductionScreen<Preview: View>: View {
             }
             filledButton("接続", widthFraction: 0.6) {
                 formError = onConnect(host, port, token)
+            }
+            manualToggleButton(title: "自動検出に戻る") {
+                formError = nil
+                showManual = false
             }
         }
     }
@@ -392,7 +450,8 @@ struct ProductionScreen<Preview: View>: View {
         switch state.stage {
         case .cameraPermission: return "手の動きを読み取るためにカメラを使います"
         case .cameraError: return "カメラを起動できません"
-        case .connect: return "PCに接続"
+        case .connect: return "画面認識をはじめましょう"
+        case .discoveryWaiting: return "PCからの接続を待っています"
         case .connecting: return "PCに接続しています"
         case .autoConnecting: return "前回のPCに接続しています"
         case .connectionError: return connectionErrorTitle(state.connection.errorCode)
@@ -421,7 +480,8 @@ struct ProductionScreen<Preview: View>: View {
         switch state.stage {
         case .cameraPermission: return "背面カメラで手とPC画面のマーカーを検出します。"
         case .cameraError: return "ほかのアプリがカメラを使用していないか確認してください。"
-        case .connect: return "接続情報はPCアプリに表示されています。"
+        case .connect: return "PC画面全体が映る位置に端末を固定して、ボタンを押してください。"
+        case .discoveryWaiting: return "PC側で「スマホ設置完了」を押すと自動で接続されます。"
         case .connecting: return "通常は5秒以内に応答します。"
         case .autoConnecting: return "保存済みの信頼済み接続情報を使用しています。"
         case .connectionError: return connectionErrorMessage(state.connection.errorCode)

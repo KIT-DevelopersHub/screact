@@ -27,6 +27,8 @@ struct ContentView: View {
             onOpenSystemSettings: openSystemSettings,
             onRetryCamera: viewModel.retryCamera,
             onConnect: { host, port, token in viewModel.connect(host: host, portText: port, pairingToken: token) },
+            onStartAutoPairing: viewModel.startAutoPairing,
+            onCancelAutoPairing: viewModel.cancelAutoPairing,
             onCancelConnection: viewModel.disconnect,
             onDisconnect: viewModel.disconnect,
             onRetryNow: viewModel.retryNow,

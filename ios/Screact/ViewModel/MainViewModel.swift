@@ -76,9 +76,22 @@ final class MainViewModel: ObservableObject {
         webSocketClient.setMaxFrameRate(settings.maxSendFps)
         makeProcessors()
         trustedCoordinator.autoConnect()
-        // 信頼済みPCが無い場合のみ Bonjour 自動発見を起動する（信頼済みなら resume で自動接続され、
-        // 無効化されたら handleTrustedConnectionInvalid が Bonjour を起こす）。
-        if !hasTrustedPc { armBonjour() }
+        // Android と同じく、起動直後は自動発見を始めない（Step 1「画面認識開始」待ち）。
+        // 信頼済みPCがあれば上の autoConnect() が resume 接続する。
+    }
+
+    // MARK: - 自動ペアリング（Android startAutoPairing/cancelAutoPairing と一致）
+
+    /// 「画面認識開始」: Bonjour 自動発見を開始し、待受表示（Step 2）へ進む。
+    func startAutoPairing() {
+        armBonjour()
+        updateProduction { $0.pairing = .waiting; $0.notice = nil }
+    }
+
+    /// 待受のキャンセル: 自動発見を止め、Step 1（「画面認識開始」待ち）へ戻す。
+    func cancelAutoPairing() {
+        stopBonjour()
+        updateProduction { $0.pairing = .idle; $0.notice = nil }
     }
 
     // MARK: - Bonjour 自動発見（iOS のゼロコンフィグ接続）
@@ -109,7 +122,7 @@ final class MainViewModel: ObservableObject {
         // 1回発見したら発火を止め、以後の再接続は WebSocket クライアントの再接続ロジックに委ねる。
         bonjourArmed = false
         bonjour?.stop()
-        updateProduction { $0.notice = nil }
+        updateProduction { $0.pairing = .idle; $0.notice = nil }
         webSocketClient.connect(config)
     }
 
@@ -207,6 +220,7 @@ final class MainViewModel: ObservableObject {
     func disconnect() {
         // ユーザが明示的に切断した場合は自動再接続しない。
         stopBonjour()
+        updateProduction { $0.pairing = .idle; $0.notice = nil }
         webSocketClient.disconnect()
         trustedCoordinator.forget()
         trustedConnection = nil
@@ -215,16 +229,17 @@ final class MainViewModel: ObservableObject {
     func retryNow() { webSocketClient.retryNow() }
 
     func changeConnectionSettings() {
+        stopBonjour()
         webSocketClient.disconnect()
         trustedCoordinator.forget()
         trustedConnection = nil
+        // Android と同じく、接続先の再選択後は Step 1（「画面認識開始」待ち）へ戻す。
         updateProduction {
             $0.connection = ConnectionSnapshot(.disconnected)
             $0.calibration = .inactive
             $0.tracking = .inactive
+            $0.pairing = .idle
         }
-        // 接続先の再選択なので、Bonjour 自動発見を再開してゼロコンフィグ接続へ戻す。
-        armBonjour()
     }
 
     func forgetTrustedPc() { changeConnectionSettings() }
@@ -333,9 +348,11 @@ final class MainViewModel: ObservableObject {
     private func handleTrustedConnectionInvalid() {
         trustedCoordinator.forget()
         trustedConnection = nil
-        updateProduction { $0.notice = "保存済みの接続情報が無効です。6桁コードで接続し直してください。" }
-        // 信頼済み接続が無効化されたので、Bonjour 自動発見で PC を探し直す。
-        armBonjour()
+        // Android と同じく、ここでは自動発見を始めない（Step 1 に戻す）。
+        updateProduction {
+            $0.pairing = .idle
+            $0.notice = "保存済みの接続情報が無効です。6桁コードで接続し直してください。"
+        }
     }
 
     // MARK: - Settings
