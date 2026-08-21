@@ -44,6 +44,9 @@ Android Studioでは`android/`をプロジェクトとして開く。コマン�
 ## 3. debug APKの画面構成
 
 debug APKは初回にデバッグ画面を開く。release APKは常に本番画面で、デバッグ切替を表示しない。
+debug APKのapplicationIdは`com.nxtend.team35.yubiboard.debug`であり、releaseの
+`com.nxtend.team35.yubiboard`とは別アプリとして導入される。デバッグスクリプトは
+debug IDだけを起動・初期化・計測し、releaseアプリの保存データには触れない。
 
 デバッグ画面には次がある。
 
