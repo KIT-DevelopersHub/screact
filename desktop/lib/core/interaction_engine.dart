@@ -8,7 +8,7 @@ import '../protocol/messages.dart';
 /// チーム確定仕様のジェスチャー分岐:
 /// - ポインタ移動 = 人差し指先端（pointerMove）※OSカーソルを動かす
 /// - インク描画 = 人差し指と中指をくっつける（drawDown/drawMove/drawUp）
-///   筆点は人差し指先端と中指先端の「中間点」。オーバーレイのインク専用。
+///   筆点は人差し指先端。トリガー条件（人差し指＋中指のくっつき）は不変。オーバーレイのインク専用。
 /// - OSクリック/ドラッグ = 親指と人差し指のピンチ（pressDown/pressMove/pressUp/click）
 ///   OSの実マウスイベントとして注入する。
 /// - スクロール = 二本指を立てて動かす（scroll）
@@ -299,10 +299,10 @@ class InteractionEngine {
     }
     _lastScrollAnchor = null;
 
-    // 2) インク描画: 人差し指と中指がくっついている → 中間点で線を引く。
+    // 2) インク描画: 人差し指と中指がくっついている（トリガーは不変） → 人差し指先端で線を引く。
     if (pose.fingersTogether) {
       if (_pressed) events.addAll(_endPress(screen: null, tMs: t)); // 排他解除
-      final rawDraw = _toSurface(pose.drawPoint);
+      final rawDraw = _toSurface(pose.indexTip);
       final screen = _filteredScreen(
         _isInside(rawDraw) ? rawDraw : rawIndex,
         t,
@@ -317,7 +317,7 @@ class InteractionEngine {
       return events;
     } else if (_drawing) {
       // くっつきが解けた: インクを確定（drawUp）。同フレームで下の分岐も評価する。
-      final rawDraw = _toSurface(pose.drawPoint);
+      final rawDraw = _toSurface(pose.indexTip);
       final endAt = _filteredScreen(_isInside(rawDraw) ? rawDraw : rawIndex, t);
       events.addAll(_endDraw(endAt));
     }
