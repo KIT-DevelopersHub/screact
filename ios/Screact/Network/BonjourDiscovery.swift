@@ -29,6 +29,11 @@ final class BonjourDiscovery: NSObject {
   /// 解決中の NetService を強参照で保持する（解放されると解決が中断されるため）。
   private var resolving: [NetService] = []
   private var isRunning = false
+  /// 再検索ループの世代。stop() で更新して予約済みリトライを無効化する。
+  private var searchGeneration = 0
+  /// Android の UDP 常時待受と同様、接続成立（stop 呼び出し）までブラウズを粘り強く再試行する間隔。
+  /// 初回の「ローカルネットワーク」許可でブラウズが落ちても、許可後に自動復帰させるのが狙い。
+  private static let retryInterval: TimeInterval = 3
 
   init(
     onDiscovered: @escaping (ConnectionConfig) -> Void,
@@ -43,6 +48,16 @@ final class BonjourDiscovery: NSObject {
   func start() {
     guard !isRunning else { return }
     isRunning = true
+    searchGeneration &+= 1
+    beginSearch()
+    scheduleRetry(generation: searchGeneration)
+    onLog("[Bonjour] PC を検索開始: \(Self.serviceType)")
+  }
+
+  /// NetServiceBrowser を作り直してブラウズを張り直す。
+  private func beginSearch() {
+    browser?.stop()
+    browser?.delegate = nil
     let newBrowser = NetServiceBrowser()
     // 同一 Wi-Fi に加え AWDL(ピアツーピア)経由でも検出できるようにする。
     newBrowser.includesPeerToPeer = true
@@ -50,13 +65,26 @@ final class BonjourDiscovery: NSObject {
     newBrowser.schedule(in: .main, forMode: .common)
     newBrowser.searchForServices(ofType: Self.serviceType, inDomain: Self.domain)
     browser = newBrowser
-    onLog("[Bonjour] PC を検索開始: \(Self.serviceType)")
+  }
+
+  /// 接続成立（stop）まで未発見なら再検索を続ける。Android の常時待受と挙動を揃える。
+  /// 解決中（resolve 進行中）は割り込まない。
+  private func scheduleRetry(generation: Int) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryInterval) { [weak self] in
+      guard let self, self.isRunning, generation == self.searchGeneration else { return }
+      if self.resolving.isEmpty {
+        self.beginSearch()
+        self.onLog("[Bonjour] 未発見のため再検索します")
+      }
+      self.scheduleRetry(generation: generation)
+    }
   }
 
   /// ブラウズと解決を停止し、保持を解放する。
   func stop() {
     guard isRunning else { return }
     isRunning = false
+    searchGeneration &+= 1   // 予約済みの再検索リトライを無効化する
     browser?.stop()
     browser?.delegate = nil
     browser = nil
