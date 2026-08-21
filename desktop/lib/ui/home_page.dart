@@ -88,6 +88,11 @@ class _HomePageState extends State<HomePage> {
   bool _enforcePairing = true;
   // 手の骨格（ランドマーク）をオーバーレイに描画するか。既定OFF・永続化する。
   bool _showSkeleton = false;
+  // ハンドジェスチャーの個別ON/OFF。既定は全てON・永続化・即時反映する。
+  bool _clickGestureEnabled = true;
+  bool _penGestureEnabled = true;
+  bool _eraserGestureEnabled = true;
+  bool _scrollGestureEnabled = true;
   bool _startingServer = false;
   // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
   // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
@@ -155,6 +160,7 @@ class _HomePageState extends State<HomePage> {
     _draftSmoothing = _engine.smoothingEnabled;
     _syncCalibrationDraftFromConfig();
     _loadShowSkeleton();
+    _loadGestureToggles();
 
     _pairing =
         widget.pairingController ??
@@ -1437,6 +1443,41 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
+                const Divider(thickness: 1.5),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'ハンドジェスチャー',
+                        style: TextStyle(
+                          fontSize: 38,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${_enabledGestureCount()}/4 ON',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ProductionButton(
+                      key: const ValueKey('settings-gestures'),
+                      width: 220,
+                      height: 62,
+                      label: '個別設定',
+                      outlined: true,
+                      onPressed: _showGestureSettings,
+                      textStyle: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
                 if (Platform.isMacOS && _accessibilityTrusted == false) ...[
                   const Divider(thickness: 1.5),
                   Row(
@@ -1561,23 +1602,26 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 骨格表示トグルの永続化先（プラグイン不要のプレーンファイル。connection_log と同流儀）。
-  File? _showSkeletonPrefsFile() {
+  /// ユーザー設定の永続化先（プラグイン不要のプレーンファイル）。
+  /// Windows/macOS/Linuxで各OSのユーザー設定ディレクトリを使う。
+  File? _userSettingsFile(String name) {
     if (Platform.isWindows) {
       final appData =
           Platform.environment['LOCALAPPDATA'] ??
           Platform.environment['APPDATA'];
       if (appData == null || appData.isEmpty) return null;
-      return File('$appData\\yubiboard\\show_skeleton');
+      return File('$appData\\yubiboard\\$name');
     }
     final home = Platform.environment['HOME'];
     if (home == null || home.isEmpty) return null;
     if (Platform.isMacOS) {
-      return File('$home/Library/Application Support/yubiboard/show_skeleton');
+      return File('$home/Library/Application Support/yubiboard/$name');
     }
     final configHome = Platform.environment['XDG_CONFIG_HOME'];
-    return File('${configHome ?? '$home/.config'}/yubiboard/show_skeleton');
+    return File('${configHome ?? '$home/.config'}/yubiboard/$name');
   }
+
+  File? _showSkeletonPrefsFile() => _userSettingsFile('show_skeleton');
 
   void _loadShowSkeleton() {
     try {
@@ -1603,6 +1647,169 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {
       // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
     }
+  }
+
+  /// ジェスチャー個別ON/OFFの永続化先（show_skeleton と同流儀のプレーンファイル）。
+  /// 内容は click,pen,eraser,scroll の順に '1'/'0' を並べた4文字。
+  File? _gestureTogglesPrefsFile() => _userSettingsFile('gesture_toggles');
+
+  void _loadGestureToggles() {
+    try {
+      final f = _gestureTogglesPrefsFile();
+      if (f != null && f.existsSync()) {
+        final raw = f.readAsStringSync().trim();
+        if (raw.length >= 4) {
+          _clickGestureEnabled = raw[0] == '1';
+          _penGestureEnabled = raw[1] == '1';
+          _eraserGestureEnabled = raw[2] == '1';
+          _scrollGestureEnabled = raw[3] == '1';
+        }
+      }
+    } catch (_) {
+      // 読めなければ既定（全てON）のまま。
+    }
+    _applyGestureTogglesToEngine();
+  }
+
+  void _applyGestureTogglesToEngine() {
+    _engine
+      ..clickEnabled = _clickGestureEnabled
+      ..penEnabled = _penGestureEnabled
+      ..eraserEnabled = _eraserGestureEnabled
+      ..scrollEnabled = _scrollGestureEnabled;
+  }
+
+  void _persistGestureToggles() {
+    try {
+      final f = _gestureTogglesPrefsFile();
+      if (f != null) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(
+          '${_clickGestureEnabled ? '1' : '0'}'
+          '${_penGestureEnabled ? '1' : '0'}'
+          '${_eraserGestureEnabled ? '1' : '0'}'
+          '${_scrollGestureEnabled ? '1' : '0'}',
+          flush: true,
+        );
+      }
+    } catch (_) {
+      // 永続化に失敗しても致命ではない。
+    }
+  }
+
+  void _setClickGesture(bool v) => _setGestureToggle(() => _clickGestureEnabled = v);
+  void _setPenGesture(bool v) => _setGestureToggle(() => _penGestureEnabled = v);
+  void _setEraserGesture(bool v) =>
+      _setGestureToggle(() => _eraserGestureEnabled = v);
+  void _setScrollGesture(bool v) =>
+      _setGestureToggle(() => _scrollGestureEnabled = v);
+
+  void _setGestureToggle(void Function() mutate) {
+    setState(mutate);
+    _applyGestureTogglesToEngine();
+    _persistGestureToggles();
+  }
+
+  int _enabledGestureCount() =>
+      (_clickGestureEnabled ? 1 : 0) +
+      (_penGestureEnabled ? 1 : 0) +
+      (_eraserGestureEnabled ? 1 : 0) +
+      (_scrollGestureEnabled ? 1 : 0);
+
+  /// ハンドジェスチャーを個別にON/OFFするダイアログ（初期値は全てON）。
+  Future<void> _showGestureSettings() async {
+    await showDialog<void>(
+      context: context,
+      builder:
+          (dialogContext) => StatefulBuilder(
+            builder: (context, setDialogState) {
+              Widget tile({
+                required Key key,
+                required IconData icon,
+                required String title,
+                required String subtitle,
+                required bool value,
+                required void Function(bool) onChanged,
+              }) => SwitchListTile(
+                key: key,
+                contentPadding: EdgeInsets.zero,
+                secondary: Icon(icon, size: 30, color: ProductionDesign.textColor),
+                title: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: Text(subtitle),
+                value: value,
+                onChanged: (v) {
+                  onChanged(v);
+                  setDialogState(() {});
+                },
+              );
+
+              return AlertDialog(
+                title: const Text('ハンドジェスチャー'),
+                content: SizedBox(
+                  width: 560,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '使わないジェスチャーをOFFにすると誤作動を防げます。'
+                          '（初期値は全てON）',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                        const SizedBox(height: 8),
+                        tile(
+                          key: const ValueKey('gesture-toggle-click'),
+                          icon: Icons.touch_app_outlined,
+                          title: 'クリック',
+                          subtitle: '親指と人差し指でつまむ（OSクリック・ドラッグ）',
+                          value: _clickGestureEnabled,
+                          onChanged: _setClickGesture,
+                        ),
+                        tile(
+                          key: const ValueKey('gesture-toggle-pen'),
+                          icon: Icons.edit_outlined,
+                          title: 'ペン（描画）',
+                          subtitle: '人差し指と中指をくっつけて線を描く',
+                          value: _penGestureEnabled,
+                          onChanged: _setPenGesture,
+                        ),
+                        tile(
+                          key: const ValueKey('gesture-toggle-eraser'),
+                          icon: Icons.cleaning_services_outlined,
+                          title: '消しゴム',
+                          subtitle: '手をグーにして線を消す',
+                          value: _eraserGestureEnabled,
+                          onChanged: _setEraserGesture,
+                        ),
+                        tile(
+                          key: const ValueKey('gesture-toggle-scroll'),
+                          icon: Icons.swap_vert_rounded,
+                          title: 'スクロール',
+                          subtitle: 'グッドサイン（親指を立てる）で親指の向きにスクロール',
+                          value: _scrollGestureEnabled,
+                          onChanged: _setScrollGesture,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('閉じる'),
+                  ),
+                ],
+              );
+            },
+          ),
+    );
   }
 
   void _saveSettings() {
@@ -1644,7 +1851,13 @@ class _HomePageState extends State<HomePage> {
         ..requiredStableMessages = defaults.requiredStableMessages
         ..source = defaults.source;
       _syncCalibrationDraftFromConfig();
+      _clickGestureEnabled = true;
+      _penGestureEnabled = true;
+      _eraserGestureEnabled = true;
+      _scrollGestureEnabled = true;
     });
+    _applyGestureTogglesToEngine();
+    _persistGestureToggles();
     _showMessage('設定を初期化しました');
   }
 

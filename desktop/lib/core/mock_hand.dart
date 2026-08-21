@@ -112,8 +112,56 @@ class MockHand {
     set(HandFrame.ringTip, Vec2(cx + 0.06, cy + 0.10));
     set(18, Vec2(cx + 0.09, cy + 0.06));
     set(HandFrame.pinkyTip, Vec2(cx + 0.09, cy + 0.10));
-    // 親指は掌側へ寄せる（人差し指先端から十分離しピンチ判定を避ける）。
+    // 親指は掌側へ折り、グッドサイン判定もしない距離にする。
+    set(HandFrame.thumbMcp, Vec2(cx - 0.08, cy + 0.10));
     set(HandFrame.thumbTip, Vec2(cx - 0.12, cy + 0.12));
+
+    return HandFrame(
+      frameId: frameId,
+      capturedAtMonotonicMs: frameId * 33,
+      detected: true,
+      handedness: 'RIGHT',
+      landmarks: lm,
+    );
+  }
+
+  /// グッドサイン（親指だけを立て、他4指を折り曲げた手）を合成する。
+  /// [center] は手の中心（＝画面内外判定に使う人差し指先端の近傍）、
+  /// [thumbDir] は親指の向き（例: 上=Vec2(0,-1)）。
+  static HandFrame goodSign({
+    required int frameId,
+    Vec2 center = const Vec2(0.5, 0.5),
+    Vec2 thumbDir = const Vec2(0, -1),
+  }) {
+    final cx = center.x, cy = center.y;
+    final wrist = Vec2(cx, cy + 0.22);
+    final lm =
+        List<Landmark>.filled(
+          21,
+          Landmark(wrist.x, wrist.y, 0),
+          growable: false,
+        ).toList();
+    void set(int idx, Vec2 v) => lm[idx] = Landmark(v.x, v.y, 0);
+
+    set(HandFrame.wrist, wrist);
+    set(HandFrame.indexMcp, Vec2(cx, cy + 0.12)); // 手スケール基準
+    // 4本の指を折り曲げる: 先端(tip)を pip より手首側に置き up()=false にする。
+    void fold(int pip, int tip, double dx) {
+      set(pip, Vec2(cx + dx, cy - 0.02)); // 突き出た第2関節
+      set(tip, Vec2(cx + dx, cy + 0.05)); // 折り込んだ先端（手首寄り）
+    }
+
+    fold(6, HandFrame.indexTip, 0.0);
+    fold(10, HandFrame.middleTip, 0.03);
+    fold(14, HandFrame.ringTip, 0.06);
+    fold(18, HandFrame.pinkyTip, 0.09);
+
+    // 親指: 付け根(thumbMcp)から thumbDir 方向へ十分伸ばす。
+    final base = Vec2(cx - 0.05, cy + 0.06);
+    final len = thumbDir.length;
+    final unit = len == 0 ? const Vec2(0, -1) : thumbDir * (1 / len);
+    set(HandFrame.thumbMcp, base);
+    set(HandFrame.thumbTip, base + unit * 0.18);
 
     return HandFrame(
       frameId: frameId,

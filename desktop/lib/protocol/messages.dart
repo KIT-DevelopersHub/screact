@@ -139,6 +139,7 @@ class HandFrame {
 
   /// MediaPipe hand の主要インデックス。
   static const int wrist = 0;
+  static const int thumbMcp = 2; // 親指の付け根（向き算出の基点）
   static const int thumbTip = 4;
   static const int indexTip = 8;
   static const int middleTip = 12;
