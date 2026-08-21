@@ -3,20 +3,21 @@ package com.nxtend.team35.yubiboard.network
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 
 /**
  * 「画面認識開始」押下後の待受け。UDP :8766 で Desktop の discovery_offer を
- * 待ち、offer を受けた時点で **自分から** PC の WebSocket へ接続しに行く
+ * 待ちながら discovery_probe も送信し、offer を受けた時点で **自分から**
+ * PC の WebSocket へ接続しに行く
  * （onConnect(host, wsPort, token) を1回呼ぶ）。host は offer の送信元
  * アドレスを優先する（offer の ip フィールドは参考値）。
  *
  * 【現行経路とローカルネットワーク権限】
  * PC→Android の discovery_select ユニキャストは接続確立の必須経路から外した。
- * ただし、最初の discovery_offer は PC から LAN への UDP broadcast である。
- * そのため自動発見は macOS のローカルネットワーク許可、OSファイアウォール、
- * AP isolation などの到達性に依存する。offer broadcast 自体が抑止される環境では
- * 自動発見は成立せず、UI から手動接続へフォールバックする。
+ * offer broadcast または probe broadcast の少なくとも一方向はLAN内で到達する
+ * 必要がある。OSファイアウォール、AP isolation 等で両方が抑止される環境では
+ * UI から手動接続へフォールバックする。
  *
  * response(discovery_response) は PC のUI/ログ表示用に最初の offer に対して
  * 1回返す（接続自体は response に依存しない）。discovery_select を受けた
@@ -34,6 +35,9 @@ class DesktopDiscoveryListener(
     private val port: Int = DISCOVERY_PORT,
     private val multicastLock: Lock? = null,
     private val socketFactory: () -> DatagramSocket = { DatagramSocket(null) },
+    private val probeTargetsProvider: () -> List<InetAddress> = { emptyList() },
+    private val probePort: Int = DISCOVERY_PORT,
+    private val probeIntervalMs: Long = 1_000,
 ) {
     /** WifiManager.MulticastLock の抽象（テスト差し替え用）。 */
     interface Lock {
@@ -47,6 +51,7 @@ class DesktopDiscoveryListener(
     @Volatile
     private var running = false
     private var worker: Thread? = null
+    private var probeWorker: Thread? = null
     private var multicastLockHeld = false
 
     /** 実際に待受けているポート（port=0 指定時のテスト用）。未起動なら null。 */
@@ -81,13 +86,63 @@ class DesktopDiscoveryListener(
             }
             worker = nextWorker
             nextWorker.start()
+            val nextProbeWorker = Thread({ probeLoop(bound) }, "screact-discovery-probe").apply {
+                isDaemon = true
+            }
+            probeWorker = nextProbeWorker
+            nextProbeWorker.start()
         } catch (error: Throwable) {
             socket = null
             bound.close()
             releaseMulticastLock()
             worker = null
+            probeWorker = null
             running = false
             throw error
+        }
+    }
+
+    private fun probeLoop(bound: DatagramSocket) {
+        val payload = DiscoveryCodec.encode(DiscoveryProbe(deviceId = deviceId))
+            .toByteArray(Charsets.UTF_8)
+        var attempt = 0
+        while (running && socket === bound) {
+            val targets = runCatching { probeTargetsProvider() }.getOrElse { error ->
+                AppDiagnostics.event(
+                    "discovery",
+                    "probe_targets_failed",
+                    mapOf("message" to error.message),
+                )
+                emptyList()
+            }.distinctBy { it.hostAddress }
+            var sentCount = 0
+            targets.forEach { target ->
+                runCatching {
+                    bound.send(DatagramPacket(payload, payload.size, target, probePort))
+                    sentCount += 1
+                }.onFailure { error ->
+                    if (running && socket === bound) {
+                        AppDiagnostics.event(
+                            "discovery",
+                            "probe_send_failed",
+                            mapOf("to" to target.hostAddress, "message" to error.message),
+                        )
+                    }
+                }
+            }
+            attempt += 1
+            if (sentCount > 0 && (attempt == 1 || attempt % 10 == 0)) {
+                AppDiagnostics.event(
+                    "discovery",
+                    "probe_sent",
+                    mapOf("attempt" to attempt, "targets" to sentCount),
+                )
+            }
+            try {
+                Thread.sleep(probeIntervalMs)
+            } catch (_: InterruptedException) {
+                return
+            }
         }
     }
 
@@ -155,7 +210,7 @@ class DesktopDiscoveryListener(
                         }
                     }
 
-                    is DiscoveryResponse, is DiscoverySelectAck, null -> Unit // 他端末の応答等は無視
+                    is DiscoveryProbe, is DiscoveryResponse, is DiscoverySelectAck, null -> Unit
                 }
             }
         } catch (error: Exception) {
@@ -178,8 +233,10 @@ class DesktopDiscoveryListener(
         if (!running && bound == null) return
         socket = null
         bound?.close()
+        probeWorker?.interrupt()
         releaseMulticastLock()
         worker = null
+        probeWorker = null
         running = false
         AppDiagnostics.event("discovery", "listen_stopped")
     }
@@ -189,8 +246,10 @@ class DesktopDiscoveryListener(
         if (socket !== bound) return
         socket = null
         bound.close()
+        probeWorker?.interrupt()
         releaseMulticastLock()
         worker = null
+        probeWorker = null
         running = false
         AppDiagnostics.event("discovery", "listen_stopped")
     }

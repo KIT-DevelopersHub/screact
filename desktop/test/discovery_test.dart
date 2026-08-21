@@ -9,6 +9,14 @@ import 'package:thehack_overlay/net/discovery.dart';
 /// offer→response→select 往復テスト。
 void main() {
   group('発見メッセージのJSONコーデック', () {
+    test('probe の round trip（Android側と同じフィールド構成）', () {
+      const probe = DiscoveryProbe(deviceId: 'android-abc');
+      final j = jsonDecode(jsonEncode(probe.toJson())) as Map<String, dynamic>;
+      expect(j['messageType'], 'discovery_probe');
+      expect(DiscoveryProbe.tryParse(j)!.deviceId, 'android-abc');
+      expect(DiscoveryProbe.tryParse({...j, 'deviceId': ' '}), isNull);
+    });
+
     test('offer の round trip', () {
       const offer = DiscoveryOffer(
         ip: '192.168.1.5',
@@ -26,6 +34,7 @@ void main() {
 
     test('schemaVersion が不一致または欠落したメッセージは拒否する', () {
       final messages = <Map<String, dynamic>>[
+        const DiscoveryProbe(deviceId: 'android-abc').toJson(),
         const DiscoveryOffer(wsPort: 8765, token: '123456').toJson(),
         const DiscoveryResponse(
           deviceId: 'android-abc',
@@ -41,6 +50,7 @@ void main() {
       ];
 
       Object? parse(Map<String, dynamic> message) =>
+          DiscoveryProbe.tryParse(message) ??
           DiscoveryOffer.tryParse(message) ??
           DiscoveryResponse.tryParse(message) ??
           DiscoverySelect.tryParse(message) ??
@@ -159,10 +169,20 @@ void main() {
       );
     });
 
-    test('subnetBroadcastOf は /24 のブロードキャストを作る', () {
+    test('subnetBroadcastOf は通常/24、iPhoneテザリングは/28で作る', () {
       expect(subnetBroadcastOf('192.168.1.23'), '192.168.1.255');
+      expect(subnetBroadcastOf('172.20.10.3'), '172.20.10.15');
+      expect(subnetBroadcastOf('172.20.10.14'), '172.20.10.15');
       expect(subnetBroadcastOf(null), isNull);
       expect(subnetBroadcastOf('bad'), isNull);
+      expect(subnetBroadcastOf('192.168.1.999'), isNull);
+    });
+
+    test('discoveryBindAddress は表示中のIPv4を優先し不正値ではanyへ戻る', () {
+      expect(discoveryBindAddress('172.20.10.3').address, '172.20.10.3');
+      expect(discoveryBindAddress(null), InternetAddress.anyIPv4);
+      expect(discoveryBindAddress('bad'), InternetAddress.anyIPv4);
+      expect(discoveryBindAddress('::1'), InternetAddress.anyIPv4);
     });
 
     test('ln_probe（権限トリガ）は既存パーサに無視され例外も出さない', () async {
@@ -179,7 +199,8 @@ void main() {
         final j = decodeDiscoveryDatagram(dg.data);
         if (j == null) return;
         parsed.add(
-          DiscoveryOffer.tryParse(j) ??
+          DiscoveryProbe.tryParse(j) ??
+              DiscoveryOffer.tryParse(j) ??
               DiscoveryResponse.tryParse(j) ??
               DiscoverySelect.tryParse(j) ??
               DiscoverySelectAck.tryParse(j),
@@ -199,6 +220,54 @@ void main() {
   });
 
   group('DesktopDiscovery（loopback実ソケット往復）', () {
+    test('Androidのprobeへ既存形式のofferをユニキャスト返信する', () async {
+      final reservation = await RawDatagramSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      final discoveryPort = reservation.port;
+      reservation.close();
+      final android = await RawDatagramSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      final offerReceived = Completer<DiscoveryOffer>();
+      android.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final datagram = android.receive();
+        if (datagram == null) return;
+        final json = decodeDiscoveryDatagram(datagram.data);
+        if (json == null) return;
+        final offer = DiscoveryOffer.tryParse(json);
+        if (offer != null && !offerReceived.isCompleted) {
+          offerReceived.complete(offer);
+        }
+      });
+      final discovery = DesktopDiscovery(
+        token: '123456',
+        wsPort: 9876,
+        discoveryPort: discoveryPort,
+        broadcastAddresses: const ['127.0.0.1'],
+        enableProbeListener: true,
+        offerInterval: const Duration(minutes: 1),
+      );
+      await discovery.start();
+      android.send(
+        utf8.encode(
+          jsonEncode(const DiscoveryProbe(deviceId: 'android-probe').toJson()),
+        ),
+        InternetAddress.loopbackIPv4,
+        discoveryPort,
+      );
+      final offer = await offerReceived.future.timeout(
+        const Duration(seconds: 5),
+      );
+      expect(offer.wsPort, 9876);
+      expect(offer.token, '123456');
+      discovery.stop();
+      android.close();
+    });
+
     test('IF列挙中に停止してもsocketとofferタイマーが復活しない', () async {
       final providerStarted = Completer<void>();
       final providerResult = Completer<List<String>>();
@@ -206,6 +275,7 @@ void main() {
       final discovery = DesktopDiscovery(
         token: '123456',
         wsPort: 8765,
+        enableProbeListener: false,
         subnetBroadcastsProvider: () {
           providerStarted.complete();
           return providerResult.future;

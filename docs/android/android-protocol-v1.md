@@ -4,6 +4,26 @@ Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクラ�
 
 ## 接続
 
+### UDP自動発見
+
+自動発見はUDP `8766`を使用し、既存のDesktop→Android広告とAndroid→Desktop探索を
+併用する。どちらか一方が届けば、Androidは受信した`discovery_offer`のUDP送信元へ
+WebSocket接続できる。すべてUTF-8 JSONで`app="screact"`、`schemaVersion=1`を必須とする。
+
+| messageType | 方向 | 必須フィールド | 用途 |
+| --- | --- | --- | --- |
+| `discovery_probe` | Android → broadcast | `deviceId` | offerのユニキャスト返信を要求する |
+| `discovery_offer` | Desktop → broadcast / unicast | `wsPort`, `token` | WebSocket接続情報を広告する |
+| `discovery_response` | Android → Desktop unicast | `deviceId`, `deviceName`, `model` | 表示・診断用。接続条件ではない |
+| `discovery_select` / `discovery_select_ack` | 双方向 | 既存フィールド | 旧実装との互換用 |
+
+Androidはlimited broadcastに加え、既定ネットワークの実IPv4プレフィックスから求めた
+directed broadcastへ`discovery_probe`を送る。たとえば`192.168.1.23/24`は
+`192.168.1.255`、`172.20.10.2/28`は`172.20.10.15`となる。Desktopはprobeの
+送信元アドレス・ポートへ既存形式のofferを返す。旧Androidは従来のbroadcast offerを、
+旧Desktopは新Androidが引き続き待受けるbroadcast offerを利用できるため、追加フィールドや
+schemaVersion更新を必要としない。UDPには手指・位置合わせデータを流さない。
+
 Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_active_hands`、`maxHands=2`、選択中レンズを表す`cameraFacing=front|back`とし、`capabilities`には従来値に加えて`multi_hand_landmarks_21`と`stable_hand_track_id`を含める。`maxHands`は端末の対応能力を表し、利用設定の既定は1手、任意切替時だけ2手を検出・送信する。PCは5秒以内に`hello_ack`を返し、Androidは応答の`sessionId`を以後のメッセージへ設定する。
 
 初回接続では`pairingToken`へPC画面に表示された6桁コードを設定し、`resumeToken`は省略する。認証成功時、PCは暗号学的乱数生成器で32 byteを生成し、パディングなしBase64URLへ変換した`resumeToken`を`hello_ack`へ設定する。Androidはホスト、ポート、`resumeToken`を保存し、次回起動では`pairingToken`を省略して保存済み`resumeToken`を送る。`pairingToken`と`resumeToken`は排他的で、必ずどちらか一方だけを送る。
@@ -103,6 +123,12 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
   "sentAtMonotonicMs": 19385000
 }
 ```
+
+PCは認証済みWebSocketで`heartbeat`を含むメッセージを12秒間受信しなかった場合、
+Wi-Fi切断等でTCPのclose通知が届かない半開き接続とみなす。現行ソケットのidentityを
+外して全押下・描画状態を安全解除してからソケットを閉じ、新しい接続を受理できる状態へ戻る。
+任意の有効／不正WebSocketメッセージ受信で生存期限を更新するが、未認証接続には従来の
+5秒`hello` timeoutを適用する。
 
 ## PCからAndroid
 

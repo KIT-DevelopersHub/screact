@@ -19,6 +19,43 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class DesktopDiscoveryListenerTest {
 
+    @Test
+    fun `probe送信先からユニキャストofferを受けて接続できる`() {
+        val desktop = desktopSocket()
+        val connected = CountDownLatch(1)
+        val listener = DesktopDiscoveryListener(
+            deviceId = "android-probe",
+            deviceName = "TestPhone",
+            model = "TestModel",
+            onConnect = { _, wsPort, token ->
+                if (wsPort == 8765 && token == "123456") connected.countDown()
+            },
+            port = 0,
+            probeTargetsProvider = { listOf(InetAddress.getLoopbackAddress()) },
+            probePort = desktop.localPort,
+            probeIntervalMs = 100,
+        )
+        listener.start()
+        try {
+            val packet = DatagramPacket(ByteArray(4096), 4096)
+            desktop.receive(packet)
+            val probe = DiscoveryCodec.parse(
+                String(packet.data, packet.offset, packet.length, Charsets.UTF_8),
+            )
+            assertTrue(probe is DiscoveryProbe)
+            assertEquals("android-probe", (probe as DiscoveryProbe).deviceId)
+
+            val offer =
+                """{"app":"screact","schemaVersion":1,"messageType":"discovery_offer","wsPort":8765,"token":"123456"}"""
+                    .toByteArray(Charsets.UTF_8)
+            desktop.send(DatagramPacket(offer, offer.size, packet.address, packet.port))
+            assertTrue("probeへのoffer返信で接続する", connected.await(5, TimeUnit.SECONDS))
+        } finally {
+            listener.stop()
+            desktop.close()
+        }
+    }
+
     private class RecordingLock : DesktopDiscoveryListener.Lock {
         val acquireCount = AtomicInteger()
         val releaseCount = AtomicInteger()
