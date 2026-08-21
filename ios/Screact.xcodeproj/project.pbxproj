@@ -27,6 +27,7 @@
 		9F172622C0946EF227A9923B /* CaptureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80D74C228EA48C60AC40BC15 /* CaptureMode.swift */; };
 		AABE4795554F2EFAD5C307CE /* ProtocolCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D693D848603534FC7128319E /* ProtocolCodecTests.swift */; };
 		AD5B1A41FD317A27967F8268 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C024304F90ACB6B5BDCCE5 /* CameraSession.swift */; };
+		B82430C1E890950F66D9A263 /* OpenCV in Frameworks */ = {isa = PBXBuildFile; productRef = 084672600D4CF351E9CD8095 /* OpenCV */; };
 		BE489CC2D38592AF3E77CB4B /* ProtocolCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1212BEFF5F8A9C34A1499114 /* ProtocolCodec.swift */; };
 		D7209A46E35C330D408971C4 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED6CE3EB50054125D14C07F /* AppSettings.swift */; };
 		D8E5CC49549343D02371FD8D /* CameraPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE0FABE34CCEE78EB15ADBA /* CameraPreviewView.swift */; };
@@ -79,6 +80,17 @@
 		E7025DA213B1A0E4FA8519B8 /* Screact-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Screact-Bridging-Header.h"; sourceTree = "<group>"; };
 		FCF5F6C15109DC2F8FC129CD /* TrustedConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedConnectionStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		BE8969E7D11B55B650B52B18 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B82430C1E890950F66D9A263 /* OpenCV in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		05671BA78E7DC8BFE8EC9795 /* Camera */ = {
@@ -249,6 +261,7 @@
 			buildPhases = (
 				214BFD6FB640F07070917877 /* Sources */,
 				DB96C44498DE2488159B0810 /* Resources */,
+				BE8969E7D11B55B650B52B18 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -256,6 +269,7 @@
 			);
 			name = Screact;
 			packageProductDependencies = (
+				084672600D4CF351E9CD8095 /* OpenCV */,
 			);
 			productName = Screact;
 			productReference = 27CAFC6A3AACF7332631B55E /* Screact.app */;
@@ -289,6 +303,9 @@
 			);
 			mainGroup = 2B126F4BA50773348EAAA2DF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F555951B391D27B9C0C396E9 /* XCRemoteSwiftPackageReference "opencv-spm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D69F9507A8B5AA682ACC0F5F /* Products */;
 			projectDirPath = "";
@@ -597,6 +614,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F555951B391D27B9C0C396E9 /* XCRemoteSwiftPackageReference "opencv-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/yeatse/opencv-spm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 4.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		084672600D4CF351E9CD8095 /* OpenCV */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F555951B391D27B9C0C396E9 /* XCRemoteSwiftPackageReference "opencv-spm" */;
+			productName = OpenCV;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = BA4257318D015B860C000616 /* Project object */;
 }

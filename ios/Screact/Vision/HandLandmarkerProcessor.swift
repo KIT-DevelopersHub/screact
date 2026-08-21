@@ -19,6 +19,10 @@ final class HandLandmarkerProcessor: NSObject, HandLandmarkerLiveStreamDelegate 
     private var frameTimes: [Int64] = []
     // detectAsync requires strictly increasing timestamps; guard against camera clock collisions.
     private var lastTimestampMs: Int = -1
+    // Source frame dimensions per submitted timestamp. The LIVE_STREAM callback does not echo the
+    // MPImage, so we stash the pixel-buffer size here (matches Android forwarding input.width/height
+    // into HandDetectionResult.sourceWidth/Height instead of reporting 0).
+    private var pendingSourceSizes: [Int: (Int, Int)] = [:]
 
     var isAvailable: Bool { handLandmarker != nil }
 
@@ -56,6 +60,7 @@ final class HandLandmarkerProcessor: NSObject, HandLandmarkerLiveStreamDelegate 
         var timestampMs = Int(capturedAtMonotonicMs)
         if timestampMs <= lastTimestampMs { timestampMs = lastTimestampMs + 1 }
         lastTimestampMs = timestampMs
+        pendingSourceSizes[timestampMs] = (CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer))
         do {
             let image = try MPImage(pixelBuffer: pixelBuffer)
             try handLandmarker.detectAsync(image: image, timestampInMilliseconds: timestampMs)
@@ -80,12 +85,15 @@ final class HandLandmarkerProcessor: NSObject, HandLandmarkerLiveStreamDelegate 
         AppDiagnostics.shared.increment(detected ? "hand.detected" : "hand.missing")
 
         let timestampMs = Int64(timestampInMilliseconds)
+        let sourceSize = pendingSourceSizes.removeValue(forKey: timestampInMilliseconds) ?? (0, 0)
+        // Drop any stale entries whose callback never arrived (dropped frames), keeping the map small.
+        pendingSourceSizes = pendingSourceSizes.filter { $0.key >= timestampInMilliseconds }
         let trackingState = trackingStateMachine.update(detected: detected, timestampMs: timestampMs)
         let fps = Float(frameTimes.count) * 1000 / Float(Self.fpsWindowMs)
         onResult(HandDetectionResult(
             capturedAtMonotonicMs: timestampMs,
-            sourceWidth: 0,
-            sourceHeight: 0,
+            sourceWidth: sourceSize.0,
+            sourceHeight: sourceSize.1,
             detected: detected,
             trackingState: trackingState,
             landmarks: landmarks,

@@ -13,6 +13,14 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
 
+packages:
+  # OpenCV 4.9 for the ArUco DICT_4X4_50 detector used by Vision/ArucoBridge.mm.
+  # Delivered as a prebuilt opencv2.xcframework via Swift Package (the `OpenCV` CocoaPod stops at
+  # 4.3.0 and lacks the `cv::aruco::ArucoDetector` API that OpenCV 4.7+ exposes in `objdetect`).
+  OpenCV:
+    url: https://github.com/yeatse/opencv-spm.git
+    exactVersion: 4.9.0
+
 targets:
   Screact:
     type: application
@@ -34,6 +42,11 @@ targets:
         CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Code signing is left unset so `xcodebuild ... -sdk iphonesimulator` builds without a team.
+    dependencies:
+      # OpenCV 4.9 xcframework (opencv2 module) — enables the __has_include(<opencv2/opencv.hpp>)
+      # path in ArucoBridge.mm so ArUco marker detection is compiled in.
+      - package: OpenCV
+        product: OpenCV
 
   ScreactTests:
     type: bundle.unit-test

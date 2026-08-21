@@ -1,10 +1,15 @@
 #import "ArucoBridge.h"
 
-// Only pull in OpenCV when its headers are present (i.e. after `pod install`). This keeps the
-// default pure-Swift build compiling. objdetect carries the ArUco API in OpenCV 4.7+.
-#if __has_include(<opencv2/opencv.hpp>)
+// Only pull in OpenCV when its headers are present (resolved via the OpenCV Swift Package, see
+// project.yml). This keeps the default dependency-free build compiling. objdetect carries the
+// ArUco API in OpenCV 4.7+.
+#if __has_include(<opencv2/objdetect/aruco_detector.hpp>)
   #define ARUCO_OPENCV_AVAILABLE 1
-  #import <opencv2/opencv.hpp>
+  // Import only the modules ArUco detection needs. The umbrella <opencv2/opencv.hpp> also drags in
+  // the `stitching` module, whose enums use the identifier `NO` — which collides with the
+  // Objective-C `NO` macro and fails to compile in this Objective-C++ translation unit.
+  #import <opencv2/core.hpp>
+  #import <opencv2/imgproc.hpp>
   #import <opencv2/objdetect/aruco_detector.hpp>
 #else
   #define ARUCO_OPENCV_AVAILABLE 0
