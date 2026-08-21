@@ -285,6 +285,9 @@ $ackTimeouts = ($results | Measure-Object -Property ackTimeouts -Sum).Sum
 # 揃った最初の証拠であるoffer受信からhello_ackまでを10秒基準にする。
 $slow = @($results | Where-Object { $null -ne $_.offerToAckMs -and $_.offerToAckMs -gt 10000 }).Count
 $recoveryFailed = @($recoveryResults | Where-Object { -not $_.success }).Count
+$recoveryAckTimeouts = ($recoveryResults | Measure-Object -Property ackTimeouts -Sum).Sum
+$recoveryWebsocketFailures = ($recoveryResults | Measure-Object -Property websocketFailures -Sum).Sum
+$maxRecoveryMs = ($recoveryResults | Measure-Object -Property reconnectMs -Maximum).Maximum
 $summary = [pscustomobject][ordered]@{
     generatedAt = (Get-Date).ToString('o')
     deviceModel = (Invoke-Adb shell getprop ro.product.model | Out-String).Trim()
@@ -295,6 +298,9 @@ $summary = [pscustomobject][ordered]@{
     ackTimeouts = $ackTimeouts
     recoveryAttempts = $recoveryResults.Count
     recoveryFailed = $recoveryFailed
+    recoveryAckTimeouts = $recoveryAckTimeouts
+    recoveryWebsocketFailures = $recoveryWebsocketFailures
+    maxRecoveryMs = $maxRecoveryMs
 }
 $summary | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'summary.json') -Encoding utf8
 $summary | Format-List | Out-Host

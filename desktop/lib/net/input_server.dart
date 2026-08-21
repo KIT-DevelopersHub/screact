@@ -56,6 +56,10 @@ class InputServer {
   /// WebSocket確立後、helloを送らない接続が単一クライアント枠を占有できる時間。
   final Duration helloTimeout;
 
+  /// 認証後にメッセージを受信しない接続を半開きとみなすまでの時間。
+  /// Androidは5秒ごとにheartbeatを送るため、2回分を超える猶予を持たせる。
+  final Duration inactivityTimeout;
+
   /// 6桁ペアリングコード（null なら照合しない）。UIがサーバ開始時に生成して表示する。
   final String? pairingCode;
 
@@ -72,6 +76,7 @@ class InputServer {
   HttpServer? _http;
   WebSocket? _socket;
   Timer? _helloTimer;
+  Timer? _inactivityTimer;
   String? _sessionId;
   String? _clientId;
   int _frames = 0;
@@ -92,6 +97,7 @@ class InputServer {
     this.onFrame,
     this.port = 8765,
     this.helloTimeout = const Duration(seconds: 5),
+    this.inactivityTimeout = const Duration(seconds: 12),
     this.pairingCode,
     this.enforcePairing = true,
     this.acceptCalibrationMessages = true,
@@ -197,6 +203,7 @@ class InputServer {
     // close/error の遅延通知や拒否済みソケットからのデータが、後から確立した
     // 現在のセッションを変更しないよう、全受信をソケットidentityで守る。
     if (!identical(_socket, source)) return;
+    if (_sessionId != null) _armInactivityTimeout(source);
     Map<String, dynamic> j;
     try {
       j = (jsonDecode(data as String) as Map).cast<String, dynamic>();
@@ -288,6 +295,7 @@ class InputServer {
     _helloTimer?.cancel();
     _helloTimer = null;
     _sessionId = 'session-${_randHex(8)}';
+    _armInactivityTimeout(source);
     _log(
       'hello_ack 送信: session=$_sessionId '
       'calibrationRequired=${!engine.isCalibrated} — 接続完了',
@@ -463,9 +471,28 @@ class InputServer {
     _emit(error: 'helloを受信できず接続を終了しました');
   }
 
+  void _armInactivityTimeout(WebSocket source) {
+    _inactivityTimer?.cancel();
+    _inactivityTimer = Timer(
+      inactivityTimeout,
+      () => _onInactivityTimeout(source),
+    );
+  }
+
+  void _onInactivityTimeout(WebSocket source) {
+    if (!identical(_socket, source) || _sessionId == null) return;
+    _log('受信timeout: heartbeatを含む通信が途絶えたため半開き接続を解放');
+    _socket = null;
+    _clearConnectionState(releaseInput: true);
+    unawaited(source.close(4004, 'inactivity_timeout'));
+    _emit(error: 'スマホとの通信が途絶えたため再接続を待っています');
+  }
+
   void _clearConnectionState({required bool releaseInput}) {
     _helloTimer?.cancel();
     _helloTimer = null;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
     _sessionId = null;
     _clientId = null;
     _frames = 0;

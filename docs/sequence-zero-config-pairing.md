@@ -196,16 +196,18 @@ Android先行5回、Desktop先行5回を実行した。双方向UDP探索の導�
 導入後は10/10成功し、offer受信から`hello_ack`までは135〜610ms、
 `hello_ack_timeout`は0回だった。初回の自動発見はこの環境の反復合格とする。
 
-Wi-Fi無効化・再有効化後の復帰は双方向探索導入前に0/3だった。復帰失敗時はWi-Fi再参加後に
-WebSocket upgradeと`hello`送信まで進むが、新ソケットが閉じられたため、Desktopが切断済みの
-旧ソケットを接続枠として保持している可能性が高い。今回の初回発見試験には混ぜず、stale
-session解消後に再試験する。デモ時のフォールバックは引き続き手動IP・ポート・6桁コード入力とする。
+Desktopが認証後12秒間メッセージを受信しない半開き接続を安全解除する変更後、Wi-Fi無効化・
+再有効化からの無操作復帰は3/3成功した。既定ネットワーク復帰から`hello_ack`までは
+11.167〜16.244秒だった。各試行で旧枠解放前の接続試行に`hello_ack_timeout`が1回、
+WebSocket失敗が2〜3回あったが、Androidの再試行で30秒以内に復帰した。同じbuildで行った
+初回接続の短縮回帰はAndroid先行2回・Desktop先行2回の4/4成功、offer受信から
+`hello_ack`は160〜257msだった。デモ時のフォールバックは引き続き手動IP・ポート・6桁コード入力とする。
 
 ## 回帰テスト
 
 - Desktop codec: probe、app/schema、port、6桁token、legacy select/ACK
 - Desktop UDP: probe→unicast offer、offer/response、重複排除、start/stop世代競合、legacy select再送/ACK
-- Desktop WebSocket: pairing token、first socket wins、server_busy、socket identity guard
+- Desktop WebSocket: pairing token、first socket wins、server_busy、socket identity guard、heartbeat timeoutと次接続受理
 - Desktop E2E: `offer → Android自発WS → hello_ack`
 - Android codec/listener: 実prefix broadcast計算、probe→offer往復、offer受信、response返信、offer駆動`onConnect`、legacy select ACK
 
