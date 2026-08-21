@@ -104,6 +104,11 @@ class OverlayModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// ペンモード解除（人差し指と中指を離す）直前は、指を離す動作で手がブレて
+  /// 不要な線が描かれやすい。drawUp 時に末尾のこの点数ぶんを削ってブレ線をカットする。
+  /// 保守的な既定値。0 で無効。実測に応じて調整可能（フレーム間引き後の点数基準）。
+  int penReleaseTrimPoints = 3;
+
   Iterable<int> get trackIds => _tracks.keys;
   TrackVisual? track(int id) => _tracks[id];
 
@@ -152,7 +157,7 @@ class OverlayModel extends ChangeNotifier {
         v.erasing = false;
         _active.remove(trackId);
         break;
-      // インク描画（人差し指＋中指のくっつき・中間点）。
+      // インク描画（人差し指＋中指のくっつき・人差し指先端）。
       case InteractionKind.drawDown:
         v.cursor = e.screen;
         v.pressed = true;
@@ -178,7 +183,18 @@ class OverlayModel extends ChangeNotifier {
         break;
       case InteractionKind.drawUp:
         v.pressed = false;
-        _active.remove(trackId);
+        final ending = _active.remove(trackId);
+        // ペンモード終了直前のブレ線をカット: 末尾の penReleaseTrimPoints 点を落とす。
+        // 少なくとも1点は残す（点を消しすぎてストローク自体を壊さない）。
+        if (ending != null &&
+            penReleaseTrimPoints > 0 &&
+            ending.points.length > 1) {
+          final drop = penReleaseTrimPoints.clamp(0, ending.points.length - 1);
+          ending.points.removeRange(
+            ending.points.length - drop,
+            ending.points.length,
+          );
+        }
         break;
       // 消しゴム（グー）。カーソル位置近傍のインクを消す。
       case InteractionKind.eraseDown:
