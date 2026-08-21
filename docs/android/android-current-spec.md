@@ -8,7 +8,7 @@
 | 対象 | YubiBoard Androidアプリ |
 | アプリバージョン | `0.1.0`（`versionCode=1`） |
 | 実装基準 | `feat/android-mvp`本番UI実装 |
-| 最終更新日 | 2026-08-06 |
+| 最終更新日 | 2026-08-22 |
 | 通信スキーマ | version 1 |
 | パッケージ | `com.nxtend.team35.yubiboard` |
 
@@ -16,7 +16,7 @@
 
 ## 2. 目的と責任範囲
 
-Androidアプリは背面カメラから画像を取得し、次のいずれかを検出して同一LAN上のPCへWebSocket/JSONで送信する。
+Androidアプリは背面または前面カメラから画像を取得し、次のいずれかを検出して同一LAN上のPCへWebSocket/JSONで送信する。
 
 - 通常撮影: 1つの手に対するMediaPipeの21点ランドマーク
 - 位置合わせ撮影: 画面四隅に配置した4つのArUcoマーカー
@@ -25,7 +25,7 @@ Android側は撮影・検出・可視化・送信までを担当する。画面�
 
 ```mermaid
 flowchart LR
-    User[利用者] --> Camera[Android背面カメラ]
+    User[利用者] --> Camera[Androidカメラ]
 
     subgraph Android[Androidアプリの責任]
         Camera --> Correct[画像回転補正]
@@ -79,7 +79,7 @@ flowchart LR
 | JSON | kotlinx.serialization 1.7.3 |
 | ライフサイクル | AndroidX ViewModel 2.10.0 |
 
-必要な端末機能はカメラであり、背面カメラを使用する。アプリは`CAMERA`、`INTERNET`、`ACCESS_NETWORK_STATE`権限を宣言する。`CAMERA`のみ実行時許可が必要である。
+必要な端末機能はカメラであり、背面カメラを既定として前面へ切り替えられる。アプリは`CAMERA`、`INTERNET`、`ACCESS_NETWORK_STATE`権限を宣言する。`CAMERA`のみ実行時許可が必要である。
 
 ## 4. ソフトウェア構成
 
@@ -139,7 +139,7 @@ flowchart TB
 | --- | --- |
 | `MainActivity` | Compose UIの構築、権限要求、カメラ開始、撮影モードによる解析振り分け、設定適用 |
 | `MainViewModel` | 画面回転をまたぐ接続・モード状態、設定永続化、WebSocketクライアントの所有 |
-| `CameraSession` | CameraX PreviewとImageAnalysisを背面カメラへバインド |
+| `CameraSession` | CameraX PreviewとImageAnalysisを選択中の背面／前面カメラへバインド |
 | `HandLandmarkerProcessor` | 画像補正、非同期手指検出、21点・左右・信頼度・fps・推論時間の生成 |
 | `TrackingStateMachine` | 手の検出候補、追跡、一時喪失、未検出の判定 |
 | `ArucoMarkerProcessor` | OpenCV初期化、対象IDの検出、座標正規化 |
@@ -188,7 +188,7 @@ flowchart TD
     Request --> Result{許可結果}
     Result -->|許可| Start
     Result -->|拒否| Card
-    Start --> Bind[PreviewとImageAnalysisを背面カメラへバインド]
+    Start --> Bind[PreviewとImageAnalysisを選択中のカメラへバインド]
     Bind --> Ready[解析開始]
 ```
 
@@ -223,7 +223,7 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-    Camera[背面カメラ] --> Preview[Preview]
+    Camera[選択中のカメラ] --> Preview[Preview]
     Camera --> Analysis[ImageAnalysis RGBA_8888]
     Analysis --> Latest[KEEP_ONLY_LATEST]
     Latest --> Rotate[rotationDegreesでBitmap回転]
@@ -234,13 +234,13 @@ flowchart LR
 
 | 項目 | 現行仕様 |
 | --- | --- |
-| カメラ | `DEFAULT_BACK_CAMERA` |
+| カメラ | 背面を既定とし、前面／背面を切替可能。切替時は旧位置合わせを破棄し、再位置合わせを必須化 |
 | 解析出力 | `RGBA_8888` |
 | バックプレッシャー | `STRATEGY_KEEP_ONLY_LATEST` |
 | 解析スレッド | 単一Executor |
 | Preview表示 | `compatible`、`fitCenter`、本番は縦横とも常時表示 |
 | 回転 | `ImageInfo.rotationDegrees`をBitmapへ適用 |
-| 左右反転 | 背面カメラのため追加反転なし |
+| 左右反転 | 背面は追加補正なし。前面は元画像のままMediaPipe／ArUcoで検出・安定判定し、結果のx座標だけを`1-x`へ変換してミラープレビューと一致させる |
 | 本番要求解像度 | 1280×720、失敗時960×540、640×480へ順次フォールバック |
 | debug要求解像度 | 本番3候補と比較用1920×1080 |
 | 画角整合 | PreviewとImageAnalysisを共通`UseCaseGroup`・`ViewPort`でバインド |
@@ -436,6 +436,7 @@ sequenceDiagram
 | PC → Android | `hello_ack` | sessionIdと初期モードの確定 | PCがhelloを受理したとき |
 | Android → PC | `hand_frame` | 21点または未検出通知 | 接続済み・通常撮影結果あり |
 | Android → PC | `calibration_markers` | 安定した4マーカー | 接続済み・安定結果あり |
+| Android → PC | `camera_changed` | レンズ切替と位置合わせ失効の通知 | 接続中の前面／背面切替直後 |
 | Android → PC | `heartbeat` | セッション生存確認 | 接続済みで5秒ごと |
 | PC → Android | `control_message` | モード切替または切断 | 同一sessionIdの制御時 |
 

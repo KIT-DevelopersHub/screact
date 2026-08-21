@@ -487,5 +487,88 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(engine.isCalibrated, isTrue);
     });
+
+    test('camera_changed は入力を止めて旧位置合わせを破棄し再位置合わせを要求する', () async {
+      final engine = InteractionEngine(
+        config: CalibrationConfig.forCalibrationTarget(),
+      );
+      final invalidated = Completer<void>();
+      final server = InputServer(
+        engine: MultiHandEngine(calibrationEngine: engine),
+        port: 0,
+        onEvents: (_) {},
+        onStatus: (_) {},
+        onCalibrationInvalidated: () {
+          if (!invalidated.isCompleted) invalidated.complete();
+        },
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      final ws = await WebSocket.connect(
+        'ws://localhost:${server.boundPort}/ws/v1/input',
+      );
+      addTearDown(ws.close);
+      final sessionId = Completer<String>();
+      final calibrationMode = Completer<void>();
+      ws.listen((data) {
+        final json = jsonDecode(data as String) as Map<String, dynamic>;
+        if (json['messageType'] == 'hello_ack' && !sessionId.isCompleted) {
+          sessionId.complete(json['sessionId'] as String);
+        }
+        if (json['messageType'] == 'control_message' &&
+            json['command'] == 'set_mode' &&
+            json['mode'] == 'calibration' &&
+            !calibrationMode.isCompleted) {
+          calibrationMode.complete();
+        }
+      });
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'hello',
+          'deviceId': 'camera-switch-phone',
+          'cameraFacing': 'front',
+        }),
+      );
+      final activeSession = await sessionId.future.timeout(
+        const Duration(seconds: 5),
+      );
+
+      final centers = targetCenters();
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'calibration_markers',
+          'sessionId': activeSession,
+          'capturedAtMonotonicMs': 1,
+          'source': {'cameraFacing': 'front'},
+          'markers': [
+            for (var i = 0; i < 4; i++)
+              {
+                'id': Homography.cornerMarkerIds[i],
+                'center': [centers[i].x, centers[i].y],
+                'corners': const [],
+              },
+          ],
+        }),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(engine.isCalibrated, isTrue);
+
+      ws.add(
+        jsonEncode({
+          'schemaVersion': 1,
+          'messageType': 'camera_changed',
+          'sessionId': activeSession,
+          'cameraFacing': 'back',
+          'changedAtMonotonicMs': 2,
+        }),
+      );
+      await invalidated.future.timeout(const Duration(seconds: 5));
+      await calibrationMode.future.timeout(const Duration(seconds: 5));
+      expect(engine.isCalibrated, isFalse);
+      expect(engine.mode, EngineMode.calibration);
+    });
   });
 }

@@ -46,6 +46,9 @@ class InputServer {
 
   final void Function(ServerStatus) onStatus;
 
+  /// カメラ切替で位置合わせが失効した時、UIへ再位置合わせ表示を要求する。
+  final void Function()? onCalibrationInvalidated;
+
   /// 受信フレーム全体（0〜2トラックの骨格・骨格表示/状態用）。任意。
   final void Function(InputFrame)? onFrame;
   final int port;
@@ -74,6 +77,7 @@ class InputServer {
   int _frames = 0;
   int? _lastFrameId;
   bool _handDetected = false;
+  String? _calibratedCameraFacing;
 
   // 単一スロット（最新フレームだけ保持）
   InputFrame? _pending;
@@ -83,6 +87,7 @@ class InputServer {
     required this.engine,
     required this.onEvents,
     required this.onStatus,
+    this.onCalibrationInvalidated,
     this.onTrackEvents,
     this.onFrame,
     this.port = 8765,
@@ -220,6 +225,9 @@ class InputServer {
         case 'calibration_markers':
           _onCalibration(CalibrationMarkers.fromJson(j));
           break;
+        case 'camera_changed':
+          _onCameraChanged(CameraChanged.fromJson(j));
+          break;
         case 'slide_corners':
           _onSlideCorners(SlideCorners.fromJson(j));
           break;
@@ -265,6 +273,17 @@ class InputServer {
       _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
       return;
     }
+    final cameraChangedSinceCalibration =
+        engine.isCalibrated &&
+        hello.cameraFacing != null &&
+        hello.cameraFacing != _calibratedCameraFacing;
+    if (cameraChangedSinceCalibration) {
+      _log(
+        '接続カメラが前回位置合わせと異なるため旧位置合わせを破棄: '
+        '${_calibratedCameraFacing ?? "unknown"} -> ${hello.cameraFacing}',
+      );
+      _invalidateCalibration(notifyClient: false);
+    }
     _clientId = hello.deviceId;
     _helloTimer?.cancel();
     _helloTimer = null;
@@ -288,6 +307,7 @@ class InputServer {
     engine.mode =
         engine.isCalibrated ? EngineMode.tracking : EngineMode.calibration;
     _emit();
+    if (cameraChangedSinceCalibration) onCalibrationInvalidated?.call();
   }
 
   void _onCalibration(CalibrationMarkers markers) {
@@ -301,6 +321,7 @@ class InputServer {
     }
     final ok = engine.calibrate(markers);
     if (ok) {
+      _calibratedCameraFacing = markers.cameraFacing;
       _log('calibration_markers で位置合わせ成功 → set_mode tracking 送信');
       // 「画面位置合わせ完了」の通知（チームシーケンス図）。Androidはこれで
       // マーカー検出ループを抜けて通常トラッキングへ移る。
@@ -309,6 +330,28 @@ class InputServer {
     // 安定判定の蓄積中（4マーカー揃いだが未確定）はエラーにしない。
     final invalid = markers.markers.length < 4;
     _emit(error: invalid ? 'calibration failed (need 4 markers)' : null);
+  }
+
+  void _onCameraChanged(CameraChanged message) {
+    if (!message.isValid || message.sessionId != _sessionId) {
+      _log('不正または別sessionの camera_changed を無視');
+      _emit(error: 'invalid camera_changed (ignored)');
+      return;
+    }
+    _log('カメラ切替を受信: facing=${message.cameraFacing} → 再位置合わせ必須');
+    _invalidateCalibration(notifyClient: true);
+    onCalibrationInvalidated?.call();
+  }
+
+  void _invalidateCalibration({required bool notifyClient}) {
+    _pending = null;
+    final byTrack = engine.resetCalibration();
+    _dispatch(byTrack);
+    _calibratedCameraFacing = null;
+    if (notifyClient && _sessionId != null) {
+      _send(ControlMessage.setMode(_sessionId!, 'calibration').toJson());
+    }
+    _emit();
   }
 
   /// スマホ検出のスライド四隅で位置合わせ（ArUcoなしの経路）。

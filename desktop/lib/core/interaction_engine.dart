@@ -112,6 +112,15 @@ class InteractionEngine {
     _rec.reset();
   }
 
+  /// カメラ切替時に旧座標変換を破棄し、再位置合わせまで操作を止める。
+  void resetCalibration() {
+    _homography = null;
+    mode = EngineMode.calibration;
+    _arucoStreak = 0;
+    _cornersStreak = 0;
+    _resetRuntimeFilters();
+  }
+
   /// ピンチ認識の感度（0..1）。既定0.5は従来の比率ON=0.40/OFF=0.60。
   double get recognitionSensitivity => _rec.recognitionSensitivity;
 

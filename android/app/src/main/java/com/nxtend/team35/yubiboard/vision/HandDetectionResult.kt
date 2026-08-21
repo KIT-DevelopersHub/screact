@@ -31,6 +31,9 @@ data class HandDetectionResult(
     },
     val inferenceTimeMs: Long = 0,
     val framesPerSecond: Float = 0f,
+    /** ランドマークが表示（ミラー補正済み）座標系か。前面カメラも補正するため常に true。 */
+    val mirrorCorrected: Boolean = true,
+    val cameraFacing: String = "back",
 ) {
     val detected: Boolean get() = hands.isNotEmpty()
     val primaryHand: TrackedHand? get() = hands.minByOrNull(TrackedHand::trackId)

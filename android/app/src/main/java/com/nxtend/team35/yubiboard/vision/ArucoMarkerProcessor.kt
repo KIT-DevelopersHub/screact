@@ -25,7 +25,7 @@ class ArucoMarkerProcessor(
         }.onFailure(onError).getOrNull()
     }
 
-    fun process(image: ImageProxy) {
+    fun process(image: ImageProxy, mirror: Boolean = false) {
         val activeDetector = detector
         if (activeDetector == null) {
             image.close()
@@ -33,6 +33,8 @@ class ArucoMarkerProcessor(
         }
         val capturedAt = SystemClock.uptimeMillis()
         runCatching {
+            // ArUco画像を鏡像にすると辞書のビット列が変わり認識できないため、
+            // 検出は元画像で行い、検出後の座標だけをプレビュー座標へ反転する。
             val bitmap = image.toCorrectedBitmap()
             val rgba = Mat()
             val gray = Mat()
@@ -42,7 +44,7 @@ class ArucoMarkerProcessor(
                 Utils.bitmapToMat(bitmap, rgba)
                 Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
                 activeDetector.detectMarkers(gray, corners, ids)
-                val markers = corners.mapIndexedNotNull { index, cornerMat ->
+                val rawMarkers = corners.mapIndexedNotNull { index, cornerMat ->
                     val id = ids.get(index, 0)?.firstOrNull()?.toInt() ?: return@mapIndexedNotNull null
                     if (id !in MarkerStabilityTracker.EXPECTED_IDS) return@mapIndexedNotNull null
                     val normalizedCorners = (0 until 4).mapNotNull { cornerIndex ->
@@ -63,7 +65,14 @@ class ArucoMarkerProcessor(
                         corners = normalizedCorners,
                     )
                 }.sortedBy { it.id }
-                val isStable = stabilityTracker.update(markers)
+                // ID 10=左上、11=右上というレイアウト検証は、鏡像化前のカメラ
+                // 座標で行う。検証後に表示・送信用座標だけを水平反転する。
+                val isStable = stabilityTracker.update(rawMarkers)
+                val markers = if (mirror) {
+                    rawMarkers.map(DetectedMarker::mirrorHorizontally)
+                } else {
+                    rawMarkers
+                }
                 AppDiagnostics.increment("aruco.frames")
                 if (isStable) AppDiagnostics.increment("aruco.stable_frames")
                 AppDiagnostics.gauge("aruco.marker_count", markers.size)
@@ -80,6 +89,7 @@ class ArucoMarkerProcessor(
                         "ids" to markers.joinToString { it.id.toString() },
                         "stable" to isStable,
                         "stableFrames" to stabilityTracker.stableFrameCount,
+                        "mirrored" to mirror,
                         "centers" to markers.joinToString(";") { "${it.id}:${it.center.x},${it.center.y}" },
                     ),
                 )
@@ -92,6 +102,7 @@ class ArucoMarkerProcessor(
                         stable = isStable,
                         stableFrameCount = stabilityTracker.stableFrameCount,
                         requiredStableFrames = MarkerStabilityTracker.DEFAULT_REQUIRED_STABLE_FRAMES,
+                        cameraFacing = if (mirror) "front" else "back",
                     ),
                 )
             } finally {

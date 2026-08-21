@@ -24,6 +24,66 @@ import java.util.concurrent.atomic.AtomicReference
 
 class YubiBoardWebSocketClientTest {
     @Test
+    fun `camera facing is sent in hello and lens switch invalidates calibration`() {
+        val server = MockWebServer()
+        val connected = CountDownLatch(1)
+        val changed = CountDownLatch(1)
+        val hello = AtomicReference<String>()
+        val cameraChanged = AtomicReference<String>()
+        val serverSocket = AtomicReference<WebSocket>()
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        serverSocket.set(webSocket)
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        when {
+                            text.contains("\"messageType\":\"hello\"") -> {
+                                hello.set(text)
+                                webSocket.send(
+                                    """{"schemaVersion":1,"messageType":"hello_ack","sessionId":"camera-session","surface":{"surfaceId":"primary","widthPx":1920,"heightPx":1080},"calibrationRequired":false}""",
+                                )
+                            }
+                            text.contains("\"messageType\":\"camera_changed\"") -> {
+                                cameraChanged.set(text)
+                                changed.countDown()
+                            }
+                        }
+                    }
+                },
+            ),
+        )
+        server.start()
+        val client = YubiBoardWebSocketClient(
+            deviceId = "android-test",
+            clientVersion = "0.1.0",
+            onStateChanged = {
+                if (it.status == ConnectionStatus.CONNECTED) connected.countDown()
+            },
+            onModeChanged = {},
+        )
+        try {
+            client.setCameraFacing(usingFrontCamera = true)
+            val url = server.url("/")
+            client.connect(ConnectionConfig(url.host, url.port, pairingToken = "123456"))
+            assertTrue(connected.await(2, TimeUnit.SECONDS))
+            assertTrue(hello.get().contains("\"cameraFacing\":\"front\""))
+
+            client.notifyCameraChanged(usingFrontCamera = false)
+            assertTrue(changed.await(2, TimeUnit.SECONDS))
+            assertTrue(cameraChanged.get().contains("\"sessionId\":\"camera-session\""))
+            assertTrue(cameraChanged.get().contains("\"cameraFacing\":\"back\""))
+        } finally {
+            client.disconnect()
+            serverSocket.get()?.close(1000, "test complete")
+            client.close()
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `hello ack delivers resume token for secure persistence`() {
         val server = MockWebServer()
         val issued = CountDownLatch(1)
@@ -189,6 +249,7 @@ class YubiBoardWebSocketClientTest {
             val root = ProtocolCodec.json.parseToJsonElement(handJson).toString()
             assertTrue(root.contains("\"sessionId\":\"s-test\""))
             assertTrue(root.contains("\"landmarkFormat\":\"mediapipe_hand_21\""))
+            assertTrue(root.contains("\"mirrorCorrected\":true"))
         } finally {
             client.disconnect()
             serverSocket.get()?.close(1000, "test complete")

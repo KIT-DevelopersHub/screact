@@ -17,6 +17,7 @@ data class HelloMessage(
     val interactionProfile: String = TWO_HAND_INTERACTION_PROFILE,
     val maxHands: Int = 2,
     val coordinateSpace: String = "normalized_camera",
+    val cameraFacing: String = "back",
     val capabilities: List<String> = listOf(
         "aruco_calibration",
         "hand_landmarks_21",
@@ -47,7 +48,21 @@ data class SourceInfo(
     val rotationDegrees: Int = 0,
     val rotationCorrected: Boolean = true,
     val mirrorCorrected: Boolean = true,
+    val cameraFacing: String = "back",
 )
+
+@Serializable
+data class CameraChangedMessage(
+    val schemaVersion: Int = SCHEMA_VERSION,
+    val messageType: String = "camera_changed",
+    val sessionId: String,
+    val cameraFacing: String,
+    val changedAtMonotonicMs: Long,
+) {
+    init {
+        require(cameraFacing == "front" || cameraFacing == "back")
+    }
+}
 
 @Serializable
 data class HandPayload(
