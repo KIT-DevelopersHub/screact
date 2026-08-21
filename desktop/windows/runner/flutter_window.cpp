@@ -27,6 +27,9 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   overlay_mode_ = std::make_unique<OverlayModeController>(
       GetHandle(), flutter_controller_->engine()->messenger());
+  // OSクリック/ドラッグ/スクロールの実注入（SendInput）。channel: desktop_input。
+  desktop_input_ = std::make_unique<DesktopInputController>(
+      flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -42,6 +45,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  desktop_input_ = nullptr;
   overlay_mode_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
