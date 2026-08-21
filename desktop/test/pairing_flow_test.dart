@@ -129,6 +129,48 @@ void main() {
     responder.close();
   });
 
+  test('timeout後に起動した端末を発見し、未接続なら再びtimeoutへ戻る', () async {
+    final responder = await RawDatagramSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    var responding = false;
+    responder.listen((event) {
+      if (event != RawSocketEvent.read) return;
+      final datagram = responder.receive();
+      if (datagram == null || !responding) return;
+      final json = decodeDiscoveryDatagram(datagram.data);
+      if (json == null || DiscoveryOffer.tryParse(json) == null) return;
+      responder.send(
+        utf8.encode(
+          jsonEncode(
+            const DiscoveryResponse(
+              deviceId: 'late-phone',
+              deviceName: 'late phone',
+              model: 'm',
+            ).toJson(),
+          ),
+        ),
+        datagram.address,
+        datagram.port,
+      );
+    });
+    final controller = makeController(
+      responder.port,
+      timeout: const Duration(milliseconds: 180),
+    );
+
+    await controller.start();
+    await waitUntil(() => controller.phase == PairingPhase.timeout);
+    responding = true;
+    await waitUntil(() => controller.phase == PairingPhase.waitingConnect);
+    expect(controller.selected?.deviceId, 'late-phone');
+    await waitUntil(() => controller.phase == PairingPhase.timeout);
+
+    controller.dispose();
+    responder.close();
+  });
+
   test('キャンセルでUDP socketと端末一覧を破棄する', () async {
     final (responder, _) = await startResponder(['dev-a']);
     final controller = makeController(responder.port);
