@@ -18,7 +18,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$packageName = 'com.nxtend.team35.yubiboard'
+# app/build.gradle.kts の debug.applicationIdSuffix と同期する。
+# releaseアプリの保存データをdoctor/install/soakで誤って操作しない。
+$packageName = 'com.nxtend.team35.yubiboard.debug'
+$mainActivity = 'com.nxtend.team35.yubiboard.MainActivity'
 $androidRoot = Split-Path $PSScriptRoot -Parent
 $sdkCandidates = @(
     $env:ANDROID_HOME,
@@ -157,7 +160,7 @@ function Show-LanRoute {
 
 function Start-App {
     Resolve-Device
-    Invoke-Adb shell am start -n "$packageName/.MainActivity" | Out-Host
+    Invoke-Adb shell am start -n "$packageName/$mainActivity" | Out-Host
 }
 
 function Start-ProductionCheck {

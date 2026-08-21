@@ -46,12 +46,19 @@ class InputServer {
 
   final void Function(ServerStatus) onStatus;
 
+  /// カメラ切替で位置合わせが失効した時、UIへ再位置合わせ表示を要求する。
+  final void Function()? onCalibrationInvalidated;
+
   /// 受信フレーム全体（0〜2トラックの骨格・骨格表示/状態用）。任意。
   final void Function(InputFrame)? onFrame;
   final int port;
 
   /// WebSocket確立後、helloを送らない接続が単一クライアント枠を占有できる時間。
   final Duration helloTimeout;
+
+  /// 認証後にメッセージを受信しない接続を半開きとみなすまでの時間。
+  /// Androidは5秒ごとにheartbeatを送るため、2回分を超える猶予を持たせる。
+  final Duration inactivityTimeout;
 
   /// 6桁ペアリングコード（null なら照合しない）。UIがサーバ開始時に生成して表示する。
   final String? pairingCode;
@@ -69,11 +76,13 @@ class InputServer {
   HttpServer? _http;
   WebSocket? _socket;
   Timer? _helloTimer;
+  Timer? _inactivityTimer;
   String? _sessionId;
   String? _clientId;
   int _frames = 0;
   int? _lastFrameId;
   bool _handDetected = false;
+  String? _calibratedCameraFacing;
 
   // 単一スロット（最新フレームだけ保持）
   InputFrame? _pending;
@@ -83,10 +92,12 @@ class InputServer {
     required this.engine,
     required this.onEvents,
     required this.onStatus,
+    this.onCalibrationInvalidated,
     this.onTrackEvents,
     this.onFrame,
     this.port = 8765,
     this.helloTimeout = const Duration(seconds: 5),
+    this.inactivityTimeout = const Duration(seconds: 12),
     this.pairingCode,
     this.enforcePairing = true,
     this.acceptCalibrationMessages = true,
@@ -192,6 +203,7 @@ class InputServer {
     // close/error の遅延通知や拒否済みソケットからのデータが、後から確立した
     // 現在のセッションを変更しないよう、全受信をソケットidentityで守る。
     if (!identical(_socket, source)) return;
+    if (_sessionId != null) _armInactivityTimeout(source);
     Map<String, dynamic> j;
     try {
       j = (jsonDecode(data as String) as Map).cast<String, dynamic>();
@@ -219,6 +231,9 @@ class InputServer {
           break;
         case 'calibration_markers':
           _onCalibration(CalibrationMarkers.fromJson(j));
+          break;
+        case 'camera_changed':
+          _onCameraChanged(CameraChanged.fromJson(j));
           break;
         case 'slide_corners':
           _onSlideCorners(SlideCorners.fromJson(j));
@@ -265,10 +280,22 @@ class InputServer {
       _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
       return;
     }
+    final cameraChangedSinceCalibration =
+        engine.isCalibrated &&
+        hello.cameraFacing != null &&
+        hello.cameraFacing != _calibratedCameraFacing;
+    if (cameraChangedSinceCalibration) {
+      _log(
+        '接続カメラが前回位置合わせと異なるため旧位置合わせを破棄: '
+        '${_calibratedCameraFacing ?? "unknown"} -> ${hello.cameraFacing}',
+      );
+      _invalidateCalibration(notifyClient: false);
+    }
     _clientId = hello.deviceId;
     _helloTimer?.cancel();
     _helloTimer = null;
     _sessionId = 'session-${_randHex(8)}';
+    _armInactivityTimeout(source);
     _log(
       'hello_ack 送信: session=$_sessionId '
       'calibrationRequired=${!engine.isCalibrated} — 接続完了',
@@ -288,6 +315,7 @@ class InputServer {
     engine.mode =
         engine.isCalibrated ? EngineMode.tracking : EngineMode.calibration;
     _emit();
+    if (cameraChangedSinceCalibration) onCalibrationInvalidated?.call();
   }
 
   void _onCalibration(CalibrationMarkers markers) {
@@ -301,6 +329,7 @@ class InputServer {
     }
     final ok = engine.calibrate(markers);
     if (ok) {
+      _calibratedCameraFacing = markers.cameraFacing;
       _log('calibration_markers で位置合わせ成功 → set_mode tracking 送信');
       // 「画面位置合わせ完了」の通知（チームシーケンス図）。Androidはこれで
       // マーカー検出ループを抜けて通常トラッキングへ移る。
@@ -309,6 +338,28 @@ class InputServer {
     // 安定判定の蓄積中（4マーカー揃いだが未確定）はエラーにしない。
     final invalid = markers.markers.length < 4;
     _emit(error: invalid ? 'calibration failed (need 4 markers)' : null);
+  }
+
+  void _onCameraChanged(CameraChanged message) {
+    if (!message.isValid || message.sessionId != _sessionId) {
+      _log('不正または別sessionの camera_changed を無視');
+      _emit(error: 'invalid camera_changed (ignored)');
+      return;
+    }
+    _log('カメラ切替を受信: facing=${message.cameraFacing} → 再位置合わせ必須');
+    _invalidateCalibration(notifyClient: true);
+    onCalibrationInvalidated?.call();
+  }
+
+  void _invalidateCalibration({required bool notifyClient}) {
+    _pending = null;
+    final byTrack = engine.resetCalibration();
+    _dispatch(byTrack);
+    _calibratedCameraFacing = null;
+    if (notifyClient && _sessionId != null) {
+      _send(ControlMessage.setMode(_sessionId!, 'calibration').toJson());
+    }
+    _emit();
   }
 
   /// スマホ検出のスライド四隅で位置合わせ（ArUcoなしの経路）。
@@ -375,8 +426,8 @@ class InputServer {
   /// 安定して保持する主トラックのイベントをOS入力へ、全トラックをオーバーレイへ。
   void _dispatch(Map<int, List<InteractionEvent>> byTrack) {
     if (byTrack.isEmpty) return;
-    final primary = engine.primaryTrackIdOf(byTrack);
-    if (primary != null) onEvents(byTrack[primary]!);
+    final primaryEvents = engine.primaryEventsOf(byTrack);
+    if (primaryEvents != null) onEvents(primaryEvents);
     onTrackEvents?.call(byTrack);
   }
 
@@ -420,9 +471,28 @@ class InputServer {
     _emit(error: 'helloを受信できず接続を終了しました');
   }
 
+  void _armInactivityTimeout(WebSocket source) {
+    _inactivityTimer?.cancel();
+    _inactivityTimer = Timer(
+      inactivityTimeout,
+      () => _onInactivityTimeout(source),
+    );
+  }
+
+  void _onInactivityTimeout(WebSocket source) {
+    if (!identical(_socket, source) || _sessionId == null) return;
+    _log('受信timeout: heartbeatを含む通信が途絶えたため半開き接続を解放');
+    _socket = null;
+    _clearConnectionState(releaseInput: true);
+    unawaited(source.close(4004, 'inactivity_timeout'));
+    _emit(error: 'スマホとの通信が途絶えたため再接続を待っています');
+  }
+
   void _clearConnectionState({required bool releaseInput}) {
     _helloTimer?.cancel();
     _helloTimer = null;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
     _sessionId = null;
     _clientId = null;
     _frames = 0;

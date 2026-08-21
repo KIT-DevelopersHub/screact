@@ -4,11 +4,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.net.InetAddress
 
 /**
  * Screact ゼロコンフィグ・ペアリングの UDP 発見プロトコル。
- * Desktop が discovery_offer をブロードキャストし、待受中の Android は
- * offer の wsPort/token を使って WebSocket (/ws/v1/input) へ自動接続する。
+ * Desktop が discovery_offer をブロードキャストし、Android も discovery_probe を
+ * ブロードキャストする。待受中の Android は届いたofferの wsPort/token を使って
+ * WebSocket (/ws/v1/input) へ自動接続する。
  * discovery_response は Desktop の表示・ログ用、discovery_select/ack は旧フローとの
  * 後方互換用であり、現行の接続成立には必要としない。
  */
@@ -18,6 +20,15 @@ const val DISCOVERY_SCHEMA_VERSION = 1
 const val DISCOVERY_DEVICE_ID_MAX_LENGTH = 128
 
 sealed interface DiscoveryMessage
+
+/** Android→broadcast: Desktop の offer をユニキャストで要求する探索通知。 */
+@Serializable
+data class DiscoveryProbe(
+    val app: String = DISCOVERY_APP,
+    val schemaVersion: Int = DISCOVERY_SCHEMA_VERSION,
+    val messageType: String = "discovery_probe",
+    val deviceId: String,
+) : DiscoveryMessage
 
 /** Desktop→broadcast: 接続情報の広告。 */
 @Serializable
@@ -81,6 +92,8 @@ object DiscoveryCodec {
         val obj = runCatching { element.jsonObject }.getOrNull() ?: return null
         if (obj["app"]?.jsonPrimitive?.contentOrNullSafe() != DISCOVERY_APP) return null
         val message = when (obj["messageType"]?.jsonPrimitive?.contentOrNullSafe()) {
+            "discovery_probe" ->
+                runCatching { json.decodeFromString<DiscoveryProbe>(text) }.getOrNull()
             "discovery_offer" ->
                 runCatching { json.decodeFromString<DiscoveryOffer>(text) }.getOrNull()
             "discovery_response" ->
@@ -94,6 +107,8 @@ object DiscoveryCodec {
         return message?.takeIf { it.isValid() }
     }
 
+    fun encode(message: DiscoveryProbe): String = json.encodeToString(DiscoveryProbe.serializer(), message)
+
     fun encode(message: DiscoveryResponse): String = json.encodeToString(DiscoveryResponse.serializer(), message)
 
     fun encode(message: DiscoverySelectAck): String = json.encodeToString(DiscoverySelectAck.serializer(), message)
@@ -103,6 +118,7 @@ object DiscoveryCodec {
 
     private fun DiscoveryMessage.isValid(): Boolean {
         val schemaVersion = when (this) {
+            is DiscoveryProbe -> schemaVersion
             is DiscoveryOffer -> schemaVersion
             is DiscoveryResponse -> schemaVersion
             is DiscoverySelect -> schemaVersion
@@ -111,6 +127,7 @@ object DiscoveryCodec {
         if (schemaVersion != DISCOVERY_SCHEMA_VERSION) return false
 
         return when (this) {
+            is DiscoveryProbe -> deviceId.isValidDeviceId()
             is DiscoveryOffer -> wsPort.isValidWsPort() && token.isValidPairingToken()
             is DiscoveryResponse -> deviceId.isValidDeviceId()
             is DiscoverySelect ->
@@ -126,4 +143,17 @@ object DiscoveryCodec {
 
     private fun String.isValidDeviceId(): Boolean =
         isNotBlank() && length <= DISCOVERY_DEVICE_ID_MAX_LENGTH
+}
+
+/** IPv4アドレスとプレフィックス長から、そのサブネットのdirected broadcastを求める。 */
+fun ipv4DirectedBroadcast(address: InetAddress, prefixLength: Int): InetAddress? {
+    val bytes = address.address
+    if (bytes.size != 4 || prefixLength !in 0..30) return null
+    val result = bytes.copyOf()
+    for (bit in prefixLength until 32) {
+        val byteIndex = bit / 8
+        val bitInByte = 7 - bit % 8
+        result[byteIndex] = (result[byteIndex].toInt() or (1 shl bitInByte)).toByte()
+    }
+    return InetAddress.getByAddress(result)
 }

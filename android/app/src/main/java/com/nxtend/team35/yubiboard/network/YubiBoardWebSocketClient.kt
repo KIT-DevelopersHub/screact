@@ -3,6 +3,7 @@ package com.nxtend.team35.yubiboard.network
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.CalibrationMarkersMessage
+import com.nxtend.team35.yubiboard.protocol.CameraChangedMessage
 import com.nxtend.team35.yubiboard.protocol.ControlMessage
 import com.nxtend.team35.yubiboard.protocol.HandFrameMessage
 import com.nxtend.team35.yubiboard.protocol.HandPayload
@@ -66,6 +67,8 @@ class YubiBoardWebSocketClient(
     private var pendingErrorCode: ConnectionErrorCode? = null
     private var calibrationConfirmed = false
     private var calibrationRequested = false
+    @Volatile
+    private var cameraFacing = "back"
 
     init {
         scheduler.scheduleAtFixedRate(::flushLatestHand, 0, SENDER_TICK_MS, TimeUnit.MILLISECONDS)
@@ -111,6 +114,35 @@ class YubiBoardWebSocketClient(
                 AppDiagnostics.increment("network.calibration_replaced")
             }
         }
+    }
+
+    fun notifyCameraChanged(usingFrontCamera: Boolean) {
+        synchronized(lock) {
+            cameraFacing = if (usingFrontCamera) "front" else "back"
+            latestHand.set(null)
+            latestCalibration.set(null)
+            lastStableCalibration.set(null)
+            calibrationConfirmed = false
+            calibrationRequested = true
+            val socket = webSocket ?: return
+            val activeSession = sessionId ?: return
+            val encoded = ProtocolCodec.encode(
+                CameraChangedMessage(
+                    sessionId = activeSession,
+                    cameraFacing = cameraFacing,
+                    changedAtMonotonicMs = monotonicMs(),
+                ),
+            )
+            if (socket.send(encoded)) {
+                AppDiagnostics.event("network", "camera_changed", mapOf("facing" to cameraFacing))
+            } else {
+                AppDiagnostics.increment("network.send_failures")
+            }
+        }
+    }
+
+    fun setCameraFacing(usingFrontCamera: Boolean) {
+        cameraFacing = if (usingFrontCamera) "front" else "back"
     }
 
     fun setMaxFrameRate(framesPerSecond: Int) {
@@ -200,6 +232,10 @@ class YubiBoardWebSocketClient(
         val listener = SocketListener(config, reconnecting)
         val openedSocket = httpClient.newWebSocket(request, listener)
         webSocket = openedSocket
+    }
+
+    /** hello_ack の待ち時間はTCP/WebSocket接続ではなく、hello送信後から数える。 */
+    private fun scheduleHelloAckTimeout(openedSocket: WebSocket) {
         scheduler.schedule(
             {
                 synchronized(lock) {
@@ -265,7 +301,12 @@ class YubiBoardWebSocketClient(
             sessionId = activeSession,
             frameId = frameId.incrementAndGet(),
             capturedAtMonotonicMs = result.capturedAtMonotonicMs,
-            source = SourceInfo(result.sourceWidth, result.sourceHeight),
+            source = SourceInfo(
+                result.sourceWidth,
+                result.sourceHeight,
+                mirrorCorrected = result.mirrorCorrected,
+                cameraFacing = result.cameraFacing,
+            ),
             hands = hands,
             hand = if (primary != null) {
                 HandPayload(
@@ -359,7 +400,12 @@ class YubiBoardWebSocketClient(
         val message = CalibrationMarkersMessage(
             sessionId = activeSession,
             capturedAtMonotonicMs = result.capturedAtMonotonicMs,
-            source = SourceInfo(result.sourceWidth, result.sourceHeight),
+            source = SourceInfo(
+                result.sourceWidth,
+                result.sourceHeight,
+                mirrorCorrected = result.mirrorCorrected,
+                cameraFacing = result.cameraFacing,
+            ),
             markers = result.markers.map { marker ->
                 MarkerPayload(
                     id = marker.id,
@@ -527,6 +573,7 @@ class YubiBoardWebSocketClient(
             if (webSocket !== socket || manuallyStopped) return
             AppDiagnostics.increment("network.disconnects")
             AppDiagnostics.event("network", "socket_ended", mapOf("detail" to detail))
+            webSocket = null
             sessionId = null
             heartbeatTask?.cancel(false)
             val errorCode = pendingErrorCode ?: ConnectionErrorCode.UNREACHABLE
@@ -614,6 +661,11 @@ class YubiBoardWebSocketClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             synchronized(lock) {
                 if (this@YubiBoardWebSocketClient.webSocket !== webSocket || manuallyStopped) return
+                AppDiagnostics.event(
+                    "network",
+                    "websocket_opened",
+                    mapOf("responseCode" to response.code),
+                )
                 publish(
                     ConnectionSnapshot(
                         ConnectionStatus.AWAITING_ACK,
@@ -626,11 +678,13 @@ class YubiBoardWebSocketClient(
                             clientVersion = clientVersion,
                             pairingToken = config.pairingToken,
                             resumeToken = config.resumeToken,
+                            cameraFacing = cameraFacing,
                         ),
                     )
                 webSocket.send(encoded)
                 AppDiagnostics.increment("network.bytes_sent", encoded.toByteArray().size.toLong())
                 AppDiagnostics.event("network", "hello_sent", mapOf("bytes" to encoded.toByteArray().size))
+                scheduleHelloAckTimeout(webSocket)
             }
         }
 
@@ -643,6 +697,14 @@ class YubiBoardWebSocketClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            AppDiagnostics.event(
+                "network",
+                "websocket_failure",
+                mapOf(
+                    "exception" to t.javaClass.simpleName,
+                    "responseCode" to response?.code,
+                ),
+            )
             handleSocketEnded(webSocket, t.message ?: "通信エラー")
         }
     }

@@ -191,7 +191,9 @@ class _HomePageState extends State<HomePage> {
       // プロンプトを先出しする（許可が遅れると offer/select が黙って落ち、
       // 「PCは検索中・スマホは待ちのまま」になる）。_wifiIp は init時点で未取得
       // でも良い（その場合は 255.255.255.255 宛てに送られる）。ベストエフォート。
-      unawaited(triggerLocalNetworkPrompt(ip: _wifiIp, onLog: _handleServerLog));
+      unawaited(
+        triggerLocalNetworkPrompt(ip: _wifiIp, onLog: _handleServerLog),
+      );
     }
     if (_autoFlow) scheduleMicrotask(_startPairing);
   }
@@ -357,6 +359,12 @@ class _HomePageState extends State<HomePage> {
       onTrackEvents: _handleTrackEvents,
       onFrame: _handleFrame,
       onStatus: _onServerStatus,
+      onCalibrationInvalidated: () {
+        if (_disposed || !mounted) return;
+        unawaited(
+          _startCalibrationDisplay(intoOverlay: _overlayPlatformSupported),
+        );
+      },
       pairingCode: _pairingCode,
       enforcePairing: _enforcePairing,
       acceptCalibrationMessages: false,
@@ -529,9 +537,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _enterOverlay() async {
     if (_disposed || !mounted || _enteringOverlay) return;
     if (!_running || !_phoneConnected) {
-      setState(
-        () => _overlayError = 'スマホを接続すると、操作画面を表示できます。',
-      );
+      setState(() => _overlayError = 'スマホを接続すると、操作画面を表示できます。');
       return;
     }
     if (!_engine.isCalibrated && !_flow.showingTarget) {

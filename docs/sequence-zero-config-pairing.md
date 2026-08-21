@@ -20,7 +20,8 @@ UDPで手指骨格や操作データは送りません。実データはすべ�
 
 | messageType | 方向 | 用途 |
 |---|---|---|
-| `discovery_offer` | Desktop → UDP broadcast | `wsPort`と6桁`token`を広告する |
+| `discovery_probe` | Android → UDP broadcast | Desktopへ既存形式のofferをユニキャスト返信するよう要求する |
+| `discovery_offer` | Desktop → UDP broadcast / unicast | `wsPort`と6桁`token`を広告する |
 | `discovery_response` | Android → Desktop unicast | 端末情報をPCのログ・発見表示へ返す。接続成立には必須でない |
 | `discovery_select` | Desktop → Android | legacy互換。現行フローでは接続トリガに使わない |
 | `discovery_select_ack` | Android → Desktop | legacy互換。現行フローでは接続成立条件に使わない |
@@ -46,12 +47,16 @@ sequenceDiagram
     AU->>AV: 画面認識開始
     AV->>AL: UDP :8766 待受開始
     Note over AU: PCからのoffer待ち
+    loop 接続または中止まで
+        AL-->>DD: discovery_probe broadcast<br/>limited + 実prefixのdirected broadcast
+    end
 
     DU->>WS: WebSocketサーバ開始
     DU->>DD: 発見開始
     loop 接続または中止まで
         DD-->>AL: discovery_offer broadcast<br/>schema=1, wsPort, 6桁token
     end
+    DD-->>AL: probe受信時は同じdiscovery_offerをunicast返信
 
     AL->>AL: app/schema/port/tokenを検証
     AL-->>DD: discovery_response（表示・診断用）
@@ -127,13 +132,15 @@ sequenceDiagram
 ## macOSローカルネットワーク権限
 
 現行フローはPCからAndroidへの`discovery_select`ユニキャストを必須経路から外しました。
-ただし、最初の`discovery_offer`はPCからLANへのUDP broadcastです。したがって
+ただし、自動発見にはPCからの`discovery_offer`またはAndroidからの`discovery_probe`の
+少なくとも一方向のbroadcast到達が必要です。したがって
 「接続方向を変えたのでmacOSのローカルネットワーク権限に完全非依存」という説明は
 正しくありません。
 
 - offer broadcastが許可・到達する環境では、Androidは自分からWebSocketを張れるため
   select到達問題を回避できます。
-- macOSがoffer broadcast自体を抑止する場合、自動発見は成立しません。
+- macOSがoffer broadcastを抑止してもprobeが届けばユニキャストofferで補完できます。
+  LAN向け送受信全体が抑止される場合は自動発見できません。
 - アプリは`NSLocalNetworkUsageDescription`を宣言し、「始める」で実際にofferを
   送る時にmacOSの許可導線を出しますが、許可状態やAP設定は実行環境に依存します。
 - UDP自動発見が利用できない場合は手動接続を使用します。
@@ -141,6 +148,22 @@ sequenceDiagram
 過去の調査では環境ごとに「broadcastは届くがunicast selectは届かない」と
 「LAN向け送信全体が制限される」という異なる観測がありました。現行仕様は特定の
 TCC挙動を保証として扱わず、offer失敗時にタイムアウトと手動フォールバックを提供します。
+
+## WindowsとiPhoneテザリング
+
+WindowsではiPhoneのWi-FiテザリングとApple Mobile Device Ethernetが同じ
+`172.20.10.0/28`へ同時接続されることがあります。Desktopはoffer送信用UDP socketを
+画面に表示したWi-Fi IPv4へbindし、limited broadcastがUSB側へ誤配送されることを
+避けます。Wi-Fi IPv4へbindできない場合だけ`0.0.0.0`へフォールバックします。
+
+この対策は送信インターフェースの選択と補助broadcast宛先だけを限定的に変えます。
+iPhoneテザリングの`172.20.10.0/28`ではdirected broadcast `172.20.10.15`も併送します。
+UDPメッセージ、ポート、認証、WebSocket経路は変更しません。
+
+Android側のprobeは特定のiPhoneアドレスをハードコードせず、接続中ネットワークの
+IPv4アドレスとprefix lengthからdirected broadcastを算出します。これにより通常の
+`/24` LAN、`/20`等の異なる構成、iPhoneテザリングの`/28`を同じ経路で扱い、limited
+broadcastと従来のDesktop発offerも残して後方互換を保ちます。
 
 ## legacy select / ACK
 
@@ -160,18 +183,38 @@ legacy select/ACKは互換試験に限定します。
 ## 既知の制約
 
 - UDP broadcastはルータ、企業Wi-Fi、ゲストネットワーク、VPN、OS権限で遮断され得る。
-- サブネット補助宛先は現在`/24`を仮定して計算する。
+- Desktop発offerの旧補助宛先はiPhoneテザリング以外では`/24`を仮定するが、Android発
+  probeは実prefixからdirected broadcastを求める。
 - 6桁tokenは同一LANへbroadcastされるため、高機密な認証方式ではない。
 - PCは単一WebSocket端末のみを受理し、AirDrop風の事前選択は行わない。
 - 自動発見失敗時は手動接続が必要。
 
+## iPhoneテザリング実機の反復結果（2026-08-22）
+
+WindowsとXiaomi 25118PC98GをiPhoneテザリングへ接続し、debug専用の無操作ハーネスで
+Android先行5回、Desktop先行5回を実行した。双方向UDP探索の導入前は6/10成功だったが、
+導入後は10/10成功し、offer受信から`hello_ack`までは135〜610ms、
+`hello_ack_timeout`は0回だった。初回の自動発見はこの環境の反復合格とする。
+
+Desktopが認証後12秒間メッセージを受信しない半開き接続を安全解除する変更後、Wi-Fi無効化・
+再有効化からの無操作復帰は3/3成功した。既定ネットワーク復帰から`hello_ack`までは
+11.167〜16.244秒だった。各試行で旧枠解放前の接続試行に`hello_ack_timeout`が1回、
+WebSocket失敗が2〜3回あったが、Androidの再試行で30秒以内に復帰した。同じbuildで行った
+初回接続の短縮回帰はAndroid先行2回・Desktop先行2回の4/4成功、offer受信から
+`hello_ack`は160〜257msだった。デモ時のフォールバックは引き続き手動IP・ポート・6桁コード入力とする。
+
+同日の通常Wi-Fi `/24`実機確認では、Android先行1回・Desktop先行1回の初回自動接続が
+2/2成功した。offer受信から`hello_ack`は241〜309ms、10秒超過と`hello_ack_timeout`は
+どちらも0だった。これによりiPhoneテザリング固有の`/28`だけでなく、通常LANでも従来の
+自動接続経路が維持されていることを確認した。
+
 ## 回帰テスト
 
-- Desktop codec: app/schema、port、6桁token、legacy select/ACK
-- Desktop UDP: offer/response、重複排除、start/stop世代競合、legacy select再送/ACK
-- Desktop WebSocket: pairing token、first socket wins、server_busy、socket identity guard
+- Desktop codec: probe、app/schema、port、6桁token、legacy select/ACK
+- Desktop UDP: probe→unicast offer、offer/response、重複排除、start/stop世代競合、legacy select再送/ACK
+- Desktop WebSocket: pairing token、first socket wins、server_busy、socket identity guard、heartbeat timeoutと次接続受理
 - Desktop E2E: `offer → Android自発WS → hello_ack`
-- Android codec/listener: offer受信、response返信、offer駆動`onConnect`、legacy select ACK
+- Android codec/listener: 実prefix broadcast計算、probe→offer往復、offer受信、response返信、offer駆動`onConnect`、legacy select ACK
 
 実行例:
 

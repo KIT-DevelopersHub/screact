@@ -63,24 +63,9 @@ class _OverlayPainter extends CustomPainter {
         );
         continue;
       }
-      // 中点スムージング: 各点を制御点に、隣接中点を終点にした2次ベジェで
-      // 連続した滑らかな線にする（折れ線のカクつきを除去）。
-      final path = Path();
-      final first = _p(pts.first, size);
-      path.moveTo(first.dx, first.dy);
-      for (var i = 1; i < pts.length - 1; i++) {
-        final c = _p(pts[i], size);
-        final n = _p(pts[i + 1], size);
-        path.quadraticBezierTo(
-          c.dx,
-          c.dy,
-          (c.dx + n.dx) / 2,
-          (c.dy + n.dy) / 2,
-        );
-      }
-      final last = _p(pts.last, size);
-      path.lineTo(last.dx, last.dy);
-      canvas.drawPath(path, ink);
+      // 中点スムージングの2次ベジェPath。完了ストロークはInkStroke側で
+      // キャッシュされるため、毎フレーム再構築されるのは描画中の1本だけ。
+      canvas.drawPath(stroke.pathFor(size), ink);
     }
 
     // トラックごとの骨格＋カーソル。

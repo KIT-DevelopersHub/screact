@@ -62,6 +62,21 @@ void main() {
     });
   });
 
+  group('directedBroadcastsOf（UDP offerの併送先）', () {
+    test('物理IFの/24宛先を重複排除し、仮想IFと不正IPv4を除外する', () {
+      expect(
+        directedBroadcastsOf(const [
+          InterfaceAddrs('Wi-Fi', ['192.168.10.42']),
+          InterfaceAddrs('Ethernet', ['10.2.3.4', '192.168.10.5']),
+          InterfaceAddrs('VirtualBox Host-Only Network', ['192.168.56.1']),
+          InterfaceAddrs('utun4', ['100.64.0.1']),
+          InterfaceAddrs('Ethernet 2', ['999.1.2.3', 'not-an-ip']),
+        ]),
+        ['192.168.10.255', '10.2.3.255'],
+      );
+    });
+  });
+
   group('6桁コード', () {
     test('generatePairingCode は6桁の数字', () {
       for (var i = 0; i < 20; i++) {
@@ -76,6 +91,7 @@ void main() {
       required String? code,
       bool enforce = true,
       Duration helloTimeout = const Duration(seconds: 5),
+      Duration inactivityTimeout = const Duration(seconds: 12),
       void Function(ServerStatus)? onStatus,
     }) async {
       final server = InputServer(
@@ -86,6 +102,7 @@ void main() {
         pairingCode: code,
         enforcePairing: enforce,
         helloTimeout: helloTimeout,
+        inactivityTimeout: inactivityTimeout,
       );
       await server.start();
       addTearDown(server.stop);
@@ -227,6 +244,60 @@ void main() {
         (await ack.timeout(const Duration(seconds: 5)))['sessionId'],
         isNotNull,
       );
+    });
+
+    test('heartbeatが途絶えた半開き接続を解放し次の接続を受理する', () async {
+      ServerStatus latest = const ServerStatus();
+      final server = await startServer(
+        code: '123456',
+        inactivityTimeout: const Duration(milliseconds: 120),
+        onStatus: (status) => latest = status,
+      );
+      final (stale, staleMessages) = await connect(server);
+      addTearDown(stale.close);
+      final firstAck = staleMessages.firstWhere(
+        (message) => message['messageType'] == 'hello_ack',
+      );
+      stale.add(jsonEncode(hello('123456')));
+      await firstAck.timeout(const Duration(seconds: 5));
+      expect(latest.sessionId, isNotNull);
+
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (latest.sessionId != null && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(latest.sessionId, isNull);
+
+      final (next, nextMessages) = await connect(server);
+      addTearDown(next.close);
+      final nextAck = nextMessages.firstWhere(
+        (message) => message['messageType'] == 'hello_ack',
+      );
+      next.add(jsonEncode(hello('123456')));
+      expect(
+        (await nextAck.timeout(const Duration(seconds: 5)))['sessionId'],
+        isNotNull,
+      );
+    });
+
+    test('heartbeat受信で半開き判定の期限を延長する', () async {
+      ServerStatus latest = const ServerStatus();
+      final server = await startServer(
+        code: '123456',
+        inactivityTimeout: const Duration(milliseconds: 250),
+        onStatus: (status) => latest = status,
+      );
+      final (ws, messages) = await connect(server);
+      addTearDown(ws.close);
+      final ack = messages.firstWhere(
+        (message) => message['messageType'] == 'hello_ack',
+      );
+      ws.add(jsonEncode(hello('123456')));
+      await ack.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      ws.add(jsonEncode({'messageType': 'heartbeat'}));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(latest.sessionId, isNotNull);
     });
 
     test('拒否済み旧ソケットの遅延onDoneが新しいセッションを消さない', () async {

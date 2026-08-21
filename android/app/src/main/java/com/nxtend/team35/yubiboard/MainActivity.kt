@@ -162,6 +162,17 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        AppDiagnostics.event("app", "activity_created")
+        if (BuildConfig.DEBUG &&
+            savedInstanceState == null &&
+            intent.getBooleanExtra(EXTRA_DEBUG_AUTO_DISCOVERY, false)
+        ) {
+            // ADBだけでUDP実機E2Eを再現するためのdebug APK限定導線。
+            // 保存済み接続の自動再利用を止め、必ずdiscovery_offer経路を通す。
+            viewModel.changeConnectionSettings()
+            viewModel.startAutoPairing()
+            AppDiagnostics.event("debug", "auto_discovery_started")
+        }
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         runCatching {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
@@ -207,6 +218,8 @@ class MainActivity : ComponentActivity() {
             previewView = previewView,
             onReady = {
                 cameraStarted = true
+                usingFrontCamera = cameraSession.isFrontFacing
+                viewModel.setCameraFacing(usingFrontCamera)
                 cameraStatus = "カメラ準備完了"
                 viewModel.updateCameraState(CameraUiState.READY)
             },
@@ -224,10 +237,12 @@ class MainActivity : ComponentActivity() {
             },
         )
         cameraSession.setFrameConsumer { image ->
+            // ArUco/MediaPipeには元画像を渡し、検出後の座標だけをプレビューに合わせる。
+            val mirror = cameraSession.isFrontFacing
             if (currentMode == CaptureMode.CALIBRATION) {
-                arucoMarkerProcessor.process(image)
+                arucoMarkerProcessor.process(image, mirror)
             } else {
-                handLandmarkerProcessor.process(image)
+                handLandmarkerProcessor.process(image, mirror)
             }
         }
 
@@ -378,10 +393,14 @@ class MainActivity : ComponentActivity() {
             return
         }
         usingFrontCamera = cameraSession.isFrontFacing
+        viewModel.notifyCameraChanged(usingFrontCamera)
         previewView.contentDescription =
             if (usingFrontCamera) "前面カメラのプレビュー" else "背面カメラのプレビュー"
-        transientMessage =
-            if (usingFrontCamera) "前面カメラに切り替えました" else "背面カメラに切り替えました"
+        transientMessage = if (usingFrontCamera) {
+            "前面カメラに切り替えました。位置合わせをし直してください"
+        } else {
+            "背面カメラに切り替えました。位置合わせをし直してください"
+        }
     }
 
     internal fun startSyntheticTwoHandStreamForTest() {
@@ -457,6 +476,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val EXTRA_DEBUG_AUTO_DISCOVERY = "debugAutoDiscovery"
         private const val PROCESSOR_CLOSE_DELAY_MS = 1_000L
     }
 }

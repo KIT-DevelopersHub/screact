@@ -7,12 +7,14 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import com.nxtend.team35.yubiboard.network.ConnectionConfig
 import com.nxtend.team35.yubiboard.network.ConnectionSnapshot
 import com.nxtend.team35.yubiboard.network.ConnectionStatus
 import com.nxtend.team35.yubiboard.network.DesktopDiscoveryListener
 import com.nxtend.team35.yubiboard.network.YubiBoardWebSocketClient
+import com.nxtend.team35.yubiboard.network.ipv4DirectedBroadcast
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.CalibrationStatusMessage
@@ -36,6 +38,8 @@ import com.nxtend.team35.yubiboard.vision.DetectedMarker
 import com.nxtend.team35.yubiboard.vision.LandmarkPoint
 import com.nxtend.team35.yubiboard.vision.NormalizedPoint
 import com.nxtend.team35.yubiboard.vision.TrackedHand
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -159,6 +163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             },
             multicastLock = createMulticastLock(),
+            probeTargetsProvider = ::discoveryProbeTargets,
         )
         // start直後にofferが届いても callback 側から同じlistenerを停止できるよう、
         // ソケットを開く前に参照を公開する。
@@ -216,6 +221,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.getOrNull()
 
+    /** 現在の既定ネットワークから通常Wi-Fiにもテザリングにも使える送信先を求める。 */
+    private fun discoveryProbeTargets(): List<InetAddress> {
+        val targets = linkedSetOf(InetAddress.getByName("255.255.255.255"))
+        val connectivity = getApplication<Application>().applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return targets.toList()
+        val network = connectivity.activeNetwork ?: return targets.toList()
+        connectivity.getLinkProperties(network)?.linkAddresses.orEmpty()
+            .filter { it.address is Inet4Address }
+            .mapNotNull { ipv4DirectedBroadcast(it.address, it.prefixLength) }
+            .forEach(targets::add)
+        return targets.toList()
+    }
+
     fun disconnect() {
         stopDiscovery()
         updateProduction { it.copy(pairing = PairingUiState.IDLE, notice = null) }
@@ -252,6 +271,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateCameraState(state: CameraUiState, notice: String? = null) {
         updateProduction { it.copy(camera = state, notice = notice) }
+    }
+
+    fun setCameraFacing(usingFrontCamera: Boolean) {
+        webSocketClient.setCameraFacing(usingFrontCamera)
+    }
+
+    fun notifyCameraChanged(usingFrontCamera: Boolean) {
+        webSocketClient.notifyCameraChanged(usingFrontCamera)
+        handleModeChanged(CaptureMode.CALIBRATION)
     }
 
     fun submitHand(result: HandDetectionResult) {

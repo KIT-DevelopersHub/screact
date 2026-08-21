@@ -41,9 +41,42 @@ Android Studioでは`android/`をプロジェクトとして開く。コマン�
 
 `-ResetAppData`は保存済みhost、port、`resumeToken`、Experience Modeを消す。通常の更新では指定しない。`pm clear`を制限する端末では、スクリプトが対象debugアプリの再導入へ自動でフォールバックする。`-GrantCamera`を端末が拒否した場合は警告が出るため、起動後の権限ダイアログで許可する。
 
+UDP自動発見をユーザー操作なしで実機確認する場合は、カメラ権限を許可済みのdebug APKを
+次のextra付きで起動する。debug APKは保存済みの接続・信頼情報を破棄してUDP待受を開始する。
+release APKではextraを無視する。
+
+```powershell
+adb shell am force-stop com.nxtend.team35.yubiboard.debug
+adb shell am start `
+  -n com.nxtend.team35.yubiboard.debug/com.nxtend.team35.yubiboard.MainActivity `
+  --ez debugAutoDiscovery true
+```
+
+Desktopも`flutter run -d windows --dart-define=YUBI_AUTOFLOW=true`で起動すると、
+画面操作なしでWebSocket待受とUDP offer送信を開始できる。Androidの`YubiBoardDiag`ログで
+`listen_started`、`probe_sent`、`offer_received`、`connect_from_offer`、`hello_ack`を確認する。
+offerは従来のDesktop発broadcastと、Android発probeへのunicast返信のどちらでもよい。
+
+iPhoneテザリングで接続順を入れ替えた反復試験とWi-Fi再接続試験まで自動実行する場合は、
+既存のFlutter／Gradle／ADBだけを使う次のスクリプトを実行する。結果はIP、6桁コード、
+session IDを含めず`android/debug-results/autoconnect-日時/`へ保存され、Git差分には入らない。
+
+```powershell
+.\android\tools\iphone-hotspot-autoconnect-smoke.ps1 -Build
+```
+
+既定の合格条件はAndroid先行5回、Desktop先行5回の全成功、offer受信から各10秒以内、
+`hello_ack_timeout`なし、Wi-Fi再接続3回の全成功である。ログでは
+`websocket_opened`と`hello_sent`も分けて記録するため、UDP、WebSocket upgrade、
+認証応答のどこで失敗したかをCSVから切り分けられる。Windows debugアプリのcold startは
+環境によって20秒を超えるため、offer開始までの猶予は45秒とし、接続時間とは分けて記録する。
+
 ## 3. debug APKの画面構成
 
 debug APKは初回にデバッグ画面を開く。release APKは常に本番画面で、デバッグ切替を表示しない。
+debug APKのapplicationIdは`com.nxtend.team35.yubiboard.debug`であり、releaseの
+`com.nxtend.team35.yubiboard`とは別アプリとして導入される。デバッグスクリプトは
+debug IDだけを起動・初期化・計測し、releaseアプリの保存データには触れない。
 
 デバッグ画面には次がある。
 
