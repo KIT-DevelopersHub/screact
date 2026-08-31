@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; // Rect もここから来る。
 
 /// ネイティブの「オーバーレイ窓」（透過・最前面・クリック透過）との境界。
 /// スライドの上にインクを重ねるモードの入退場を担う。
@@ -84,6 +84,26 @@ class OverlayWindowController {
     ++_operationEpoch;
     if (!_available) return;
     await _invokeNativeExit();
+  }
+
+  /// クリック透過オーバーレイ窓の中で「マウス入力を拾わせたい」矩形を通知する。
+  /// ネイティブ側はカーソルがこの矩形（画面正規化・左上原点）に入っている間だけ
+  /// window.ignoresMouseEvents を false にして、色丸のマウスクリックを Flutter の
+  /// GestureDetector へ届ける。それ以外は従来どおりクリック透過を維持する。
+  Future<void> setInteractiveRect(Rect? normalized) async {
+    if (_disposed || !_available) return;
+    try {
+      await channel.invokeMethod('setInteractiveRect', <String, double>{
+        'x': normalized?.left ?? 0,
+        'y': normalized?.top ?? 0,
+        'w': normalized?.width ?? 0,
+        'h': normalized?.height ?? 0,
+      });
+    } on MissingPluginException {
+      // 未対応ビルドでは何もしない（マウスは従来どおり素通り）。
+    } on PlatformException {
+      // 失敗しても致命ではない。
+    }
   }
 
   Future<void> _invokeNativeExit() async {

@@ -11,7 +11,11 @@ class OverlayCanvas extends StatelessWidget {
   final OverlayModel model;
   const OverlayCanvas({super.key, required this.model});
 
-  /// 表示モデルが割り当てた色スロット→表示色。
+  /// 通常時のペン/消しゴムのカーソルの丸の直径（論理px）。右下の色丸のサイズは
+  /// この 2.5 倍にする（大きな1つの丸に集約）。
+  static const double cursorDiameter = 18;
+
+  /// トラック別のカーソル/骨格に使う自動色スロット→表示色。
   static Color colorForSlot(int colorSlot) =>
       _palette[colorSlot % _palette.length];
 
@@ -44,9 +48,9 @@ class _OverlayPainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(Offset.zero & size);
 
-    // インク（トラック別の色）。
+    // インク（描画時に選ばれていたペン色）。
     for (final stroke in model.strokes) {
-      final color = OverlayCanvas.colorForSlot(stroke.colorSlot);
+      final color = stroke.color;
       final ink =
           Paint()
             ..color = color

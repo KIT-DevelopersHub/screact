@@ -1,18 +1,20 @@
+import 'dart:ui' show Color, Rect;
+
 import 'package:flutter/foundation.dart';
 
 import 'geom.dart';
 import 'interaction_engine.dart';
 
-/// 描画中／確定したインクストローク（画面正規化点列）。trackId でトラック別に
-/// 色分けする（2人同時描画の識別）。
+/// 描画中／確定したインクストローク（画面正規化点列）。描画色はペン色サイクル
+/// （右下の大きな色丸）で選ばれた実際の色を保持する。trackId は同時描画の識別用。
 class InkStroke {
   final List<Vec2> points;
   final int trackId;
-  final int colorSlot;
+  final Color color;
   InkStroke(
     this.points, {
     this.trackId = OverlayModel.legacyTrackId,
-    this.colorSlot = 0,
+    this.color = OverlayModel.defaultPenColor,
   });
 }
 
@@ -22,6 +24,10 @@ class TrackVisual {
   Vec2? cursor;
   bool pressed = false;
   bool erasing = false; // グー（消しゴム）中。カーソルを消しゴム範囲の輪で描く。
+
+  /// 右下の色丸の上でピンチ/くっつきが始まった間 true。この間は描画/クリックを
+  /// 開始せず「色送り」だけ行う（ピンチ開始→開放で1回色が回る）。
+  bool cyclingColor = false;
 
   TrackVisual({required this.colorSlot});
 
@@ -35,7 +41,22 @@ class TrackVisual {
 class OverlayModel extends ChangeNotifier {
   /// 単一手（後方互換）の既定トラックID。旧 [apply] はこのトラックへ流す。
   static const int legacyTrackId = 0;
+
+  /// カーソル/骨格のトラック別自動色に使うスロット数。
   static const int colorSlotCount = 4;
+
+  /// ペンの巡回色。右下の大きな色丸を1回押すたびに次の色へ進む。
+  /// 初期表示は青（[_penColorIndex] の初期値がこの並びの青を指す）。
+  /// クリックすると 赤 → 黄 → 緑 → 青 → 赤 … と循環する。
+  static const List<Color> penCycle = [
+    Color(0xFFE53935), // 赤
+    Color(0xFFFDD835), // 黄
+    Color(0xFF43A047), // 緑
+    Color(0xFF1E88E5), // 青
+  ];
+
+  /// ストロークの既定色（＝初期のペン色・青）。
+  static const Color defaultPenColor = Color(0xFF1E88E5);
 
   final Map<int, TrackVisual> _tracks = {};
   final List<InkStroke> strokes = [];
@@ -47,17 +68,40 @@ class OverlayModel extends ChangeNotifier {
   /// 消しゴム（グー）の消去半径（画面正規化・0..1）。この距離以内のインク点を消す。
   static const double eraserRadius = 0.045;
 
-  /// ユーザーがパレットで選んだ描画色スロット（null=トラック別自動色にフォールバック）。
-  int? _selectedColorSlot;
-  int? get selectedColorSlot => _selectedColorSlot;
+  /// 現在のペン色を指す [penCycle] のインデックス。初期=青（末尾）にして、
+  /// 最初のクリックで赤（先頭）へ進むようにする。
+  int _penColorIndex = 3;
 
-  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する。
-  /// 同じ色を再選択したら選択解除し、トラック別自動色へ戻す。
-  void selectColorSlot(int? slot) {
-    final next = _selectedColorSlot == slot ? null : slot;
-    if (next == _selectedColorSlot) return;
-    _selectedColorSlot = next;
+  /// 右下の大きな色丸に表示中＝これから描く色。
+  Color get penColor => penCycle[_penColorIndex];
+
+  /// 色丸を1回押すたびに次の巡回色へ進める（赤→黄→緑→青→赤 …）。
+  void cyclePenColor() {
+    _penColorIndex = (_penColorIndex + 1) % penCycle.length;
     notifyListeners();
+  }
+
+  /// 右下の大きな色丸の当たり判定（画面正規化・0..1・左上原点）。Flutter 側が
+  /// レイアウト後に実測して設定する。ピンチ（手）クリックのヒットテストに使う
+  /// （マウスクリックはネイティブ側が同じ矩形で ignoresMouseEvents を切替える）。
+  Rect? colorButtonRect;
+
+  /// 色送りのチャタリング防止デバウンス（連続ピンチで色が飛ぶのを防ぐ）。
+  DateTime? _lastCycleAt;
+  static const Duration _cycleDebounce = Duration(milliseconds: 350);
+
+  bool _hitColorButton(Vec2 p) {
+    final r = colorButtonRect;
+    if (r == null) return false;
+    return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+  }
+
+  void _tryCyclePenColor() {
+    final now = DateTime.now();
+    final last = _lastCycleAt;
+    if (last != null && now.difference(last) < _cycleDebounce) return;
+    _lastCycleAt = now;
+    cyclePenColor();
   }
 
   Iterable<int> get trackIds => _tracks.keys;
@@ -101,6 +145,47 @@ class OverlayModel extends ChangeNotifier {
 
   void _applyTrack(int trackId, InteractionEvent e) {
     final v = _visual(trackId);
+
+    // 右下の大きな色丸の上でのピンチ/くっつきは「色送り」だけ行い、描画/クリックは
+    // 開始しない（色丸の外なら従来どおり通す）。ヒットテスト優先で色送りを最優先。
+    switch (e.kind) {
+      case InteractionKind.drawDown:
+      case InteractionKind.pressDown:
+      case InteractionKind.click:
+        if (_hitColorButton(e.screen)) {
+          v.cursor = e.screen;
+          v.pressed = false;
+          v.erasing = false;
+          v.cyclingColor = true;
+          _active.remove(trackId);
+          _tryCyclePenColor();
+          return;
+        }
+        break;
+      case InteractionKind.drawMove:
+      case InteractionKind.pressMove:
+        if (v.cyclingColor) {
+          v.cursor = e.screen; // 送り中はカーソル追従のみ（描画しない）
+          return;
+        }
+        break;
+      case InteractionKind.drawUp:
+      case InteractionKind.pressUp:
+        if (v.cyclingColor) {
+          v.cyclingColor = false;
+          v.pressed = false;
+          return;
+        }
+        break;
+      case InteractionKind.pointerMove:
+      case InteractionKind.pointerExit:
+      case InteractionKind.release:
+        v.cyclingColor = false;
+        break;
+      default:
+        break;
+    }
+
     switch (e.kind) {
       case InteractionKind.pointerMove:
         v.cursor = e.screen;
@@ -113,11 +198,11 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = e.screen;
         v.pressed = true;
         v.erasing = false;
-        // ユーザーがパレットで選んだ色を優先。未選択ならトラック別自動色。
+        // 右下の色丸に表示中のペン色で描く（大きな丸の色＝描画色）。
         final stroke = InkStroke(
           [e.screen],
           trackId: trackId,
-          colorSlot: _selectedColorSlot ?? v.colorSlot,
+          color: penColor,
         );
         _active[trackId] = stroke;
         strokes.add(stroke);
@@ -222,7 +307,7 @@ class OverlayModel extends ChangeNotifier {
               InkStroke(
                 segment,
                 trackId: stroke.trackId,
-                colorSlot: stroke.colorSlot,
+                color: stroke.color,
               ),
             );
             segment = <Vec2>[];
@@ -240,7 +325,7 @@ class OverlayModel extends ChangeNotifier {
             InkStroke(
               segment,
               trackId: stroke.trackId,
-              colorSlot: stroke.colorSlot,
+              color: stroke.color,
             ),
           );
         }

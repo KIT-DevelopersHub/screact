@@ -63,6 +63,10 @@ class _HomePageState extends State<HomePage> {
   final _calibConfig = CalibrationConfig.forCalibrationTarget();
   late final _engine = MultiHandEngine(config: _calibConfig);
   final _overlay = OverlayModel();
+
+  /// 右下の色丸の実測用キー。レイアウト後に画面正規化矩形を求め、Flutter の
+  /// ピンチ・ヒットテストとネイティブのマウス透過切替の両方へ渡す。
+  final _colorButtonKey = GlobalKey();
   late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
   final _connLog = ConnectionLog();
@@ -206,6 +210,33 @@ class _HomePageState extends State<HomePage> {
     _overlayWin.dispose();
     _flow.dispose();
     super.dispose();
+  }
+
+  /// 右下の色丸の位置・大きさを画面正規化(0..1・左上原点)で実測し、モデルと
+  /// ネイティブへ通知する。マウス・ピンチ双方の色送りが同じ矩形を基準に効く。
+  void _reportColorButtonRect() {
+    if (_disposed || !mounted || !_overlayOn) return;
+    final box = _colorButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlaySize = MediaQuery.maybeOf(context)?.size;
+    if (box == null ||
+        !box.hasSize ||
+        overlaySize == null ||
+        overlaySize.width <= 0 ||
+        overlaySize.height <= 0) {
+      return;
+    }
+    final topLeft = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    final rect = Rect.fromLTWH(
+      topLeft.dx / overlaySize.width,
+      topLeft.dy / overlaySize.height,
+      size.width / overlaySize.width,
+      size.height / overlaySize.height,
+    );
+    if (_overlay.colorButtonRect != rect) {
+      _overlay.colorButtonRect = rect;
+    }
+    unawaited(_overlayWin.setInteractiveRect(rect));
   }
 
   void _handleFlowChanged() {
@@ -616,17 +647,22 @@ class _HomePageState extends State<HomePage> {
       if (_flow.showingTarget) {
         return Material(child: _calibrationTarget());
       }
+      // レイアウト確定後に色丸の画面正規化矩形を実測し、ピンチ・ヒットテスト
+      // （Flutter）とマウス透過切替（ネイティブ）へ渡す。
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _reportColorButtonRect(),
+      );
       return Material(
         type: MaterialType.transparency,
         child: SizedBox.expand(
           child: Stack(
             children: [
               OverlayCanvas(model: _overlay),
-              // 右下の色パレット。タップで以後の描画色を切り替える。
+              // 右下の色パレット。タップ/ピンチで以後の描画色を切り替える。
               Positioned(
                 right: 24,
                 bottom: 24,
-                child: ColorPalette(model: _overlay),
+                child: ColorPalette(key: _colorButtonKey, model: _overlay),
               ),
             ],
           ),

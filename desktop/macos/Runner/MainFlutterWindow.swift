@@ -56,6 +56,12 @@ final class OverlayModeController: NSObject {
   private var eventHandlerRef: EventHandlerRef?
   private(set) var isOverlay = false
 
+  /// クリック透過中でも「ここだけはマウスを拾わせる」矩形（画面正規化・左上原点）。
+  /// 右下の色丸に対応。Flutter から setInteractiveRect で受け取る。
+  private var interactiveRectNorm: CGRect?
+  /// マウス位置を監視して、色丸に入った時だけ ignoresMouseEvents を外すタイマー。
+  private var mouseTracker: Timer?
+
   init(window: NSWindow, flutterViewController: FlutterViewController) {
     self.window = window
     self.flutterViewController = flutterViewController
@@ -83,8 +89,61 @@ final class OverlayModeController: NSObject {
     case "exitOverlay":
       exitOverlay(notifyFlutter: false)
       result(true)
+    case "setInteractiveRect":
+      if let a = call.arguments as? [String: Any],
+        let x = (a["x"] as? NSNumber)?.doubleValue,
+        let y = (a["y"] as? NSNumber)?.doubleValue,
+        let w = (a["w"] as? NSNumber)?.doubleValue,
+        let h = (a["h"] as? NSNumber)?.doubleValue
+      {
+        interactiveRectNorm =
+          (w > 0 && h > 0) ? CGRect(x: x, y: y, width: w, height: h) : nil
+      } else {
+        interactiveRectNorm = nil
+      }
+      result(nil)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // MARK: - Click-through exception for the color circle
+
+  /// 色丸の矩形にカーソルが入っている間だけ ignoresMouseEvents を外し、マウス
+  /// クリックを Flutter の GestureDetector へ届ける。それ以外は透過を維持する。
+  /// NSEvent.mouseLocation のポーリングは権限不要でフォーカスにも依存しない。
+  private func startMouseTracker() {
+    mouseTracker?.invalidate()
+    let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+      self?.updateMouseIgnore()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    mouseTracker = timer
+  }
+
+  private func stopMouseTracker() {
+    mouseTracker?.invalidate()
+    mouseTracker = nil
+  }
+
+  private func updateMouseIgnore() {
+    guard let window, isOverlay else { return }
+    guard let norm = interactiveRectNorm,
+      let screen = window.screen ?? NSScreen.main
+    else {
+      if !window.ignoresMouseEvents { window.ignoresMouseEvents = true }
+      return
+    }
+    let sf = screen.frame
+    // 正規化(左上原点) → 画面座標(左下原点)へ変換。
+    let rect = NSRect(
+      x: sf.minX + norm.minX * sf.width,
+      y: sf.minY + (1 - norm.minY - norm.height) * sf.height,
+      width: norm.width * sf.width,
+      height: norm.height * sf.height)
+    let inside = rect.contains(NSEvent.mouseLocation)
+    if window.ignoresMouseEvents == inside {
+      window.ignoresMouseEvents = !inside
     }
   }
 
@@ -129,12 +188,14 @@ final class OverlayModeController: NSObject {
     }
     window.orderFrontRegardless()
     installStatusItem()
+    startMouseTracker()
     return true
   }
 
   func exitOverlay(notifyFlutter: Bool) {
     guard let window, isOverlay else { return }
     isOverlay = false
+    stopMouseTracker()
     removeStatusItem()
 
     window.styleMask = savedStyleMask

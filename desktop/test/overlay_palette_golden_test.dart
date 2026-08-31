@@ -6,14 +6,14 @@ import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/ui/color_palette.dart';
 import 'package:thehack_overlay/ui/overlay_canvas.dart';
 
-/// オーバーレイ（インク＋消しゴムの輪）＋右下カラーパレットの見た目を1枚に
+/// オーバーレイ（インク＋消しゴムの輪）＋右下の大きな色丸の見た目を1枚に
 /// レンダリングした確認用ゴールデン。`flutter test --update-goldens` で
 /// test/goldens/overlay_palette.png を生成する（UIスクショの代替）。
 void main() {
-  testWidgets('overlay + palette screenshot', (tester) async {
+  testWidgets('overlay + big color circle screenshot', (tester) async {
     final model = OverlayModel();
 
-    // 青(slot0)のインク線。
+    // 1本目: 初期のペン色（青）で描く線。
     model.applyTrack(
       0,
       const InteractionEvent(InteractionKind.drawDown, Vec2(0.12, 0.30)),
@@ -29,8 +29,8 @@ void main() {
       const InteractionEvent(InteractionKind.drawUp, Vec2(0.45, 0.36)),
     );
 
-    // マゼンタ(slot1)のインク線。
-    model.selectColorSlot(1);
+    // 色丸を1回押して赤へ進め、2本目を赤で描く。
+    model.cyclePenColor(); // 青 → 赤
     model.applyTrack(
       1,
       const InteractionEvent(InteractionKind.drawDown, Vec2(0.55, 0.62)),
@@ -52,8 +52,9 @@ void main() {
       const InteractionEvent(InteractionKind.eraseDown, Vec2(0.40, 0.68)),
     );
 
-    // パレットは緑(slot2)を選択中にしてハイライトを見せる。
-    model.selectColorSlot(2);
+    // 色丸をさらに進めて現在色を緑にした状態を見せる（赤 → 黄 → 緑）。
+    model.cyclePenColor(); // 赤 → 黄
+    model.cyclePenColor(); // 黄 → 緑
 
     await tester.pumpWidget(
       MediaQuery(
