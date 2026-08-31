@@ -35,6 +35,7 @@
 		EE19E23BC5A3F579B8D48F8F /* AppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A804858561539337C47D80 /* AppDiagnostics.swift */; };
 		F1366006054390F8FF589252 /* ScreactApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87B6478B714C682A0C4E54A /* ScreactApp.swift */; };
 		F45F2E2E4FFE9BCD09E2AF6F /* TrackingStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 645BF8CA3A7EEB24DE311D28 /* TrackingStateMachine.swift */; };
+		F491BD79E70DFF08C2F8BA27 /* Pods_Screact.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64FFEE5C2302C9DA784ED70A /* Pods_Screact.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +50,7 @@
 
 /* Begin PBXFileReference section */
 		01A6E1831EF8C394CED0A645 /* ProductionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionModels.swift; sourceTree = "<group>"; };
+		036A78AE2A361873717920D6 /* Pods-Screact.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Screact.release.xcconfig"; path = "Target Support Files/Pods-Screact/Pods-Screact.release.xcconfig"; sourceTree = "<group>"; };
 		09FEF0B9A7AAD0BFA42BAA81 /* VisionLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionLogicTests.swift; sourceTree = "<group>"; };
 		11C024304F90ACB6B5BDCCE5 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
 		1212BEFF5F8A9C34A1499114 /* ProtocolCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodec.swift; sourceTree = "<group>"; };
@@ -60,6 +62,7 @@
 		3DF5DD5151099965F187F948 /* ProductionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionScreen.swift; sourceTree = "<group>"; };
 		51B91DC75900EC4FB8389A58 /* YubiBoardWebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YubiBoardWebSocketClient.swift; sourceTree = "<group>"; };
 		645BF8CA3A7EEB24DE311D28 /* TrackingStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackingStateMachine.swift; sourceTree = "<group>"; };
+		64FFEE5C2302C9DA784ED70A /* Pods_Screact.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Screact.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AE0FABE34CCEE78EB15ADBA /* CameraPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewView.swift; sourceTree = "<group>"; };
 		70DC0B1B3A0981C04C143796 /* MarkerDetectionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkerDetectionResult.swift; sourceTree = "<group>"; };
 		7F488D0AAF5EE62FB1B6EE8A /* HandDetectionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandDetectionResult.swift; sourceTree = "<group>"; };
@@ -76,6 +79,7 @@
 		BEE713B8A1FCD883FD4424BC /* ArucoBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ArucoBridge.h; sourceTree = "<group>"; };
 		C60A3F462A8D05D521434A68 /* MarkerStabilityTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkerStabilityTracker.swift; sourceTree = "<group>"; };
 		D2EA9A697723F0D286EBA552 /* ConnectionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionModels.swift; sourceTree = "<group>"; };
+		D61DFB33CE1A70B4CEA49B3C /* Pods-Screact.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Screact.debug.xcconfig"; path = "Target Support Files/Pods-Screact/Pods-Screact.debug.xcconfig"; sourceTree = "<group>"; };
 		D693D848603534FC7128319E /* ProtocolCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodecTests.swift; sourceTree = "<group>"; };
 		E7025DA213B1A0E4FA8519B8 /* Screact-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Screact-Bridging-Header.h"; sourceTree = "<group>"; };
 		FCF5F6C15109DC2F8FC129CD /* TrustedConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedConnectionStore.swift; sourceTree = "<group>"; };
@@ -87,6 +91,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B82430C1E890950F66D9A263 /* OpenCV in Frameworks */,
+				F491BD79E70DFF08C2F8BA27 /* Pods_Screact.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -120,12 +125,24 @@
 			path = Screact;
 			sourceTree = "<group>";
 		};
+		193B1C0FE9CF2F7CB7E92211 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				D61DFB33CE1A70B4CEA49B3C /* Pods-Screact.debug.xcconfig */,
+				036A78AE2A361873717920D6 /* Pods-Screact.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		2B126F4BA50773348EAAA2DF = {
 			isa = PBXGroup;
 			children = (
 				135B3DCF978B842E9190DF78 /* Screact */,
 				AF9A751CE39BA16CD16021B3 /* ScreactTests */,
 				D69F9507A8B5AA682ACC0F5F /* Products */,
+				193B1C0FE9CF2F7CB7E92211 /* Pods */,
+				65ADCD07FE898BCCEF6791CC /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -153,6 +170,14 @@
 				81A804858561539337C47D80 /* AppDiagnostics.swift */,
 			);
 			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		65ADCD07FE898BCCEF6791CC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				64FFEE5C2302C9DA784ED70A /* Pods_Screact.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		75E5DF5EA1B7D15751EA0AE8 /* Network */ = {
@@ -249,8 +274,6 @@
 				CCA6CFC07AB5AAC6155153E0 /* PBXTargetDependency */,
 			);
 			name = ScreactTests;
-			packageProductDependencies = (
-			);
 			productName = ScreactTests;
 			productReference = 346DE530EF645EE77941B239 /* ScreactTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -259,6 +282,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5C8133756F314CA14AB49890 /* Build configuration list for PBXNativeTarget "Screact" */;
 			buildPhases = (
+				0017419DFF04000DFC9C590F /* [CP] Check Pods Manifest.lock */,
 				214BFD6FB640F07070917877 /* Sources */,
 				DB96C44498DE2488159B0810 /* Resources */,
 				BE8969E7D11B55B650B52B18 /* Frameworks */,
@@ -328,6 +352,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0017419DFF04000DFC9C590F /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Screact-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		214BFD6FB640F07070917877 /* Sources */ = {
@@ -459,6 +508,7 @@
 		};
 		93627E0AD37821758C87C6B9 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 036A78AE2A361873717920D6 /* Pods-Screact.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
@@ -564,6 +614,7 @@
 		};
 		D8371F476DF7A8AF23F9BC93 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D61DFB33CE1A70B4CEA49B3C /* Pods-Screact.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
