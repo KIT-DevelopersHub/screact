@@ -1,24 +1,43 @@
-# YubiBoard Androidアプリ現行仕様書
+# Screact Android アプリ仕様書
 
-## 1. 文書情報
+> **Version:** 1.0.0<br>
+> **基準コミット:** `4f2d1e5`（2026-08-22）<br>
+> **対象:** THE HACK 2026 Team 35「THE WIN」 / Screact Android
+
+## 📑 目次
+
+- [はじめに](#はじめに)
+- [目的と責任範囲](#目的と責任範囲)
+- [動作環境と採用技術](#動作環境と採用技術)
+- [ソフトウェア構成](#ソフトウェア構成)
+- [画面・カメラ・認識](#画面カメラ認識)
+- [接続と通信](#接続と通信)
+- [設定・デバッグ・安全性](#設定デバッグ安全性)
+- [検証状況と既知の制約](#検証状況と既知の制約)
+- [変更時の同期対象](#変更時の同期対象)
+- [更新履歴](#更新履歴)
+
+## はじめに
+
+### 文書情報
 
 | 項目 | 内容 |
 | --- | --- |
 | 文書種別 | 現行実装仕様（As-Built Specification） |
-| 対象 | YubiBoard Androidアプリ |
+| 対象 | Screact Androidアプリ |
 | アプリバージョン | `0.1.0`（`versionCode=1`） |
-| 実装基準 | `feat/android-mvp`本番UI実装 |
+| 実装基準 | `4f2d1e5`（THE HACK 2026 本戦版） |
 | 最終更新日 | 2026-08-22 |
 | 通信スキーマ | version 1 |
 | パッケージ | `com.nxtend.team35.yubiboard` |
 
-本書は、要件上の将来像ではなく、実装基準コミット時点でAndroidアプリが実際に行う処理を記述する。目標要件は[Androidアプリ要件定義書](./android-app-requirements.md)、JSONの詳細は[Android通信プロトコル v1](./android-protocol-v1.md)を参照すること。本書と実装が矛盾する場合は、現行コードとテスト結果を優先して差異を解消する。
+本書は、要件上の将来像ではなく、実装基準コミット時点でAndroidアプリが実際に行う処理を記述する。目標要件は[Androidアプリ要件定義書](./work/requirements/android/android-app-requirements.md)、JSONの詳細は[通信仕様書 v1](./protocol-specification-v1.md)を参照すること。本書と実装が矛盾する場合は、現行コードとテスト結果を優先して差異を解消する。
 
-## 2. 目的と責任範囲
+## 目的と責任範囲
 
 Androidアプリは背面または前面カメラから画像を取得し、次のいずれかを検出して同一LAN上のPCへWebSocket/JSONで送信する。
 
-- 通常撮影: 1つの手に対するMediaPipeの21点ランドマーク
+- 通常撮影: 最大2手、それぞれに対するMediaPipeの21点ランドマーク
 - 位置合わせ撮影: 画面四隅に配置した4つのArUcoマーカー
 
 Android側は撮影・検出・可視化・送信までを担当する。画面座標への変換、ジェスチャー判定、描画、OS入力はPC側の責任である。カメラ映像そのものはPCへ送信しない。
@@ -48,7 +67,7 @@ flowchart LR
     WS --> Receive
 ```
 
-### 2.1 現行MVPの優先度
+### 現行MVPの優先度
 
 | 区分 | 内容 | 現状 |
 | --- | --- | --- |
@@ -58,7 +77,7 @@ flowchart LR
 | デモ補助 | ArUco 4点検出・安定化、検出設定変更 | 実装・単体・実機検証済み |
 | 後続確認 | 長時間性能、実PCアプリとの統合、端末・照明条件を広げた精度評価 | 未検証 |
 
-### 2.2 本番利用フロー
+### 本番利用フロー
 
 初回は「画面認識開始」後、UDP `8766`でDesktopからのofferを待ちながら、limited broadcastと
 現在のIPv4 prefixから算出したdirected broadcastへprobeを送る。いずれかでofferを受信すると、
@@ -67,7 +86,7 @@ flowchart LR
 
 モックPCは信頼済み端末をデバッグ用ファイルへ保持する一方、位置合わせ完了状態はプロセス内だけに保持する。そのため、同一プロセスの一時切断では位置合わせを再利用し、モック再起動ではresume認証後に配置確認と位置合わせを再要求できる。
 
-## 3. 動作環境と採用技術
+## 動作環境と採用技術
 
 | 項目 | 現行値 |
 | --- | --- |
@@ -84,7 +103,7 @@ flowchart LR
 
 必要な端末機能はカメラであり、背面カメラを既定として前面へ切り替えられる。アプリは`CAMERA`、`INTERNET`、`ACCESS_NETWORK_STATE`権限を宣言する。`CAMERA`のみ実行時許可が必要である。
 
-## 4. ソフトウェア構成
+## ソフトウェア構成
 
 ```mermaid
 flowchart TB
@@ -136,7 +155,7 @@ flowchart TB
     Codec --> Messages
 ```
 
-### 4.1 主要クラスの責務
+### 主要クラスの責務
 
 | クラス | 責務 |
 | --- | --- |
@@ -151,7 +170,9 @@ flowchart TB
 | `YubiBoardWebSocketClient` | 接続、認証開始、再接続、送信間引き、heartbeat、制御受信 |
 | `ProtocolCodec` | version 1メッセージのJSONエンコード・デコード |
 
-## 5. 画面仕様
+## 画面・カメラ・認識
+
+### 画面仕様
 
 画面は単一ActivityのJetpack Compose UIで構成し、本番とデバッグで`ProductionScreen`を共用する。debug APKでは本番レイアウト上に診断導線と最大2手の全骨格を重ね、release APKは本番表示に固定する。切替時にカメラと接続を破棄しない。
 
@@ -166,7 +187,7 @@ flowchart TB
     Debug --> Diagnostics[診断・疑似入力・状態ラボ]
 ```
 
-### 5.1 表示項目
+### 表示項目
 
 | 領域 | 表示・操作 |
 | --- | --- |
@@ -179,7 +200,7 @@ flowchart TB
 
 接続処理中から再接続中までは接続ボタンを無効化し、切断ボタンを有効化する。未接続またはエラー表示時は接続ボタンを有効化する。
 
-## 6. 起動と権限
+### 起動と権限
 
 ```mermaid
 flowchart TD
@@ -199,7 +220,7 @@ flowchart TD
 - カメラ開始失敗時はエラー表示と権限カードを表示する。
 - `MainActivity`破棄時はカメラ解析ExecutorとMediaPipe検出器を閉じる。
 
-## 7. 撮影モード
+### 撮影モード
 
 撮影モードは`TRACKING`と`CALIBRATION`の2種類であり、1フレームを両方の検出器へ同時には渡さない。
 
@@ -222,7 +243,7 @@ stateDiagram-v2
 - MediaPipe解析中のActivity再生成を避ける暫定安定化策として、画面方向は一方向の横画面に固定する。プロセス終了後は通常撮影へ戻る。
 - モード変更自体はPCへ通知しない。Androidは変更後のモードに応じた検出結果を送る。
 
-## 8. カメラ・画像処理
+### カメラ・画像処理
 
 ```mermaid
 flowchart LR
@@ -250,7 +271,7 @@ flowchart LR
 
 現行実装は`ResolutionSelector`の完全一致要求を使い、バインド失敗時だけ次のプロファイルを試す。最初の実フレームで要求値、実幅・高さ、回転、CropRectを診断ログへ記録する。ImageProxyはCropRect適用、Bitmapコピー、回転後に閉じ、補正後画像の左上を原点、右方向をx正、下方向をy正とする。
 
-## 9. 手指ランドマーク検出
+### 手指ランドマーク検出
 
 MediaPipe Hand Landmarkerを`LIVE_STREAM`モードで使用する。既定はデモ安定性と端末負荷を優先する「1手のみ」で、設定から「2手」へ切り替えた場合だけ最大2手を検出する。Androidが手のひら中心距離から一時`trackId`を割り当て、300ms以内の短時間欠落ではIDを維持する。モデル`hand_landmarker.task`はAPKのassetsへ同梱する。
 
@@ -267,7 +288,7 @@ flowchart TD
     State --> Slot[最新手指フレームスロットへ格納]
 ```
 
-### 9.1 出力データ
+#### 出力データ
 
 | 項目 | 内容 |
 | --- | --- |
@@ -280,7 +301,7 @@ flowchart TD
 | `inferenceTimeMs` | 結果受領時刻と入力timestampの差 |
 | `framesPerSecond` | 直近1秒に受領した結果数から算出 |
 
-### 9.2 追跡状態
+#### 追跡状態
 
 ```mermaid
 stateDiagram-v2
@@ -301,7 +322,7 @@ stateDiagram-v2
 
 追跡状態が`TEMPORARILY_LOST`でも、そのフレームの通信データは`hand.detected=false`となる。これによりPC側は押下やドラッグを継続せず、安全側へ解除できる。
 
-## 10. ArUcoマーカー検出
+### ArUcoマーカー検出
 
 位置合わせ撮影ではOpenCVの`ArucoDetector`と`DICT_4X4_50`を使用する。対象外IDは破棄する。
 
@@ -335,9 +356,11 @@ flowchart TD
 
 配置検証は端末の90度単位の回転に依存せず、ID 10、11、12、13が同じ向きの凸四角形を構成し、4中心から作る正規化面積が`0.01`以上であることを要求する。安定性は各IDの中心が履歴先頭からユークリッド距離`0.02`以内にある有効な5フレームの蓄積で成立する。1〜2フレームの一時的な欠落では有効履歴を保持し、3フレーム連続で4 IDまたは配置条件を満たさなければ履歴を消去する。
 
-## 11. 接続仕様
+## 接続と通信
 
-### 11.1 接続先と入力検証
+### 接続仕様
+
+#### 接続先と入力検証
 
 接続URLは次の形式である。
 
@@ -354,7 +377,7 @@ ws://<host>:<port>/ws/v1/input
 
 同一LANでのデモを目的として、アプリは平文WebSocket通信を許可している。
 
-### 11.2 接続状態
+#### 接続状態
 
 ```mermaid
 stateDiagram-v2
@@ -380,7 +403,7 @@ stateDiagram-v2
 
 `ERROR`状態はモデル上定義されているが、現行WebSocketクライアントの通常遷移では発行しない。入力不備は接続開始前に画面上のメッセージとして表示する。
 
-### 11.3 再接続
+#### 再接続
 
 - 自動再試行間隔は1秒、2秒、4秒、8秒、以後10秒である。
 - 有効な`hello_ack`を受信すると試行回数を0へ戻す。
@@ -390,7 +413,7 @@ stateDiagram-v2
 - 手動切断では自動再接続を停止し、未送信スロットとsessionIdを消去する。
 - 手動切断または新しい接続操作では保存した位置合わせ座標も消去し、既存ソケットと再接続タスクを破棄する。
 
-## 12. WebSocketセッション
+### WebSocketセッション
 
 ```mermaid
 sequenceDiagram
@@ -431,7 +454,7 @@ sequenceDiagram
 - 未知メッセージ、未知コマンド、不正JSONは状態変更せず無視またはログ表示する。
 - JSON heartbeatは5秒間隔、WebSocket pingは10秒間隔である。
 
-## 13. メッセージ仕様概要
+### メッセージ仕様概要
 
 | 方向 | `messageType` | 用途 | 送信条件 |
 | --- | --- | --- | --- |
@@ -455,9 +478,9 @@ flowchart LR
     Control --> Disconnect[disconnect]
 ```
 
-すべてのメッセージは`schemaVersion=1`である。詳細なフィールド、型、例は[Android通信プロトコル v1](./android-protocol-v1.md)を参照すること。
+すべてのメッセージは`schemaVersion=1`である。詳細なフィールド、型、例は[通信仕様書 v1](./protocol-specification-v1.md)を参照すること。
 
-## 14. 低遅延送信制御
+### 低遅延送信制御
 
 手指結果と安定マーカー結果は、それぞれ1件だけ保持する最新値スロットを使用する。未送信結果を蓄積しない。
 
@@ -487,7 +510,9 @@ flowchart TD
 | `hello_ack`前の検出結果 | 最新値のみ保持し、送信しない |
 | `frameId` | 実際にJSON化する手指フレームごとに1増加 |
 
-## 15. 設定と永続化
+## 設定・デバッグ・安全性
+
+### 設定と永続化
 
 ```mermaid
 flowchart LR
@@ -518,7 +543,7 @@ flowchart LR
 
 設定適用時、旧MediaPipe検出器は新しい検出器への差し替えから1秒後に閉じる。値が不正な場合は設定もカメラも変更しない。
 
-## 16. 可視化とデバッグ
+### 可視化とデバッグ
 
 本番の通常撮影では人差し指先端のリングだけを表示し、位置合わせではIDを表示せずマーカー枠だけを描く。デバッグ画面では従来どおり21点骨格、ArUco枠とIDを表示する。両者は同時表示しない。
 
@@ -536,7 +561,7 @@ flowchart LR
 
 PC側のPowerShellテストハーネスは本番位置合わせ成功・再試行、ペアリング拒否、未対応版、server busy、モード切替、切断、ackタイムアウト、不正JSON、session/schema不一致、低速受信を再現する。イベントJSONL、全`hand_frame`の21点座標JSONL、接続CSV、Markdown要約を`android/debug-results/`へ保存し、任意でH.264 MP4も生成する。
 
-## 17. データ保持・セキュリティ
+### データ保持・セキュリティ
 
 - 通信は同一LAN向けの平文`ws://`であり、TLSは使用しない。
 - ペアリングコードはメモリ上の接続設定にのみ保持し、SharedPreferencesへ保存しない。
@@ -547,7 +572,7 @@ PC側のPowerShellテストハーネスは本番位置合わせ成功・再試�
 - アプリはAndroidバックアップを許可している。端末・OSのバックアップ規則により、保存設定がバックアップ対象となる可能性がある。
 - 初回ペアリングはPCが6桁コードを照合し、2回目以降はPC発行の高エントロピーresumeTokenを使う。
 
-## 18. 異常時の動作
+### 異常時の動作
 
 ```mermaid
 flowchart TD
@@ -565,9 +590,9 @@ flowchart TD
 
 手を1フレームでも検出できない場合は`detected=false`を送信対象とする。通信切断時はsessionIdを無効化するため、再認証が完了するまで新しい検出結果を送信しない。
 
-## 19. ビルド・テスト・デモ
+### ビルド・テスト・デモ
 
-### 19.1 ビルド
+#### ビルド
 
 Android Studioでは`android/`をプロジェクトルートとして開く。コマンドライン検証は`android/`で次を実行する。
 
@@ -575,7 +600,7 @@ Android Studioでは`android/`をプロジェクトルートとして開く。�
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --no-daemon
 ```
 
-### 19.2 テスト範囲
+#### テスト範囲
 
 | 種別 | 対象 | 現行結果 |
 | --- | --- | --- |
@@ -588,7 +613,7 @@ Android Studioでは`android/`をプロジェクトルートとして開く。�
 | AndroidTest実行 | 実端末上でOpenCV初期化とasset読込 | ADBランナーから実行可能 |
 | モックWebSocket | `hello`から`hello_ack`までの実通信 | 成功 |
 
-### 19.3 デモ経路
+#### デモ経路
 
 ```mermaid
 journey
@@ -609,13 +634,13 @@ journey
       再接続表示と自動復帰を確認: 5: 発表者
 ```
 
-モックサーバーの起動方法と具体的な操作は[`android/README.md`](../../android/README.md)を参照すること。
+モックサーバーの起動方法と具体的な操作は[`android/README.md`](../android/README.md)を参照すること。
 
-## 20. 検証状況と既知の制約
+## 検証状況と既知の制約
 
-### 20.1 実機確認済み
+### 実機確認済み
 
-2026-08-05にXiaomi 25118PC98G（Android 15、API 35）とモックPCを用いて、[`android-debug-tutorial.md`](./android-debug-tutorial.md)の全手順を実施した。
+2026-08-05にXiaomi 25118PC98G（Android 15、API 35）とモックPCを用いて、[Android実機デバッグ・チュートリアル](./work/requirements/android/android-debug-tutorial.md)の全手順を実施した。
 
 - 背面カメラプレビューと手指・ArUco Overlayの表示
 - MediaPipeによる実際の手の検出と`hand_frame`送信
@@ -643,11 +668,11 @@ journey
 | メモリ | モデル読込後は概ね300〜400 MiBで変動し、終了時350454 KiB。単調増加なし |
 | 通信断 | 4回発生し、4回とも自動再接続 |
 
-別途保存した3回の実通信ログでは、旧実装で640×480を要求しても、全フレームの`hand_frame.source`が1080×1080だった。先頭から末尾までのフレーム間隔数で計算した平均受信レートは16.252〜16.414 fpsである。この結果を受け、現行実装は`ResolutionSelector`で16:9の1280×720を第一候補とし、960×540、640×480の順でフォールバックする。最初の解析フレームから実解像度、crop、回転角を診断ログへ記録する。判断根拠は[Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md)を参照する。
+別途保存した3回の実通信ログでは、旧実装で640×480を要求しても、全フレームの`hand_frame.source`が1080×1080だった。先頭から末尾までのフレーム間隔数で計算した平均受信レートは16.252〜16.414 fpsである。この結果を受け、現行実装は`ResolutionSelector`で16:9の1280×720を第一候補とし、960×540、640×480の順でフォールバックする。最初の解析フレームから実解像度、crop、回転角を診断ログへ記録する。判断根拠は[Androidカメラ解像度・プレビューサイズ判断書](./work/requirements/android/android-camera-resolution-decision.md)を参照する。
 
 旧実装のモックサーバー検証では、手が画面外へ出たフレームでMediaPipeのx／y座標が`0.0`〜`1.0`を外れ、検証エラーとして記録された。現行実装は生値を診断ログへ残したうえで、WebSocket送信境界に限ってx／yを`0.0`〜`1.0`へクランプする。
 
-### 20.2 未検証
+### 未検証
 
 - 複数機種、照明、距離、端末角度を横断した手・マーカー検出精度
 - 実PCアプリとのペアリング、制御、再接続、座標受け渡し
@@ -655,7 +680,7 @@ journey
 
 上記を再現可能に測定する環境は実装済みである。実機セッションの生ログは`android/debug-results/`へ生成し、必要な判定結果を本書へ転記した後にローカル生成物として整理する。
 
-### 20.3 既知の制約
+### 既知の制約
 
 - 1人・1アクティブハンドのみを対象とする。
 - 通常撮影と位置合わせ撮影は排他的である。
@@ -669,14 +694,20 @@ journey
 - release APKは本番UIだけを収録する。debug APKのみ設定から既存デバッグ画面と状態ラボを開ける。
 - 端末が1280×720を正確に同時バインドできない場合は960×540、640×480へフォールバックする。実際の解析サイズは起動時診断ログで確認できる。
 
-## 21. 変更時の同期対象
+## 変更時の同期対象
 
 次の変更を行った場合は、本書と関連文書を同じコミットで更新する。
 
 | 変更 | 同期する文書 |
 | --- | --- |
-| JSONフィールド・メッセージ・タイムアウト | 本書、`android-protocol-v1.md` |
+| JSONフィールド・メッセージ・タイムアウト | 本書、[通信仕様書 v1](./protocol-specification-v1.md) |
 | マーカーID・配置・安定条件 | 本書、`android/README.md` |
 | 設定値・許容範囲 | 本書、`android/README.md` |
-| 実装範囲・責任境界 | 本書、`android-app-requirements.md` |
-| ビルド・デモ手順 | 本書、`android/README.md` |
+| 実装範囲・責任境界 | 本書、[Androidアプリ要件定義書](./work/requirements/android/android-app-requirements.md) |
+| ビルド・デモ手順 | 本書、[`android/README.md`](../android/README.md) |
+
+## 📚 更新履歴
+
+| 日付 | Version | 内容 |
+| --- | --- | --- |
+| 2026-08-30 | 1.0.0 | 基準コミット `4f2d1e5` の Android 実装を現行仕様として整理。旧称 YubiBoard は内部識別子・パッケージ名に限定し、通信の詳細契約を [通信仕様書 v1](./protocol-specification-v1.md) へ集約。 |

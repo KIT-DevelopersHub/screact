@@ -1,6 +1,31 @@
-# YubiBoard Android通信プロトコル v1
+# Screact 通信仕様書
 
-Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクライアントとして動作する。JSONの`schemaVersion`はすべて`1`とし、未知のフィールドは無視する。
+> **Version:** 1.0.0<br>
+> **基準コミット:** `4f2d1e5`（2026-08-22）<br>
+> **対象:** THE HACK 2026 Team 35「THE WIN」 / Android ↔ Desktop 通信
+
+## 📑 目次
+
+- [はじめに](#はじめに)
+- [接続](#接続)
+- [画面位置合わせ](#画面位置合わせキャリブレーションフロー)
+- [AndroidからPC](#androidからpc)
+- [PCからAndroid](#pcからandroid)
+- [送信方針](#送信方針)
+- [更新履歴](#更新履歴)
+
+## はじめに
+
+### 文書情報
+
+| 項目 | 内容 |
+| --- | --- |
+| 文書種別 | 現行通信契約（As-Built Protocol Specification） |
+| 対象 | Screact Android / Desktop 間通信 |
+| 実装基準 | `4f2d1e5`（THE HACK 2026 本戦版） |
+| 最終更新日 | 2026-08-30 |
+
+Androidアプリは `ws://<PCのIP>:<ポート>/ws/v1/input` のWebSocketクライアントとして動作する。JSONの`schemaVersion`はすべて`1`とし、未知のフィールドは無視する。本書は Android と Desktop が共有するメッセージ契約の正本である。
 
 ## 接続
 
@@ -64,7 +89,7 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 
 ## 画面位置合わせ（キャリブレーション）フロー
 
-チーム確定のシーケンス（詳細図は `docs/sequence-calibration-flow.md`）。
+チーム確定のシーケンス（詳細図は [位置合わせフロー](./work/architecture/calibration.md)）。
 
 1. PC側で「スマホ設置完了」を押すと、PCは`control_message`（`set_mode: calibration`）を送り、同時に四隅判定用のArUcoターゲット画像（`android/tools/calibration-target-1920x1080.png` と同一・デスクトップは `desktop/assets/` に同梱）をオーバーレイ最前面へ全画面表示する。
 2. Androidは4つのID（10=左上, 11=右上, 12=右下, 13=左下, DICT_4X4_50）が安定検出されるまでループし、各マーカーのIDと中心・4頂点の正規化座標を`calibration_markers`で送る（生の検出座標のみ。対応付けはしない）。
@@ -97,7 +122,7 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 - 重複ID、3手以上、21点以外、非有限値、x/y範囲外、legacyコピー不一致を含む場合、受信側は一部採用せずフレーム全体を破棄する。
 - 2手は同じ`frameId`、時刻、`source`を共有し、送信スロットもフレーム全体を置換単位とする。最大20fpsの最新値優先は従来どおり。
 
-完全な2手JSON例とAndroid・PCの責任分界は[2人同時操作・最大2手連携 共有シート](../two-person-two-hand-integration-sheet.md)を参照する。
+完全な2手JSON例とAndroid・PCの責任分界は[2人同時操作・最大2手連携 共有シート](./work/architecture/two-person-two-hand-integration-sheet.md)を参照する。
 - `calibration_markers`: Android側で4 IDの配置と安定性を確認した後、ArUco ID、中心、時計回りの4頂点を正規化座標で送る。安定判定の進捗は端末UIだけに表示し、通信フィールドには含めない。
 - `source.cameraFacing`: `hand_frame`と`calibration_markers`を取得したレンズを`front|back`で送る。前面カメラでは検出後のx座標を左右反転済みとし、`mirrorCorrected=true`を送る。
 - `camera_changed`: 接続中に前面／背面を切り替えた直後、`sessionId`、`cameraFacing`、`changedAtMonotonicMs`を送る。PCは押下・描画を安全解除して旧Homographyを破棄し、`set_mode=calibration`を返して位置合わせを必須にする。
@@ -182,3 +207,9 @@ PCは安定マーカーを受信した後、任意で`calibration_status`を返�
 ## 送信方針
 
 `hello`、`heartbeat`、位置合わせ結果などの制御データは順に送る。`hand_frame`は最大20fpsの単一スロットとし、送信前に新しい検出結果が来た場合は古い未送信フレームを置き換える。
+
+## 📚 更新履歴
+
+| 日付 | Version | 内容 |
+| --- | --- | --- |
+| 2026-08-30 | 1.0.0 | 基準コミット `4f2d1e5` の Android / Desktop 間メッセージ契約を整理。旧称 YubiBoard を公開文書名から Screact へ統一し、補助資料への参照を `docs/work/` の構造へ更新。 |

@@ -440,7 +440,7 @@ flowchart TD
 }
 ```
 
-初回ペアリング後の`hello`では、`pairingToken`の代わりにPCから発行された`resumeToken`を送る。両フィールドは同時に送らず、いずれか一方を必須とする。詳細は[Android通信プロトコル v1](./android-protocol-v1.md)を正本とする。
+初回ペアリング後の`hello`では、`pairingToken`の代わりにPCから発行された`resumeToken`を送る。両フィールドは同時に送らず、いずれか一方を必須とする。詳細は[通信仕様書 v1](../../../protocol-specification-v1.md)を正本とする。
 
 ### 9.2 骨格フレーム
 

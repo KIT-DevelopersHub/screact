@@ -1,6 +1,6 @@
 # 2人同時操作・最大2手連携 共有シート
 
-> Android担当とPC担当はこの1枚を共有する。通信の正本は[Android通信プロトコル v1](./android/android-protocol-v1.md)。
+> Android担当とPC担当はこの1枚を共有する。通信の正本は[通信仕様書 v1](../../protocol-specification-v1.md)。
 
 ## 完成形と担当
 

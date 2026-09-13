@@ -47,7 +47,7 @@ python .\android\tools\render_hand_video.py `
 
 デスクトップアプリがなくても、`tools/android-debug.ps1`とモックサーバーで実機のカメラ、検出、通信、再接続、性能を検証できます。スクリプトは`ANDROID_HOME`、`ANDROID_SDK_ROOT`、または標準のWindows SDK配置から`adb`を検出します。
 
-初めて環境を作る場合や、操作しながら見る場所を確認したい場合は、[Android実機デバッグ・チュートリアル](../docs/android/android-debug-tutorial.md)を先に参照してください。
+初めて環境を作る場合や、操作しながら見る場所を確認したい場合は、[Android実機デバッグ・チュートリアル](../docs/work/requirements/android/android-debug-tutorial.md)を先に参照してください。
 
 ```powershell
 .\android\tools\android-debug.ps1 doctor
@@ -166,4 +166,4 @@ cd android
 - ペアリングコードは保存せず、初回成功時の`resumeToken`をAndroid Keystoreで保護する
 - 保存済みhost・port・resumeTokenがある場合は、2回目以降に入力なしで自動接続する
 
-現在の実装全体は[`docs/android/android-current-spec.md`](../docs/android/android-current-spec.md)、通信JSONの詳細は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を参照してください。
+現在の実装全体は[`docs/android-specification-v1.md`](../docs/android-specification-v1.md)、通信JSONの詳細は[`docs/protocol-specification-v1.md`](../docs/protocol-specification-v1.md)を参照してください。

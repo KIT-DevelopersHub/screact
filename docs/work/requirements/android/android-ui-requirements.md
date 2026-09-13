@@ -19,7 +19,7 @@
 2. [Androidアプリ要件定義書](./android-app-requirements.md): Android側の機能・非機能要件
 3. [Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md): 解析解像度、プレビュー縦横比、最大表示方法
 4. 本書: Android本番UIの画面、状態、操作、文言
-5. [Androidアプリ現行仕様書](./android-current-spec.md): 現在実装されているデバッグ中心UI
+5. [Androidアプリ仕様書](../../../android-specification-v1.md): 現在実装されているデバッグ中心UI
 6. [Android本番UI・処理変更計画](./android-production-ui-change-plan.md): 本書を実装へ反映する手順
 
 要件が矛盾する場合は、上位文書の責任境界を優先する。本書ではAndroidにジェスチャー認識、画面座標変換、PC入力処理を追加しない。

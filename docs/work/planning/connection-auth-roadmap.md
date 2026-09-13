@@ -1,6 +1,8 @@
-# 接続/認証 確定仕様 v1（本戦向けゲート）
+# 接続・認証ロードマップ v1
 
-> Screact（Android/iOS カメラ → WebSocket → PC 操作）の接続・認証方式の**確定仕様**。
+> **状態（2026-08-30）: 計画・設計判断。** QR 読み取り、リレー、iOS の手・マーカー検出までを含むエンドツーエンド経路は、基準コミット `4f2d1e5` に未統合である。実装済みの UDP 発見・WebSocket 接続は [ペアリング](../architecture/pairing.md)、正確な到達点は [プロダクト・開発台帳](../records/product/Screact_プロダクト・開発台帳_2026-08-30.md) を参照する。
+
+> Screact（Android/iOS カメラ → WebSocket → PC 操作）の接続・認証方式の**後続実装に向けた設計仕様**。
 > QR フォールバック / LAN 非依存の代替接続 / iOS 実装は、すべて本仕様を前提に実装する。
 > 目的：以後の実装で「接続の入口」と「認証の一本化」がブレないよう、着手前に固定する。
 
@@ -34,7 +36,7 @@
 ### 2.2 WebSocket（制御＋データ）
 - エンドポイント `ws://<PCのIP>:<port>/ws/v1/input`、既定ポート `8765`（`desktop/lib/net/input_server.dart` / `android/.../network/YubiBoardWebSocketClient.kt`）。
 - 接続直後に Android が `hello`（`pairingToken` か `resumeToken` の排他）を送り、PC が 5 秒以内に `hello_ack`（`sessionId` / `surface` / `calibrationRequired` / 初回は `resumeToken` 発行）を返す。
-- 以後：`control_message`（`set_mode`）でキャリブレーション/トラッキングを切替、`calibration_markers`・`hand_frame` を流す（protocol v1、詳細は `docs/android/android-protocol-v1.md`）。
+- 以後：`control_message`（`set_mode`）でキャリブレーション/トラッキングを切替、`calibration_markers`・`hand_frame` を流す（protocol v1、詳細は [通信仕様書 v1](../../protocol-specification-v1.md)）。
 
 ### 2.3 認証（現行）
 - `pairingToken`：PC 画面表示の 6 桁。UDP offer にも同値が載る。保存しない。PC 側でチェック ON/OFF 可。不一致は `hello_error(pairing_code_mismatch, retryable=false)`。
