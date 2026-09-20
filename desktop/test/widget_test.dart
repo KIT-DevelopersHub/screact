@@ -117,6 +117,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-save')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-show-skeleton')),
+      findsOneWidget,
+    );
+    expect(HomePage.defaultShowSkeleton, isFalse);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -268,6 +273,11 @@ void main() {
         expectInViewport(
           tester,
           find.byKey(const ValueKey('settings-save')),
+          viewport,
+        );
+        expectInViewport(
+          tester,
+          find.byKey(const ValueKey('settings-show-skeleton')),
           viewport,
         );
 

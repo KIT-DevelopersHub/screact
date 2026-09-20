@@ -31,6 +31,9 @@ enum DesktopSection { connection, calibration, workspace, settings }
 /// PC側の接続・位置合わせ・オーバーレイ・設定を、本番向けの4画面にまとめた操作面。
 /// 通信・位置合わせ・透明オーバーレイの既存処理はそのまま共有する。
 class HomePage extends StatefulWidget {
+  /// 保存値がない環境で使う骨格表示の初期値。
+  static const bool defaultShowSkeleton = false;
+
   /// テスト用のポート差し替え。nullならYUBI_PORT、未指定時は8765。
   final int? port;
 
@@ -87,7 +90,7 @@ class _HomePageState extends State<HomePage> {
   late int _configuredPort;
   bool _enforcePairing = true;
   // 手の骨格（ランドマーク）をオーバーレイに描画するか。既定OFF・永続化する。
-  bool _showSkeleton = false;
+  bool _showSkeleton = HomePage.defaultShowSkeleton;
   // ハンドジェスチャーの個別ON/OFF。既定は全てON・永続化・即時反映する。
   bool _clickGestureEnabled = true;
   bool _penGestureEnabled = true;
@@ -398,9 +401,7 @@ class _HomePageState extends State<HomePage> {
       // Android 互換の UDP offer は PairingController 経由で別途流れる。
       final code = _pairingCode;
       if (code != null) {
-        unawaited(
-          _bonjour.start(port: server.boundPort ?? _port, token: code),
-        );
+        unawaited(_bonjour.start(port: server.boundPort ?? _port, token: code));
       }
     } catch (error) {
       await _shutdownServer(server);
@@ -1441,6 +1442,37 @@ class _HomePageState extends State<HomePage> {
                       onPressed: _showCalibrationSettings,
                       child: const Text('詳細設定', style: TextStyle(fontSize: 20)),
                     ),
+                    const SizedBox(width: 28),
+                    Container(
+                      width: 1,
+                      height: 48,
+                      color: const Color(0xFFD8D2DC),
+                    ),
+                    const SizedBox(width: 28),
+                    const Text(
+                      '骨格を表示',
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Text(
+                      _showSkeleton ? 'ON' : 'OFF',
+                      style: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Transform.scale(
+                      scale: 1.35,
+                      child: Switch(
+                        key: const ValueKey('settings-show-skeleton'),
+                        value: _showSkeleton,
+                        onChanged: _setShowSkeleton,
+                      ),
+                    ),
                   ],
                 ),
                 const Divider(thickness: 1.5),
@@ -1638,11 +1670,15 @@ class _HomePageState extends State<HomePage> {
     setState(() => _showSkeleton = value);
     // OFFにした瞬間、既に描かれている骨格も消す。
     if (!value) _overlay.showSkeletons(const {});
+    _persistShowSkeleton();
+  }
+
+  void _persistShowSkeleton() {
     try {
       final f = _showSkeletonPrefsFile();
       if (f != null) {
         f.parent.createSync(recursive: true);
-        f.writeAsStringSync(value ? '1' : '0', flush: true);
+        f.writeAsStringSync(_showSkeleton ? '1' : '0', flush: true);
       }
     } catch (_) {
       // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
@@ -1697,8 +1733,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _setClickGesture(bool v) => _setGestureToggle(() => _clickGestureEnabled = v);
-  void _setPenGesture(bool v) => _setGestureToggle(() => _penGestureEnabled = v);
+  void _setClickGesture(bool v) =>
+      _setGestureToggle(() => _clickGestureEnabled = v);
+  void _setPenGesture(bool v) =>
+      _setGestureToggle(() => _penGestureEnabled = v);
   void _setEraserGesture(bool v) =>
       _setGestureToggle(() => _eraserGestureEnabled = v);
   void _setScrollGesture(bool v) =>
@@ -1733,7 +1771,11 @@ class _HomePageState extends State<HomePage> {
               }) => SwitchListTile(
                 key: key,
                 contentPadding: EdgeInsets.zero,
-                secondary: Icon(icon, size: 30, color: ProductionDesign.textColor),
+                secondary: Icon(
+                  icon,
+                  size: 30,
+                  color: ProductionDesign.textColor,
+                ),
                 title: Text(
                   title,
                   style: const TextStyle(
@@ -1855,7 +1897,10 @@ class _HomePageState extends State<HomePage> {
       _penGestureEnabled = true;
       _eraserGestureEnabled = true;
       _scrollGestureEnabled = true;
+      _showSkeleton = HomePage.defaultShowSkeleton;
     });
+    if (!_showSkeleton) _overlay.showSkeletons(const {});
+    _persistShowSkeleton();
     _applyGestureTogglesToEngine();
     _persistGestureToggles();
     _showMessage('設定を初期化しました');
