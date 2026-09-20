@@ -48,7 +48,7 @@ flutter run -d macos  # or -d windows
 - ログ保存とデバッグ表示
 
 正常系は、`接続待機 → 配置確認待ち → マーカー認識中 → ホモグラフィ計算中 → 操作可能`。
-通信JSONと再接続条件は[`docs/android/android-protocol-v1.md`](../docs/android/android-protocol-v1.md)を正本とする。
+通信JSONと再接続条件は[`docs/protocol-specification-v1.md`](../docs/protocol-specification-v1.md)を正本とする。
 
 ## OSネイティブ実装
 

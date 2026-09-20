@@ -1,5 +1,7 @@
 # PR #24後の手座標・ジェスチャー精度改善レビュー
 
+> **状態（2026-08-30）: 特定 PR 時点のレビューと改善計画。** 本文の Phase、未対応項目、評価基準を現行実装の機能表と読み替えない。基準コミットで統合済みの範囲は [プロダクト・開発台帳](../../records/product/Screact_プロダクト・開発台帳_2026-08-30.md) とコードを優先する。
+
 ## 1. このレビューの前提
 
 本レビューは、PR #24「複数人操作（2人・最大2手）のPC側2トラック処理」をmainへ統合した後、その続きとして精度改善を実装するための判断資料である。
@@ -432,7 +434,7 @@ gesture_recognizer.dartとinteraction_engine.dartは同じ担当が直列で変�
 
 ### Phase 3: Android・通信の未クリップ拡張
 
-1. android-protocol-v1.mdへunclippedLandmarksを追加。
+1. 通信仕様書 v1へunclippedLandmarksを追加。
 2. Android送信とInputFrame受信を同じ変更単位で実装。
 3. 旧Android、旧PC、PR #24形式との互換テストを追加。
 4. 通信量、queueSize、capture-to-send時間を実測。
@@ -555,9 +557,9 @@ Phase 1では必要なファイルだけを変更する。特にhome_page.dart�
 
 ### 正本文書
 
-- docs/android/android-protocol-v1.md
-- docs/desktop/desktop-app-requirements.md
-- 責任境界を変える場合のみdocs/system/system-requirements.md
+- docs/protocol-specification-v1.md
+- docs/work/requirements/desktop/desktop-app-requirements.md
+- 責任境界を変える場合のみdocs/work/requirements/system/system-requirements.md
 
 ---
 
@@ -597,7 +599,7 @@ Phase 1では必要なファイルだけを変更する。特にhome_page.dart�
 13. 通信遅延、CPU負荷、バッテリー消費がデモ運用上許容範囲にある。
 14. Android・Desktopの契約テスト、純粋ロジックテスト、実機境界テストが成功する。
 
-実装時は通信変更をdocs/android/android-protocol-v1.md、画面外動作と主トラック規則をdocs/desktop/desktop-app-requirements.mdへ先に反映してからコードを変更する。
+実装時は通信変更をdocs/protocol-specification-v1.md、画面外動作と主トラック規則をdocs/work/requirements/desktop/desktop-app-requirements.mdへ先に反映してからコードを変更する。
 
 ---
 

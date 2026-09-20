@@ -8,7 +8,7 @@
 | 対象 | 現行Androidアプリから本来の操作フローへの移行 |
 | 入力要件 | [Android UI要件定義書](./android-ui-requirements.md) |
 | カメラ判断 | [Androidカメラ解像度・プレビューサイズ判断書](./android-camera-resolution-decision.md) |
-| 現行仕様 | [Androidアプリ現行仕様書](./android-current-spec.md) |
+| 現行仕様 | [Androidアプリ仕様書](../../../android-specification-v1.md) |
 | 基準コミット | `495b575` |
 | 基準日 | 2026-08-05 |
 | ステータス | 信頼済み自動接続・配置確認・デバッグ同等経路までImplemented |
@@ -118,7 +118,7 @@ UI文言はComposable側またはリソースで状態から決定し、ネッ�
 - 再試行理由コード
 - Androidから再位置合わせを要求するメッセージ
 
-追加する場合は[Android通信プロトコル v1](./android-protocol-v1.md)を先に更新し、AndroidとPC双方のテストデータを同じ変更で用意する。
+追加する場合は[通信仕様書 v1](../../../protocol-specification-v1.md)を先に更新し、AndroidとPC双方のテストデータを同じ変更で用意する。
 
 ### 4.5 デバッグOverlayと本番Overlayを分ける
 

@@ -391,7 +391,7 @@ flowchart TD
 
 PCアプリは、接続開始メッセージを検証し、セッションID、対象画面情報、位置合わせの要否を含む接続応答を返す。
 
-初回`hello`は6桁の`pairingToken`、信頼済み再接続は`resumeToken`を含む。両方を同時に受け付けず、いずれか一方を必須とする。初回成功時は端末IDへ紐づけた高エントロピーの`resumeToken`を発行する。詳細なエラーと保存規則は[Android通信プロトコル v1](../android/android-protocol-v1.md)を正本とする。
+初回`hello`は6桁の`pairingToken`、信頼済み再接続は`resumeToken`を含む。両方を同時に受け付けず、いずれか一方を必須とする。初回成功時は端末IDへ紐づけた高エントロピーの`resumeToken`を発行する。詳細なエラーと保存規則は[通信仕様書 v1](../../../protocol-specification-v1.md)を正本とする。
 
 
 ```json

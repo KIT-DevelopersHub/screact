@@ -937,7 +937,7 @@ flowchart TD
 }
 ```
 
-例は初回接続を示す。信頼済み再接続では`pairingToken`を省略し、PCが発行した`resumeToken`を送る。2つは排他的で、いずれか一方を必須とする。フィールドの正本は[Android通信プロトコル v1](../android/android-protocol-v1.md)とする。
+例は初回接続を示す。信頼済み再接続では`pairingToken`を省略し、PCが発行した`resumeToken`を送る。2つは排他的で、いずれか一方を必須とする。フィールドの正本は[通信仕様書 v1](../../../protocol-specification-v1.md)とする。
 
 ### 16.2 接続応答
 

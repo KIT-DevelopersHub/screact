@@ -18,7 +18,7 @@
 - Android 7.0（API 24）以上の実機
 - Android Studio、Android SDK、データ通信対応USBケーブル
 - PC画面全体を映せる明るい場所
-- ArUcoターゲット[`android/tools/calibration-target-1920x1080.png`](../../android/tools/calibration-target-1920x1080.png)
+- ArUcoターゲット[`android/tools/calibration-target-1920x1080.png`](../../../../android/tools/calibration-target-1920x1080.png)
 
 Android Studioでは`android/`をプロジェクトとして開く。コマンドはリポジトリルートから実行する。
 

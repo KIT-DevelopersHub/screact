@@ -1,382 +1,248 @@
 <div align="center">
-  <img src="./docs/assets/readme/screact-logo.png" width="760" alt="Screact logo">
+  <img src="./docs/assets/readme/screact-logo.png" width="720" alt="Screact logo">
 
-  <h1>Screact</h1>
-  <h3>描いて、動かせる画面へ。</h3>
-  <p><strong>普通の Screen が、人の動きに React する。</strong></p>
+  # Screact - ただの画面を、描いて動かせる画面へ
 
-  <p>
-    <img src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 7.0+">
-    <img src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin and Jetpack Compose">
-    <img src="https://img.shields.io/badge/Flutter-Desktop-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter Desktop">
-    <img src="https://img.shields.io/badge/MediaPipe-21%20Landmarks-00A67E?style=for-the-badge" alt="MediaPipe 21 landmarks">
-  </p>
+  **普通の Screen が、人の動きに React する。**
 
-  <p>
-    <a href="#画面遷移">画面遷移</a> ・
-    <a href="#使い方">使い方</a> ・
-    <a href="#操作ジェスチャー">操作ジェスチャー</a> ・
-    <a href="#クイックスタート">クイックスタート</a> ・
-    <a href="#ドキュメント">技術資料</a>
-  </p>
+  [![THE HACK 2026](https://img.shields.io/badge/THE%20HACK%202026-Grand%20Prize-ffb300?style=for-the-badge&logo=trophy&logoColor=white)](#-the-hack-2026-受賞結果-)
+  [![Android](https://img.shields.io/badge/Android-7.0%2B-3ddc84?style=for-the-badge&logo=android&logoColor=white)](./docs/android-specification-v1.md)
+  [![Flutter](https://img.shields.io/badge/Flutter-Desktop-02569b?style=for-the-badge&logo=flutter&logoColor=white)](./docs/desktop-specification-v1.md)
+  [![MediaPipe](https://img.shields.io/badge/MediaPipe-21%20Landmarks-00a67e?style=for-the-badge)](#開発技術)
+
+  [![技術仕様書](https://img.shields.io/badge/技術仕様書-詳細ドキュメント-4f46e5?style=for-the-badge)](./docs/README.md)
+  [![ギャラリー](https://img.shields.io/badge/ギャラリー-画面とフロー-16a34a?style=for-the-badge)](./docs/gallery.md)
 </div>
 
 ---
 
-## Screactとは
-
-Screactは、手の動きでPC画面を操作できるシステムです。
-
-Androidスマホの背面カメラをPC画面へ向けると、MediaPipeが手指の21点を認識します。PC側はその座標からジェスチャーを判定し、ポインター操作や、ブラウザ・スライド上への書き込みへ変換します。
-
-専用センサーや電子ペンは必要ありません。手元にあるAndroidスマホとPCを同じネットワークへ接続するだけで、いつもの画面を、人の動きに反応する画面へ変えられます。
-
-## 解決したいこと
-
-授業や発表で使う画面は、多くの場合「表示するだけ」です。画面へ書き込む、スライドを送る、PCを操作するたびに端末の前へ戻ると、説明やコミュニケーションの流れが止まってしまいます。
-
-Screactは、スマホを画面の「目」にすることで、この課題を解決します。
-
-| 今まで | Screact |
-|:--|:--|
-| PCの前へ戻って操作 | 画面の前から手で操作 |
-| 専用センサーや電子ペンを準備 | AndroidスマホとPCを利用 |
-| アプリ内の専用キャンバスへ描画 | 透明オーバーレイでブラウザやスライドへ直接描画 |
-| カメラ映像を処理先へ送り続ける | 端末内で認識し、座標データだけをPCへ送信 |
-
-## 特長
-
-### 1. 今ある機材ですぐ始められる
-
-Androidスマホ、PC、映したい画面があれば利用できます。PCがUDPで接続情報を広告し、それを検出したAndroidからWebSocket接続するため、通常はIPアドレスを入力する必要がありません。
-
-### 2. 画面とカメラのずれを自動補正
-
-画面四隅のArUcoマーカーをカメラで読み取り、Homographyで斜めから撮影した座標をPC画面座標へ変換します。スマホを正面中央へ置けない環境でも、画面全体へ指位置を対応付けられます。
-
-### 3. 動くだけでなく、操作として使える
-
-21点の手指骨格から指先位置と指の状態を判定し、One-Euro Filterで揺れを抑えます。移動、クリック、ドラッグ、スクロール、描画を、それぞれ別の操作として扱います。
-
-### 4. どの画面にも重ねられる
-
-校正後は透明・クリック透過のネイティブオーバーレイへ自動移行します。旧来の白いアプリ内キャンバスではなく、ブラウザ、PDF、スライドなど、普段使っているアプリの上へそのまま描画できます。
-
-### 5. Androidとデスクトップで統一した本番UI
-
-デスクトップ版は、水彩背景、ラベンダーのヘッダー、片目のゴーストを共通モチーフに、接続・位置合わせ・オーバーレイ・設定の4画面を整理しています。Android版も同じ世界観で構成し、Screactのロゴアニメーションを使ったスプラッシュと、ゴーストを描いたアダプティブ／従来形式のアプリアイコンを備えています。
-
-## 画面遷移
-
-[最新UI PR #13](https://github.com/NxTEND-THE-HACK/2026-Team-35/pull/13)の実装を撮影元にし、通信やジェスチャー操作で画面を進めず、各UI状態を直接表示して撮影しました。デスクトップは同PRのmacOS版Flutter UI、AndroidはPixel 8 Pro上の本番Compose UIです。Androidの左側には、PC画面へ向けた背面カメラの実映像を表示しています。
-
-<table>
-  <tr>
-    <th width="12%">段階</th>
-    <th width="44%">デスクトップ</th>
-    <th width="44%">Android</th>
-  </tr>
-  <tr>
-    <th>1. 起動</th>
-    <td>
-      <img src="./docs/assets/readme/desktop/01-connection.jpg" alt="デスクトップ接続開始画面">
-      <br><sub>接続情報を確認し、「始める」を選択</sub>
-    </td>
-    <td>
-      <img src="./docs/assets/readme/android/android-start.jpg" alt="Android画面認識開始画面">
-      <br><sub>スマホを固定して画面認識を開始</sub>
-    </td>
-  </tr>
-  <tr>
-    <th>2. 自動検出</th>
-    <td>
-      <img src="./docs/assets/readme/desktop/02-discovery.jpg" alt="デスクトップ自動検出中画面">
-      <br><sub>UDPで接続情報と6桁コードを広告</sub>
-    </td>
-    <td>
-      <img src="./docs/assets/readme/android/android-discovery.jpg" alt="Android自動検出待受画面">
-      <br><sub>PCからの接続情報を待機</sub>
-    </td>
-  </tr>
-  <tr>
-    <th>3. 設置</th>
-    <td>
-      <img src="./docs/assets/readme/desktop/03-calibration-ready.jpg" alt="デスクトップ位置合わせ準備画面">
-      <br><sub>接続後、位置合わせを開始</sub>
-    </td>
-    <td>
-      <img src="./docs/assets/readme/android/android-placement.jpg" alt="Androidスマホ設置画面">
-      <br><sub>PC画面の四隅が映る位置へ固定</sub>
-    </td>
-  </tr>
-  <tr>
-    <th>4. 位置合わせ</th>
-    <td>
-      <img src="./docs/assets/readme/desktop/04-calibration-target.jpg" alt="デスクトップArUco位置合わせターゲット">
-      <br><sub>画面四隅へArUcoマーカーを表示</sub>
-    </td>
-    <td>
-      <img src="./docs/assets/readme/android/android-calibration.jpg" alt="Androidマーカー検出画面">
-      <br><sub>4個のマーカーを検出して座標を補正</sub>
-    </td>
-  </tr>
-  <tr>
-    <th>5. 操作</th>
-    <td>
-      <img src="./docs/assets/readme/desktop/05-overlay-panel.jpg" alt="デスクトップオーバーレイ操作画面">
-      <br><sub>校正後は透明オーバーレイへ自動移行。解除後は再表示・インク消去</sub>
-    </td>
-    <td>
-      <img src="./docs/assets/readme/android/android-tracking.jpg" alt="Android手検出中画面">
-      <br><sub>手を追跡し、PCへ座標と状態を送信</sub>
-    </td>
-  </tr>
-</table>
-
-### 補助画面
-
-<table>
-  <tr>
-    <th width="50%">Androidスプラッシュ</th>
-    <th width="50%">Androidアプリアイコン</th>
-  </tr>
-  <tr>
-    <td><img src="./docs/assets/readme/android/android-splash.jpg" alt="Android起動スプラッシュ"></td>
-    <td align="center"><img src="./docs/assets/readme/android/android-app-icon.png" width="192" alt="Screact Androidアプリアイコン"></td>
-  </tr>
-  <tr>
-    <th width="50%">デスクトップ設定</th>
-    <th width="50%">Android手動接続</th>
-  </tr>
-  <tr>
-    <td><img src="./docs/assets/readme/desktop/06-settings.jpg" alt="デスクトップ設定画面"></td>
-    <td><img src="./docs/assets/readme/android/android-manual-connection.jpg" alt="Android手動接続画面"></td>
-  </tr>
-  <tr>
-    <th>Android操作待機</th>
-    <th>Android再接続</th>
-  </tr>
-  <tr>
-    <td><img src="./docs/assets/readme/android/android-ready.jpg" alt="Android操作可能画面"></td>
-    <td><img src="./docs/assets/readme/android/android-reconnecting.jpg" alt="Android再接続画面"></td>
-  </tr>
-</table>
-
-## 使い方
-
 <div align="center">
-  <img src="./docs/assets/readme/presentation/setup-flow.png" width="900" alt="Screact設定フロー">
-  <p><sub>発表資料「THE HACK 予選 THE WIN」の設定フローを、現行実装の説明とともに掲載しています。</sub></p>
+
+## 🎉 THE HACK 2026 受賞結果 🎉
+
+### 🏆 本戦
+
+**🥇 大賞**<br>
+**賞金 300,000円**
+
+<img src="./docs/assets/media/award-photo-02.jpg" width="720" alt="THE WIN の THE HACK 2026 大賞受賞写真">
+
 </div>
 
-1. PCとAndroidスマホを同じWi-Fi／LANへ接続する。
-2. AndroidでScreactを起動し、「画面認識開始」を押す。
-3. PCでScreactを起動し、「始める」を押す。
-4. AndroidがPCのUDP offerを検出し、自動的にWebSocketへ接続する。
-5. スマホにPC画面全体と手が映る位置で固定する。
-6. PCの「位置合わせ開始」を押し、4個のArUcoマーカーを認識させる。
-7. 位置合わせが完了すると、透明オーバーレイへ自動移行する。
+---
 
-自動検出できない場合は、Androidの「手動で接続する（IP・6桁コード）」を開き、PC画面に表示されたLAN内IP、ポート、6桁コードを入力してください。
+## 目次
 
-### オーバーレイを解除する
+- [🎉 THE HACK 2026 受賞結果 🎉](#-the-hack-2026-受賞結果-)
+- [目次](#目次)
+- [Live Demo](#live-demo)
+- [製品概要](#製品概要)
+- [コンテスト応募用](#コンテスト応募用)
+- [技術仕様書](#技術仕様書)
+- [ギャラリー](#ギャラリー)
+- [開発技術](#開発技術)
+- [参考文献](#参考文献)
+- [開発・検証](#開発検証)
+- [開発メンバー](#開発メンバー)
 
-- macOS: メニューバーの鉛筆アイコン、または `⌘⇧O`
-- Windows: `Ctrl+Shift+O`
+---
 
-解除後は操作パネルから「オーバーレイを再表示」または「インクを消去」を選べます。スマホ切断時やPC側の接続停止時にも自動解除されます。
+## Live Demo
 
-## 操作の仕組み
+Screact は、THE HACK 2026 本戦で、**発表者が画面の前に立ったまま、既存の画面へ描き、操作する**デモとして展示しました。Android スマホを画面へ向けて固定し、PC と接続した後は、スマホ画面を触らずに操作します。
 
 <div align="center">
-  <img src="./docs/assets/readme/presentation/operation-flow.png" width="900" alt="Screact操作フロー">
+  <a href="https://drive.google.com/file/d/14SZvVKVLxcpKkB3tEl41TTzPK-4H_XEj/view?usp=sharing">
+    <img src="./docs/assets/media/live-demo-thumbnail.jpg" width="900" alt="Screactのデモを見る">
+  </a>
+  <br>
+  <strong><a href="https://drive.google.com/file/d/14SZvVKVLxcpKkB3tEl41TTzPK-4H_XEj/view?usp=sharing">▶ Screactのデモを見る（Google Drive）</a></strong>
+  <br>
+  <sub>予選発表時に収録した、実際に手を動かして既存の画面へ描画する約33秒のデモ。</sub>
 </div>
+
+## 製品概要
+
+### 背景（製品開発のきっかけ・課題など）
+
+授業や発表では、説明する人はスクリーンの前、操作する人は PC の前へ戻らなければならないことがあります。スライドを送る、画面を指す、ブラウザを動かす、書き込む。そのたびに説明の流れが切れてしまいます。
+
+Screact が解決したいのは、「画面は見せるもの、操作は PC の前でするもの」という分断です。Screact は「画面を、買い替えない」という選択肢として、手元にある Android スマホと PC で、今ある画面へ「操作できる」を後付けします。
+
+### 製品説明（具体的な製品の説明）
+
+> **ただの画面を、描いて動かせる画面へ**
+>
+> Android スマホを画面の目にして、PC 画面を手で操作する。
+
+Screact は、Android の背面カメラで画面四隅と手を認識し、PC 側でその結果を画面座標と操作へ変換するシステムです。画面四隅の ArUco マーカーを読み取るため、カメラを画面の正面中央へ置けない環境でも、斜めから見た座標を画面全体へ対応付けられます。
+
+位置合わせ後は、ブラウザ・PDF・スライドの上に透明でクリック透過のオーバーレイを重ね、普段使うアプリを見せたまま描画できます。カメラ映像は PC へ連続送信せず、Android 内で認識した21点の手指ランドマークと必要な状態だけを送ります。
+
+<div align="center">
+  <img src="./docs/assets/media/screact-flyer.png" width="900" alt="Screact チラシ">
+  <p><sub>ただの画面を、描いて動かせる画面へ</sub></p>
+</div>
+
+### システム構成
+
+| コンポーネント | 技術 | 役割 |
+| --- | --- | --- |
+| Android アプリ | Kotlin / Jetpack Compose / CameraX | 背面カメラ、接続案内、認識結果の送信 |
+| Vision | MediaPipe Hand Landmarker / OpenCV ArUco | 手指21点、画面四隅の検出 |
+| Desktop アプリ | Flutter / Dart | 接続、位置合わせ、座標変換、ジェスチャー、描画 |
+| 通信 | UDP / WebSocket | 自動発見、認証、座標・状態のリアルタイム送信 |
+| OS 連携 | Swift / CGEvent、C++ / Win32 | 透明オーバーレイ、macOS / Windows のネイティブ入力 |
 
 ```mermaid
 flowchart LR
-    Camera["Android背面カメラ"] --> Vision["MediaPipe 21点骨格<br/>OpenCV ArUco"]
-    Desktop["Desktop Flutter"] -- "UDP :8766<br/>接続情報を広告" --> Android["Android App"]
+    Camera["Android 背面カメラ"] --> Vision["MediaPipe 21点\nOpenCV ArUco"]
+    Desktop["Screact Desktop"] -- "UDP :8766\n接続情報" --> Android["Screact Android"]
     Vision --> Android
-    Android -- "WebSocket :8765<br/>座標・状態のみ" --> Desktop
-    Desktop --> Transform["Homography<br/>One-Euro Filter<br/>ジェスチャー判定"]
+    Android -- "WebSocket :8765\n座標・状態のみ" --> Desktop
+    Desktop --> Transform["Homography\n平滑化\nジェスチャー判定"]
     Transform --> Overlay["透明オーバーレイ描画"]
-    Transform --> Input["OSポインター・クリック・スクロール"]
+    Transform --> Input["macOS CGEvent / Windows SendInput"]
 ```
 
-| 通信 | 既定値 | 役割 |
-|---|---:|---|
-| UDP | `8766` | PCの所在、WebSocketポート、6桁コードをAndroidへ知らせる自動発見専用 |
-| WebSocket over TCP | `8765` / `/ws/v1/input` | 認証、位置合わせ、手指21点、状態、制御メッセージ |
+### 処理の流れ
 
-UDPで手指データは送りません。接続後の実データはWebSocketだけを使用し、カメラ映像そのものはPCへ常時送信しません。
+<div align="center">
+  <img src="./docs/assets/media/processing-flow.png" width="900" alt="Screact の処理の流れ">
+  <p><sub>手を動かす → 21点を検出 → PCへ送信 → Desktopで処理 → 画面に反映。</sub></p>
+</div>
 
-WebSocket接続後のメッセージ形式は[Android通信プロトコル v1](./docs/android/android-protocol-v1.md)を参照してください。
+### 特長
 
-## 操作ジェスチャー
+#### 1. いつもの画面を、そのまま操作対象にする
 
-| 手の動き | PCでの操作 |
-|---|---|
-| 人差し指を動かす | ポインター移動 |
-| 親指と人差し指をつまむ | クリック |
-| つまんだまま動かす | ドラッグ |
-| 人差し指と中指の先をくっつけて動かす | 透明オーバーレイへ描画 |
-| 手をグーにして動かす | カーソル近傍の描画を消す |
-| 人差し指と中指を立てて動かす | 縦横スクロール |
+専用アプリの中だけで完結させず、透明オーバーレイで既存のブラウザ、PDF、スライドへ描画を重ねます。説明のために画面を切り替える必要がありません。
 
-描画色と骨格表示は、透明オーバーレイへ入る前の「オーバーレイ操作」画面で切り替えます。オーバーレイ中は背後アプリを操作できるよう、クリック透過を維持します。
+#### 2. スマホの置き方を限定しない
 
-手を見失った場合は、押下中・描画中の状態を安全に解除します。現在、手による拡大・縮小ジェスチャーは実装していません。
+ArUco マーカーと Homography により、画面に対して斜めに設置したスマホからでも、カメラ座標を画面座標へ補正します。
 
-## 主な使用技術
+#### 3. 「動く手」を「使える操作」にする
 
-| 領域 | 技術 | 用途 |
-|:--|:--|:--|
-| Android UI | Kotlin / Jetpack Compose | 状態別ガイド、接続、設定 |
-| カメラ | CameraX | 背面カメラ映像の取得 |
-| 手指認識 | MediaPipe Hand Landmarker | 1つの手の21点骨格検出 |
-| 画面認識 | OpenCV ArUco | 画面四隅のマーカー検出 |
-| Android通信 | OkHttp WebSocket / UDP | PC自動検出とリアルタイム送信 |
-| Desktop UI | Flutter / Dart | 接続、位置合わせ、操作、設定 |
-| 座標処理 | Homography / One-Euro Filter | 画面座標変換と揺れの低減 |
-| macOS入力 | Swift / CGEvent | ポインター、クリック、ドラッグ、スクロール |
-| Windows表示 | C++ / Win32 | 透明・最前面・クリック透過オーバーレイ |
-| デザイン | Figma / Canva / CLIP STUDIO PAINT | UI、発表資料、グラフィック制作 |
+手のランドマークを送るだけではなく、PC 側で平滑化と状態管理を行います。ポインター、ピンチクリック、ドラッグ、描画、グー消しゴム、グッドサイン・スクロールを別の意図として扱います。
 
-## 動作環境
+#### 4. 設定の摩擦を減らす
 
-### Android
+Desktop が接続情報を UDP で広告し、Android が検出して接続します。ネットワークによって自動発見できない場合にも、IP・ポート・6桁コードによる手動接続を用意しています。
 
-- Android 7.0（API 24）以上
-- 背面カメラ
-- ビルド時: Android Studio、Android SDK 36、JDK 17
-- 実機導入時: Android Platform Tools（`adb`）とUSBデバッグ
+### 解決出来ること
 
-アプリが使用する権限はカメラとネットワーク関連です。マイク、位置情報、ストレージ権限は要求しません。
+- 発表者が PC の前へ戻らず、画面の前で説明と操作を続けられる
+- 既存ディスプレイ、プロジェクター、ブラウザ、PDF、スライドを活用できる
+- 専用センサーや電子ペンを前提にしない
+- カメラ映像を PC へ送り続けず、認識結果だけで操作パイプラインを構成する
 
-### デスクトップ
+### 活用シーン
 
-- Flutter（Dart SDK `^3.7.2`に対応する版）
-- macOS: macOS 10.15以上、フル版Xcode
-- Windows: Flutter Windows toolchain、Visual Studioの「Desktop development with C++」
-- PCとAndroidが相互通信できる同一LAN
+- **授業・講義**: 説明者がスクリーンの前から離れず、板書・指示・画面操作を続けられる
+- **プレゼンテーション**: スライド、ブラウザ、PDFを見せたまま、指差し・描画・ページ操作を切り替えられる
 
-macOSでは、初回接続時にローカルネットワークへのアクセスを許可してください。実ポインター・クリック・スクロールを使用するには、システム設定の「プライバシーとセキュリティ」→「アクセシビリティ」でScreactを許可します。
+### 今後の展望
 
-## クイックスタート
+- **対応プラットフォームの拡張**: Windows の対象アプリ・権限を含む安定性を高め、iOS の手・マーカー検出を完成させる
+- **接続の拡張**: QR フォールバック、LAN 非依存リレー、複数端末の選択を検討する
+- **操作体験の改善**: 画面・照明・設置条件が変わる場面での精度と再現性を測定し、改善する
 
-### デスクトップアプリ
+これらは将来計画であり、現行デモの実装済み範囲とは区別します。
 
-macOS:
+### 注力したこと（こだわり等）
 
-```bash
-cd desktop
-flutter pub get
-flutter run -d macos
-```
+- **画面への対応付け**: 手を検出するだけで終わらず、ArUco と Homography で画面全体に使える座標へ変換した
+- **操作感と安全性**: One-Euro Filter、最新フレーム優先、トラッキング喪失時の解除を、体験の本体として実装した
+- **既存設備の活用**: 特殊なハードウェアではなく、Android スマホと PC の組み合わせで成立させた
+- **見せる画面を守る**: 透明・クリック透過オーバーレイにより、説明対象のアプリを隠さない設計にした
 
-`xcode-select`がCommand Line Toolsを向いている場合:
+## コンテスト応募用
 
-```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer flutter run -d macos
-```
+一言紹介、作品概要、こだわり・PRポイント、技術要素、デモ、実績、チーム情報を、応募フォームへそのまま貼り付けられる形で [コンテスト応募用文面](./docs/contest-copy.md) にまとめています。
 
-Windows:
+## 技術仕様書
 
-```powershell
-cd desktop
-flutter pub get
-flutter run -d windows
-```
+実装済みの仕様書は `docs/` 直下に置いています。要件、設計案、レビュー、台帳は作業用資料として下層へ分離しています。
 
-### Androidアプリ
+### Version 1.0.0 — THE HACK 2026 本戦版
 
-macOS／Linux:
+- [システム仕様書](./docs/README.md) — 全体アーキテクチャ、主要機能、仕様書の入口
+- [Android アプリ仕様書](./docs/android-specification-v1.md) — カメラ、追跡、接続、位置合わせ
+- [Desktop アプリ仕様書](./docs/desktop-specification-v1.md) — 受信、座標変換、ジェスチャー、オーバーレイ
+- [通信仕様書 v1](./docs/protocol-specification-v1.md) — Android/PC 間 WebSocket JSON 契約
 
-```bash
-cd android
-bash ./gradlew testDebugUnitTest lintDebug assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.nxtend.team35.yubiboard/.MainActivity
-```
+### 作業用・履歴資料
 
-Windowsでは`gradlew.bat`を使用します。Android Studioでは、リポジトリ全体ではなく`android/`をプロジェクトルートとして開いてください。
+- [作業用・履歴資料](./docs/work/README.md) — 要件、検証、設計、計画、開発記録の入口
+- [要件・検証資料](./docs/work/requirements/) — 要件定義、カメラ判断、実機デバッグ
+- [アーキテクチャ検討](./docs/work/architecture/) — 接続・位置合わせ・複数手の補助資料
+- [レビュー・計画](./docs/work/reviews/) / [接続計画](./docs/work/planning/) — 特定時点の評価と将来案
+- [開発記録](./docs/work/records/) — 作品資料の採用根拠、PR履歴、移行記録
 
-## テスト
+## ギャラリー
 
-デスクトップ:
+<div align="center">
+  <img src="./docs/assets/media/live-demo-thumbnail.jpg" width="58%" alt="実演中の Screact">
+  <img src="./docs/assets/readme/android/android-tracking.jpg" width="28%" alt="Android の手追跡画面">
+</div>
 
-```bash
-cd desktop
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer flutter build macos --debug
-```
+画面・フローの一覧は [Screact ギャラリー](./docs/gallery.md) を参照してください。
 
-Android:
+## 開発技術
 
-```bash
-cd android
-bash ./gradlew testDebugUnitTest lintDebug assembleDebug
-bash ./gradlew connectedDebugAndroidTest
-```
+### 活用した技術
 
-`connectedDebugAndroidTest`には、USBデバッグを有効にしたAndroid実機またはエミュレーターが必要です。
+| カテゴリ | 技術 | 用途 |
+| --- | --- | --- |
+| Android | ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white) ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white) ![CameraX](https://img.shields.io/badge/CameraX-Android-3DDC84?logo=android&logoColor=white) | カメラ、状態別ガイド、接続画面 |
+| 手指認識 | ![MediaPipe](https://img.shields.io/badge/MediaPipe-Hand%20Landmarker-00A67E) | 既定1手・設定時最大2手の21点ランドマーク検出 |
+| 画面認識 | ![OpenCV](https://img.shields.io/badge/OpenCV-ArUco-5C3EE8?logo=opencv&logoColor=white) | 画面四隅のマーカー検出 |
+| Desktop | ![Flutter](https://img.shields.io/badge/Flutter-Dart-02569B?logo=flutter&logoColor=white) | 接続、位置合わせ、操作、設定、描画 |
+| 通信 | ![UDP](https://img.shields.io/badge/UDP-Discovery-4F46E5) ![WebSocket](https://img.shields.io/badge/WebSocket-Realtime-2563EB) | 自動発見とリアルタイム送信 |
+| 座標処理 | ![Homography](https://img.shields.io/badge/Homography-Screen%20Mapping-9333EA) ![One--Euro](https://img.shields.io/badge/One--Euro-Filter-9333EA) | 座標変換と揺れの低減 |
+| OS連携 | ![Swift](https://img.shields.io/badge/Swift-CGEvent-F05138?logo=swift&logoColor=white) ![Win32](https://img.shields.io/badge/Win32-Overlay-0078D4?logo=windows&logoColor=white) | macOS / Windows 入力、透明・クリック透過ウィンドウ |
 
-## ディレクトリ構成
+### 独自技術
 
-```text
-2026-Team-35/
-├─ README.md
-├─ docs/                  # 全体仕様、通信シーケンス、README画像
-├─ android/               # Kotlin + Jetpack Compose Androidアプリ
-│  ├─ app/
-│  └─ gradle/
-└─ desktop/               # Flutterデスクトップアプリ
-   ├─ assets/
-   ├─ lib/
-   ├─ macos/
-   ├─ windows/
-   └─ test/
-```
+| 技術 | 概要 | 仕様書 |
+| --- | --- | --- |
+| 画面座標変換 | ArUco 4点から Homography を作り、斜めから見たカメラ座標を画面へ対応付ける | [Android](./docs/android-specification-v1.md) / [Desktop](./docs/desktop-specification-v1.md) |
+| 操作パイプライン | 受信、平滑化、ジェスチャー、描画・OS入力を Desktop 側へ一貫して集約する | [Desktop](./docs/desktop-specification-v1.md) |
+| ゼロコンフィグ接続 | UDP 発見と WebSocket 接続を組み合わせ、手動接続も残す | [通信](./docs/protocol-specification-v1.md) |
+| 透明オーバーレイ | 既存アプリを隠さず描画できる、最前面・クリック透過ウィンドウ | [Desktop](./docs/desktop-specification-v1.md) |
 
-`android/`と`desktop/`は同じGitリポジトリで管理しています。各ディレクトリ内で別の`git init`を実行しないでください。
+## 参考文献
 
-## 実装状況
+- [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) — 手指21点ランドマーク検出
+- [OpenCV ArUco markers](https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html) — 画面四隅のマーカー検出
+- [WebSocket — RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) — Android / Desktop 間の通信契約
+- [Flutter Desktop](https://docs.flutter.dev/platform-integration/desktop) — Desktop アプリの共通 UI・実行基盤
+- [4DX@HOME（jphacks/kz_2504）](https://github.com/jphacks/kz_2504) — README と実装済み仕様書の構成を参考
+- [EnCounter（razy6174/EnCounter）](https://github.com/razy6174/EnCounter) — README と分野別ドキュメントの構成を参考
 
-- [x] Android本番UI、カメラプレビュー、手指21点追跡
-- [x] Androidアニメーションスプラッシュとゴーストアプリアイコン
-- [x] ArUcoマーカー検出と画面位置合わせ
-- [x] UDPによるPC自動検出と手動接続フォールバック
-- [x] WebSocket認証、信頼済み接続、自動再接続
-- [x] Android・デスクトップアプリ間の統合
-- [x] Flutterデスクトップ本番UIと実行時設定
-- [x] macOS／Windowsの透明・クリック透過オーバーレイ
-- [x] macOSのネイティブOS入力
-- [x] 単体、Widget、接続、位置合わせ、回帰テスト
-- [ ] WindowsのネイティブOS入力
-- [ ] 複数Android端末の事前選択
+## 開発・検証
 
-## 既知の制約
+実機確認、PR、既知の制約は、[プロダクト・開発台帳](./docs/work/records/product/Screact_プロダクト・開発台帳_2026-08-30.md)に記録しています。コード上の実装、実機確認済み、設計済み・未実装、将来課題を分けて追跡しています。
 
-- 自動検出はUDPブロードキャストを使用するため、VPN、ゲストWi-Fi、AP isolation、OSファイアウォール、macOSのローカルネットワーク設定によって失敗する場合があります。その場合は手動接続を使用してください。
-- PCは同時に1台のAndroidだけを受け付けます。複数端末が待機している場合は、最初にWebSocket接続した端末が選ばれます。
-- 位置合わせ結果はPCアプリ終了時に失われます。同じPCプロセス内の一時的な通信断では再利用できます。
-- Windowsでは透明オーバーレイを利用できますが、ポインター・クリック・スクロールのネイティブOS入力はまだ接続されていません。
-- 6桁コードとWebSocketは、信頼できる同一LAN内での試作利用を前提としています。
-- macOS版Screact自身がネイティブフルスクリーンの場合、オーバーレイへの移行を拒否します。Screactは通常ウィンドウで起動してください。
+| 対象 | 現在の扱い |
+| --- | --- |
+| Android + macOS | 本戦デモの基準経路 |
+| Windows | 透明オーバーレイと `SendInput` によるネイティブ OS 入力を実装。特定環境で実機確認済み（環境依存） |
+| iOS | Bonjour / WebSocket 通信コードはあるが、手・マーカー検出の依存関係が未接続。実験段階 |
 
-## ドキュメント
+## 開発メンバー
 
-- [文書索引](./docs/README.md)
-- [位置合わせシーケンス](./docs/sequence-calibration-flow.md)
-- [Android現行仕様](./docs/android/android-current-spec.md)
-- [Androidプロトコル仕様](./docs/android/android-protocol-v1.md)
-- [Android実機デバッグ手順](./docs/android/android-debug-tutorial.md)
-- [システム要件](./docs/system/system-requirements.md)
+**THE WIN**
+
+- 久米蒼輝
+- マルチェンコ・ダニール
+- 高岡己太朗
+- 松本絆那
 
 ---
 
 <div align="center">
-  <strong>Screact - 描いて、動かせる画面へ。</strong>
+  <strong>Screact — 描いて、動かせる画面へ。</strong><br>
+  <sub>THE HACK 2026 Team 35 / 2026-08-30 更新</sub>
 </div>
