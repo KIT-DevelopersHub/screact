@@ -10,3 +10,4 @@
 | [作品資料の採用根拠](./product/source-register-2026-08-30.md) | Drive素材、動画デモ、参考リポジトリの出典と用途 |
 | [文書構造移行](./migration/2026-08-30-documentation-restructure.md) | 第一段階の役割別フォルダ移動 |
 | [実装仕様書優先の再編](./migration/2026-08-30-implementation-first.md) | `docs/` 直下への実装仕様書前面化と移行監査 |
+| [BLE と WebSocket の経路計測](./ble-vs-websocket-2026-11-28.md) | 手指フレームの帯域・遅延・欠落の実機計測と BLE 採否の推奨（#17） |
