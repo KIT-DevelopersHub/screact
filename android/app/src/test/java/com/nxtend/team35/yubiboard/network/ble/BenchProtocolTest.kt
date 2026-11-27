@@ -13,60 +13,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class BinaryHandFrameEncoderTest {
-    private fun hand(trackId: Int, x: Float = 0.5f) = BinaryHandFrameEncoder.Hand(
-        trackId = trackId,
-        handedness = 2,
-        handednessScore = 1f,
-        landmarks = List(21) { floatArrayOf(x, 0f, -2f) },
-    )
-
-    @Test
-    fun sizesMatchDraftTable() {
-        val source = BinaryHandFrameEncoder.Source(1280, 720)
-        assertEquals(18, BinaryHandFrameEncoder.encode(1, 0, emptyList(), source).size)
-        assertEquals(148, BinaryHandFrameEncoder.encode(1, 0, listOf(hand(1)), source).size)
-        assertEquals(278, BinaryHandFrameEncoder.encode(1, 0, listOf(hand(1), hand(2)), source).size)
-        assertEquals(188, BinaryHandFrameEncoder.encode(1, 0, listOf(hand(1), hand(2)), hasZ = false).size)
-    }
-
-    @Test
-    fun headerAndQuantizationAreLittleEndian() {
-        val bytes = BinaryHandFrameEncoder.encode(
-            frameId = 0x01020304,
-            capturedAtMonotonicMs = 0x1_0000_0005L,
-            hands = listOf(hand(7, x = 1f)),
-        )
-        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals(0x53, buffer.get().toInt())
-        assertEquals(1, buffer.get().toInt())
-        assertEquals(0x01, buffer.get().toInt()) // hasZ のみ
-        assertEquals(1, buffer.get().toInt())
-        assertEquals(0x01020304, buffer.int)
-        assertEquals(5, buffer.int) // u32 で一周する
-        assertEquals(7, buffer.short.toInt())
-        assertEquals(2, buffer.get().toInt())
-        assertEquals(254, buffer.get().toInt() and 0xFF)
-        assertEquals(0xFFFF, buffer.short.toInt() and 0xFFFF) // x = 1
-        assertEquals(0, buffer.short.toInt()) // y = 0
-        buffer.position(12 + 88)
-        assertEquals(-32767, buffer.short.toInt()) // z = -2 は -1 に飽和
-    }
-
-    @Test
-    fun handsAreSortedByTrackId() {
-        val bytes = BinaryHandFrameEncoder.encode(1, 0, listOf(hand(5), hand(2)), hasZ = false)
-        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals(2, buffer.getShort(12).toInt())
-        assertEquals(5, buffer.getShort(12 + 88).toInt())
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun rejectsOutOfRangeCoordinate() {
-        BinaryHandFrameEncoder.encode(1, 0, listOf(hand(1, x = 1.5f)))
-    }
-}
-
 class BenchProtocolTest {
     @Test
     fun parsesCommands() {

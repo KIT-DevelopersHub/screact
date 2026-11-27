@@ -1,5 +1,10 @@
 package com.nxtend.team35.yubiboard.network.ble
 
+import com.nxtend.team35.yubiboard.protocol.BinaryHand
+import com.nxtend.team35.yubiboard.protocol.BinaryHandFrame
+import com.nxtend.team35.yubiboard.protocol.BinaryHandFrameCodec
+import com.nxtend.team35.yubiboard.protocol.BinaryHandFrameSource
+import com.nxtend.team35.yubiboard.protocol.BinaryLandmark
 import com.nxtend.team35.yubiboard.protocol.HandFrameMessage
 import com.nxtend.team35.yubiboard.protocol.HandPayload
 import com.nxtend.team35.yubiboard.protocol.ProtocolCodec
@@ -119,7 +124,7 @@ object SyntheticHandFrames {
     fun landmarks(frameId: Long, trackId: Int): List<FloatArray> {
         val t = frameId / 30.0
         val baseX = if (trackId == 1) 0.35 else 0.65
-        return (0 until BinaryHandFrameEncoder.LANDMARKS).map { i ->
+        return (0 until BinaryHandFrameCodec.LANDMARK_COUNT).map { i ->
             val angle = t + i * 0.3
             floatArrayOf(
                 (baseX + 0.1 * sin(angle) + i * 0.003).toFloat().coerceIn(0f, 1f),
@@ -130,14 +135,30 @@ object SyntheticHandFrames {
     }
 
     fun binary(frameId: Long, capturedAtMs: Long, handCount: Int): ByteArray =
-        BinaryHandFrameEncoder.encode(
-            frameId = frameId,
-            capturedAtMonotonicMs = capturedAtMs,
-            hands = (1..handCount).map { trackId ->
-                BinaryHandFrameEncoder.Hand(trackId, if (trackId == 1) 1 else 2, 0.97f, landmarks(frameId, trackId))
-            },
-            source = BinaryHandFrameEncoder.Source(SOURCE_WIDTH, SOURCE_HEIGHT),
-            hasZ = true,
+        BinaryHandFrameCodec.encode(
+            BinaryHandFrame(
+                // u32 で一周させる（受信側は差分で比べる）。
+                frameId = frameId and BinaryHandFrameCodec.MAX_UINT32,
+                capturedAtMonotonicMs = capturedAtMs and BinaryHandFrameCodec.MAX_UINT32,
+                hands = (1..handCount).map { trackId ->
+                    BinaryHand(
+                        trackId = trackId,
+                        handedness = if (trackId == 1) "LEFT" else "RIGHT",
+                        handednessScore = 0.97,
+                        landmarks = landmarks(frameId, trackId).map {
+                            BinaryLandmark(it[0].toDouble(), it[1].toDouble(), it[2].toDouble())
+                        },
+                    )
+                },
+                source = BinaryHandFrameSource(
+                    SOURCE_WIDTH,
+                    SOURCE_HEIGHT,
+                    rotationCorrected = true,
+                    mirrorCorrected = true,
+                    cameraFacing = "back",
+                ),
+                includeZ = true,
+            ),
         )
 
     /** 本番と同じ JSON `hand_frame`（互換用 `hand` と `source` つき）を UTF-8 で返す。 */
