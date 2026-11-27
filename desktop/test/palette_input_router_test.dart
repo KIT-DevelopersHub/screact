@@ -6,6 +6,7 @@ import 'package:thehack_overlay/core/pointer_state.dart';
 import 'package:thehack_overlay/platform/desktop_bridge.dart';
 import 'package:thehack_overlay/ui/edge_palette.dart';
 import 'package:thehack_overlay/ui/edge_palette_layout.dart';
+import 'package:thehack_overlay/ui/overlay_canvas.dart';
 import 'package:thehack_overlay/ui/palette_input_router.dart';
 
 /// OS 入力に届いたイベントを記録するだけのブリッジ。
@@ -56,6 +57,15 @@ InteractionEvent ev(
   Vec2 p, {
   Vec2 delta = const Vec2(0, 0),
 }) => InteractionEvent(k, p, delta: delta);
+
+/// OS を実際に操作するイベントか（描画・消しゴム・カーソル移動は OS では注入されない）。
+bool _isOsOperation(InteractionKind k) => const {
+  InteractionKind.pressDown,
+  InteractionKind.pressMove,
+  InteractionKind.pressUp,
+  InteractionKind.click,
+  InteractionKind.scroll,
+}.contains(k);
 
 void main() {
   const screen = Size(1920, 1080);
@@ -390,6 +400,193 @@ void main() {
       expect(h.model.selectedColorSlot, 2);
       expect(h.osKinds, isEmpty);
     });
+  });
+
+  group('パレット付近の描画・消しゴムと色選択の競合（#35）', () {
+    test('外から描いた線がスウォッチの上で終わっても、色は変わらず線も切れない', () {
+      final h = _Harness(layout);
+      h.one([ev(InteractionKind.drawDown, outside)]);
+      h.one([ev(InteractionKind.drawMove, swatch(3))]);
+      h.one([ev(InteractionKind.drawMove, swatch(2))]);
+      h.one([ev(InteractionKind.drawUp, swatch(2))]);
+      expect(h.model.selectedColorSlot, OverlayModel.defaultInkColorSlot);
+      expect(h.model.strokes, hasLength(1));
+      expect(h.osKinds.where(_isOsOperation), isEmpty);
+    });
+
+    test('外から始めた消しゴムがパレットに入っても、色・選択表示は変わらず、パレット下のインクは消える', () {
+      final h = _Harness(layout);
+      // パレットの外からスウォッチの上まで、別の手で線を引いておく。
+      final start = Vec2(swatch(1).x - 0.1, swatch(1).y);
+      h.dispatch({
+        2: [
+          ev(InteractionKind.drawDown, start),
+          ev(InteractionKind.drawMove, Vec2(start.x + 0.05, start.y)),
+          ev(InteractionKind.drawMove, swatch(1)),
+        ],
+      });
+      h.dispatch({
+        2: [ev(InteractionKind.pointerMove, outside)],
+      });
+      expect(h.model.strokes, hasLength(1));
+      final colorBefore = h.model.selectedColorSlot;
+
+      // 消しゴムはパレットの外で始め、スウォッチの上へ移ってから離す。
+      h.one([ev(InteractionKind.eraseDown, outside)]);
+      h.one([ev(InteractionKind.eraseMove, swatch(1))]);
+      expect(h.model.track(1)?.erasing, isTrue);
+      // 消しゴム中の手はスウォッチの選択候補（後光）にならない。
+      expect(EdgePaletteOverlay.hoveredSlots(h.model, layout), isEmpty);
+      h.one([ev(InteractionKind.eraseUp, swatch(1))]);
+
+      expect(h.model.selectedColorSlot, colorBefore);
+      // パレットの上にあった点だけが消え、外側の点は残る。
+      final remaining = [for (final s in h.model.strokes) ...s.points];
+      expect(remaining, isNotEmpty);
+      for (final p in remaining) {
+        expect(p.distanceTo(swatch(1)), greaterThan(OverlayModel.eraserRadius));
+      }
+      // OS を操作するイベント（押下・クリック・スクロール）は届かない。
+      expect(h.osKinds.where(_isOsOperation), isEmpty);
+    });
+
+    test('描画中に別の手が色を選んでも、描画中の線の色は変えず、次の線から新しい色にする', () {
+      final h = _Harness(layout);
+      h.dispatch({
+        1: [ev(InteractionKind.drawDown, outside)],
+      });
+      h.dispatch({
+        1: [ev(InteractionKind.drawMove, const Vec2(0.31, 0.5))],
+        2: [ev(InteractionKind.pressDown, swatch(2))],
+      });
+      h.dispatch({
+        1: [ev(InteractionKind.drawMove, const Vec2(0.32, 0.5))],
+        2: [ev(InteractionKind.pressUp, swatch(2))],
+      });
+      expect(h.model.selectedColorSlot, 2);
+      // 色が変わった後も、同じ線に点が足され続け、色は描き始めのまま。
+      h.dispatch({
+        1: [ev(InteractionKind.drawMove, const Vec2(0.33, 0.5))],
+      });
+      h.dispatch({
+        1: [ev(InteractionKind.drawMove, const Vec2(0.34, 0.5))],
+      });
+      expect(h.model.strokes, hasLength(1));
+      expect(h.model.strokes.single.points, hasLength(5));
+      expect(
+        h.model.strokes.single.colorSlot,
+        OverlayModel.defaultInkColorSlot,
+      );
+      h.dispatch({
+        1: [ev(InteractionKind.drawUp, const Vec2(0.34, 0.5))],
+      });
+      expect(
+        h.model.strokes.single.colorSlot,
+        OverlayModel.defaultInkColorSlot,
+      );
+
+      // 次の線から新しい色。
+      h.dispatch({
+        1: [ev(InteractionKind.drawDown, outside2)],
+      });
+      h.dispatch({
+        1: [
+          ev(InteractionKind.drawMove, const Vec2(0.4, 0.6)),
+          ev(InteractionKind.drawUp, const Vec2(0.4, 0.6)),
+        ],
+      });
+      expect(h.model.strokes, hasLength(2));
+      expect(h.model.strokes.last.colorSlot, 2);
+    });
+
+    test('2 本の手が同じフレームで別々の色を確定したら、そのフレームで後に処理した手の色になる', () {
+      for (final order in [
+        [1, 2],
+        [2, 1],
+      ]) {
+        final h = _Harness(layout);
+        final slotOf = {1: 1, 2: 3};
+        h.dispatch({
+          for (final id in order)
+            id: [ev(InteractionKind.pressDown, swatch(slotOf[id]!))],
+        });
+        h.dispatch({
+          for (final id in order)
+            id: [ev(InteractionKind.pressUp, swatch(slotOf[id]!))],
+        });
+        expect(h.model.selectedColorSlot, slotOf[order.last], reason: '$order');
+        // 共有の 1 色。どちらの手の次の線も同じ色になる。
+        h.dispatch({
+          1: [ev(InteractionKind.drawDown, outside)],
+          2: [ev(InteractionKind.drawDown, outside2)],
+        });
+        h.dispatch({
+          1: [
+            ev(InteractionKind.drawMove, const Vec2(0.3, 0.6)),
+            ev(InteractionKind.drawUp, const Vec2(0.3, 0.6)),
+          ],
+          2: [
+            ev(InteractionKind.drawMove, const Vec2(0.35, 0.65)),
+            ev(InteractionKind.drawUp, const Vec2(0.35, 0.65)),
+          ],
+        });
+        expect(
+          {for (final s in h.model.strokes) s.colorSlot},
+          {slotOf[order.last]},
+          reason: '$order',
+        );
+        expect(h.osKinds.where(_isOsOperation), isEmpty, reason: '$order');
+      }
+    });
+
+    test('主トラックでない手がパレットを押しても色を選べ、その押下は OS へ流れない', () {
+      final h = _Harness(layout);
+      // 主トラック（1）はパレットの外でドラッグ中。2 本目の手がパレットで色を選ぶ。
+      h.dispatch({
+        1: [ev(InteractionKind.pressDown, outside)],
+        2: [ev(InteractionKind.pressDown, swatch(1))],
+      });
+      h.dispatch({
+        1: [ev(InteractionKind.pressMove, outside2)],
+        2: [ev(InteractionKind.pressUp, swatch(1))],
+      });
+      h.dispatch({
+        1: [ev(InteractionKind.pressUp, outside2)],
+      });
+      expect(h.model.selectedColorSlot, 1);
+      // OS には主トラックのドラッグだけが届く（2 本目の手の押下は混ざらない）。
+      expect(h.osKinds, [
+        InteractionKind.pressDown,
+        InteractionKind.pressMove,
+        InteractionKind.pressUp,
+      ]);
+      for (final e in h.bridge.applied) {
+        expect(layout.hitTestNormalized(e.screen), EdgePaletteHit.none);
+      }
+    });
+  });
+
+  testWidgets('パレットはインクの下に描く（パレットがインクの上に重ならない）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OverlayWithEdgePalette(
+          model: OverlayModel(),
+          showEdgePalette: true,
+        ),
+      ),
+    );
+    final stack = tester.widget<Stack>(
+      find
+          .descendant(
+            of: find.byType(OverlayWithEdgePalette),
+            matching: find.byType(Stack),
+          )
+          .first,
+    );
+    final palette = stack.children.indexWhere((w) => w is EdgePaletteOverlay);
+    final ink = stack.children.indexWhere((w) => w is OverlayCanvas);
+    expect(palette, isNonNegative);
+    expect(ink, greaterThan(palette));
   });
 
   testWidgets('オーバーレイは描画に使ったレイアウトを入力判定用に知らせる', (tester) async {
