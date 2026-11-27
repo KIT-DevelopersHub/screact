@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'geom.dart';
 import 'interaction_engine.dart';
 
-/// 描画中／確定したインクストローク（画面正規化点列）。trackId でトラック別に
-/// 色分けする（2人同時描画の識別）。
+/// 描画中／確定したインクストローク（画面正規化点列）。色は描画開始時の
+/// 描画色（[OverlayModel.selectedColorSlot]）を [colorSlot] に保存し、以後変えない。
 class InkStroke {
   final List<Vec2> points;
   final int trackId;
@@ -57,6 +57,7 @@ class InkStroke {
 
 /// 1トラック分の表示状態（カーソル・押下・骨格）。
 class TrackVisual {
+  /// カーソルと骨格の識別色スロット（トラック別）。インクの描画色には使わない。
   final int colorSlot;
   Vec2? cursor;
   bool pressed = false;
@@ -133,16 +134,23 @@ class OverlayModel extends ChangeNotifier {
   /// 画面幅の約1%（1920px幅で約19px）。末尾トリム前の全点で測る。
   static const double microStrokeMaxPathLength = 0.01;
 
-  /// ユーザーがパレットで選んだ描画色スロット（null=トラック別自動色にフォールバック）。
-  int? _selectedColorSlot;
-  int? get selectedColorSlot => _selectedColorSlot;
+  /// 描画色（インク色）の初期スロット（0 = 青）。
+  static const int defaultInkColorSlot = 0;
 
-  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する。
-  /// 同じ色を再選択したら選択解除し、トラック別自動色へ戻す。
-  void selectColorSlot(int? slot) {
-    final next = _selectedColorSlot == slot ? null : slot;
-    if (next == _selectedColorSlot) return;
-    _selectedColorSlot = next;
+  /// 利用者がパレットで選んだ描画色スロット。trackId のライフサイクルとは
+  /// 独立しており、手の再認識（新しい trackId）・画角外移動・追跡喪失・
+  /// Clear All では変わらない。複数の手・利用者で共有の 1 色。
+  /// カーソルと骨格の識別色（[TrackVisual.colorSlot]）とは別物。
+  int _selectedColorSlot = defaultInkColorSlot;
+  int get selectedColorSlot => _selectedColorSlot;
+
+  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する
+  /// （描画済みの線は変色しない）。同じ色を再選択しても選択は外れない。
+  /// 範囲外のスロットは無視する。
+  void selectColorSlot(int slot) {
+    if (slot < 0 || slot >= colorSlotCount) return;
+    if (slot == _selectedColorSlot) return;
+    _selectedColorSlot = slot;
     notifyListeners();
   }
 
@@ -201,11 +209,11 @@ class OverlayModel extends ChangeNotifier {
         v.erasing = false;
         // drawUp なしで次の描画が始まった場合も、前のストロークを確定する。
         _finishStroke(trackId, trimTail: false);
-        // ユーザーがパレットで選んだ色を優先。未選択ならトラック別自動色。
+        // 描画色は選択中のインク色だけで決める（トラックの識別色は使わない）。
         final stroke = InkStroke(
           [e.screen],
           trackId: trackId,
-          colorSlot: _selectedColorSlot ?? v.colorSlot,
+          colorSlot: _selectedColorSlot,
         );
         _active[trackId] = stroke;
         final startMs = _nowMs();

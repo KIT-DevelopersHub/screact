@@ -5,7 +5,7 @@ import 'overlay_canvas.dart';
 
 /// オーバーレイ右下の描画色パレット。スウォッチをタップすると、以後の新規
 /// ストロークへその色を適用する（ユーザー選択優先）。選択中はリングと拡大で
-/// ハイライトし、同じ色をもう一度押すとトラック別自動色へ戻す。
+/// ハイライトする。同じ色をもう一度押しても選択は外れない（自動色へは戻らない）。
 ///
 /// 色は [OverlayCanvas.colorForSlot]（インク描画と同じ正本）から引く。
 class ColorPalette extends StatelessWidget {
