@@ -53,7 +53,7 @@ Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_ac
 
 初回接続では`pairingToken`へPC画面に表示された6桁コードを設定し、`resumeToken`は省略する。認証成功時、PCは暗号学的乱数生成器で32 byteを生成し、パディングなしBase64URLへ変換した`resumeToken`を`hello_ack`へ設定する。Androidはホスト、ポート、`resumeToken`を保存し、次回起動では`pairingToken`を省略して保存済み`resumeToken`を送る。`pairingToken`と`resumeToken`は排他的で、必ずどちらか一方だけを送る。
 
-`calibrationRequired=true`ならAndroidはスマホ固定とPCでの配置確認を案内し、位置合わせモードへ入る。PCは利用者がPC上の`配置OK`を押すまでArUcoマーカーを表示しない。`配置OK`はPC内のUI操作であり、Android・PC間の新しい通信メッセージは必要としない。`calibrationRequired=false`なら通常トラッキングモードへ入る。
+`calibrationRequired=true`ならAndroidはスマホ固定を案内し、位置合わせモードへ入る。PCは位置合わせを開始するまでArUcoマーカーを表示しない。現在のPCは、未校正のまま`hello`の認証が完了すると、自動で位置合わせを開始する。利用者はPCの位置合わせページで配置確認操作（画面表記: `位置合わせをはじめる`）を押して、位置合わせを開始し直すこともできる。この操作はPC内のUI操作であり、Android・PC間の新しい通信メッセージは必要としない。`calibrationRequired=false`なら通常トラッキングモードへ入る。
 
 PCアプリを起動するたびに位置合わせ状態を未完了から開始し、最初の`hello_ack`では`calibrationRequired=true`を返す。同一PCプロセス内で位置合わせ完了後に一時的な通信断が発生し、`cameraFacing`も前回位置合わせ時と同じ場合だけ、再接続時に`calibrationRequired=false`を返して確認済み位置合わせを再利用する。Androidは必要に応じ、メモリ上に保持した`calibration_markers`を新しい`sessionId`で再送できる。手動切断、接続先変更、PCプロセス再起動では位置合わせを再利用しない。
 
@@ -91,7 +91,7 @@ PCはサーバ開始時に6桁コードを生成して画面に表示し、`hell
 
 チーム確定のシーケンス（詳細図は [位置合わせフロー](./work/architecture/calibration.md)）。
 
-1. PC側で「スマホ設置完了」を押すと、PCは`control_message`（`set_mode: calibration`）を送り、同時に四隅判定用のArUcoターゲット画像（`android/tools/calibration-target-1920x1080.png` と同一・デスクトップは `desktop/assets/` に同梱）をオーバーレイ最前面へ全画面表示する。
+1. PCが位置合わせを開始すると（未校正のまま接続が確立したとき、位置合わせ後に異なる`cameraFacing`で再接続したとき、または利用者がPCの位置合わせページで「位置合わせをはじめる」を押したとき）、PCは`control_message`（`set_mode: calibration`）を送り、同時に四隅判定用のArUcoターゲット画像（`android/tools/calibration-target-1920x1080.png` と同一・デスクトップは `desktop/assets/` に同梱）をオーバーレイ最前面へ全画面表示する。
 2. Androidは4つのID（10=左上, 11=右上, 12=右下, 13=左下, DICT_4X4_50）が安定検出されるまでループし、各マーカーのIDと中心・4頂点の正規化座標を`calibration_markers`で送る（生の検出座標のみ。対応付けはしない）。
 3. PC側で「マーカーIDと画面四隅の対応付け」を行い、ホモグラフィ行列を作成・保存する。ID 10..13が揃わない場合のみ幾何順序（TL/TR/BR/BL並べ替え）へフォールバックする。
 4. 位置合わせ成功時、PCは`control_message`（`set_mode: tracking`）を返す。これが「画面位置合わせ完了」の通知であり、Androidはマーカー検出ループを抜けて通常トラッキングへ移る。
@@ -202,7 +202,7 @@ PCは安定マーカーを受信した後、任意で`calibration_status`を返�
 
 `status`は`processing`、`retry_required`、`complete`。再試行理由は`markers_not_visible`、`invalid_geometry`、`unstable`、`screen_mismatch`、`internal_error`とする。`complete`後もPCは`control_message set_mode=tracking`を送り、Androidはこのモード切替を操作可能の最終条件とする。旧PCが`calibration_status`を省略して直接`set_mode=tracking`を送る経路も有効である。
 
-位置合わせの正常な順序は、PCで`配置OK`、マーカー表示、Androidの有効5フレーム安定、`calibration_markers`、PCの`processing`、`complete`、`set_mode=tracking`とする。PCは`set_mode=tracking`を送る前にマーカーを非表示にする。
+位置合わせの正常な順序は、PCでの位置合わせ開始（自動、または画面表記`位置合わせをはじめる`の配置確認操作）、マーカー表示、Androidの有効5フレーム安定、`calibration_markers`、PCの`processing`、`complete`、`set_mode=tracking`とする。PCは`set_mode=tracking`を送る前にマーカーを非表示にする。
 
 ## 送信方針
 

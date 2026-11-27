@@ -303,7 +303,7 @@ void main() {
       });
       await ack.future.timeout(const Duration(seconds: 5));
 
-      // 「スマホ設置完了」でキャリブ画像を表示した状態を再現。
+      // 位置合わせ開始でキャリブ画像を表示した状態を再現。
       flow.start(engine.calibrationCount);
       expect(flow.showingTarget, isTrue);
 
