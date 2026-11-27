@@ -8,6 +8,7 @@ import '../core/interaction_engine.dart';
 import '../core/multi_hand_engine.dart';
 import '../protocol/input_frame.dart';
 import '../protocol/messages.dart';
+import 'latency_probe.dart';
 
 /// 接続状態のスナップショット（デバッグ表示用）。
 class ServerStatus {
@@ -77,6 +78,9 @@ class InputServer {
   /// hand_frame が途絶えても押下・描画を猶予後に解除するため。
   final Duration lostTrackCheckInterval;
 
+  /// hand_frame の区間計測（null なら計測しない＝既定OFF）。
+  final LatencyProbe? latencyProbe;
+
   HttpServer? _http;
   WebSocket? _socket;
   Timer? _helloTimer;
@@ -93,6 +97,12 @@ class InputServer {
   InputFrame? _pending;
   bool _processing = false;
 
+  // 区間計測用の時刻（latencyProbe が null の間は使わない）。
+  int _pendingReceiveMicros = 0;
+  int _pendingParseMicros = 0;
+  int _osMicros = 0;
+  int _overlayMicros = 0;
+
   InputServer({
     required this.engine,
     required this.onEvents,
@@ -108,6 +118,7 @@ class InputServer {
     this.acceptCalibrationMessages = true,
     this.onLog,
     this.lostTrackCheckInterval = const Duration(milliseconds: 100),
+    this.latencyProbe,
   });
 
   void _log(String m) => onLog?.call(m);
@@ -209,6 +220,7 @@ class InputServer {
     // close/error の遅延通知や拒否済みソケットからのデータが、後から確立した
     // 現在のセッションを変更しないよう、全受信をソケットidentityで守る。
     if (!identical(_socket, source)) return;
+    final receiveMicros = latencyProbe?.now() ?? 0;
     if (_sessionId != null) _armInactivityTimeout(source);
     Map<String, dynamic> j;
     try {
@@ -233,7 +245,7 @@ class InputServer {
             _emit(error: 'invalid hand_frame (discarded)');
             break;
           }
-          _enqueueFrame(frame);
+          _enqueueFrame(frame, receiveMicros);
           break;
         case 'calibration_markers':
           _onCalibration(CalibrationMarkers.fromJson(j));
@@ -396,8 +408,20 @@ class InputServer {
     );
   }
 
-  void _enqueueFrame(InputFrame f) {
+  void _enqueueFrame(InputFrame f, int receiveMicros) {
     if (_sessionId == null) return; // ハンドシェイク前は無視
+    final probe = latencyProbe;
+    if (probe != null) {
+      final parseMicros = probe.now();
+      probe.onReceived(
+        receiveMicros: receiveMicros,
+        parseMicros: parseMicros,
+        handCount: f.tracks.length,
+        replacedPending: _pending != null,
+      );
+      _pendingReceiveMicros = receiveMicros;
+      _pendingParseMicros = parseMicros;
+    }
     _pending = f; // 最新で置換
     _drain();
   }
@@ -408,10 +432,16 @@ class InputServer {
     while (_pending != null) {
       final f = _pending!;
       _pending = null;
+      final probe = latencyProbe;
+      final receiveMicros = _pendingReceiveMicros;
+      final parseMicros = _pendingParseMicros;
+      final startMicros = probe?.now() ?? 0;
       // (sessionId, trackId) ごとに分離したエンジンで処理。単調増加でない
       // frameId は onInputFrame が null を返す＝フレーム全体を破棄する。
       final byTrack = engine.onInputFrame(f);
+      final engineMicros = probe?.now() ?? 0;
       if (byTrack == null) {
+        probe?.onStale();
         _log('失効した hand_frame を破棄（frameId=${f.frameId}）');
         _emit(error: 'stale hand_frame (discarded)');
         await Future<void>.delayed(Duration.zero);
@@ -422,7 +452,17 @@ class InputServer {
       _lastFrameId = f.frameId;
       _handDetected = f.hasHands;
       onFrame?.call(f);
-      _dispatch(byTrack);
+      _dispatch(byTrack, probe);
+      if (probe != null) {
+        probe.onProcessed(
+          receiveMicros: receiveMicros,
+          parseMicros: parseMicros,
+          startMicros: startMicros,
+          engineMicros: engineMicros,
+          osMicros: byTrack.isEmpty ? engineMicros : _osMicros,
+          overlayMicros: byTrack.isEmpty ? engineMicros : _overlayMicros,
+        );
+      }
       _emit();
       _syncLostTrackTimer();
       await Future<void>.delayed(Duration.zero); // 他イベントに譲る
@@ -446,6 +486,7 @@ class InputServer {
       final byTrack = engine.expireLostTracks();
       if (byTrack.isNotEmpty) {
         _log('hand_frame 途絶中に猶予が切れたトラックを解除: ${byTrack.keys.toList()}');
+        // 受信フレームの区間ではないので計測（probe）には渡さない。
         _dispatch(byTrack);
         _emit();
       }
@@ -454,11 +495,17 @@ class InputServer {
   }
 
   /// 安定して保持する主トラックのイベントをOS入力へ、全トラックをオーバーレイへ。
-  void _dispatch(Map<int, List<InteractionEvent>> byTrack) {
+  /// [probe] があれば OS 入力とオーバーレイ更新の呼び出し完了時刻を残す。
+  void _dispatch(
+    Map<int, List<InteractionEvent>> byTrack, [
+    LatencyProbe? probe,
+  ]) {
     if (byTrack.isEmpty) return;
     final primaryEvents = engine.primaryEventsOf(byTrack);
     if (primaryEvents != null) onEvents(primaryEvents);
+    if (probe != null) _osMicros = probe.now();
     onTrackEvents?.call(byTrack);
+    if (probe != null) _overlayMicros = probe.now();
   }
 
   void requestMode(String mode) {
