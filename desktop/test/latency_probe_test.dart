@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:thehack_overlay/core/geom.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/core/multi_hand_engine.dart';
@@ -285,5 +286,107 @@ void main() {
     // 時計は1回読むごとに100µs進むので、各区間は正の値になる。
     expect(s.startToEngine.p50Micros, greaterThan(0));
     expect(s.receiveToOverlay.p50Micros, greaterThan(0));
+  });
+
+  test('InputServer: 猶予切れタイマーによる解除は受信フレームの区間として数えない', () async {
+    var clock = 0;
+    var reads = 0;
+    final probe = LatencyProbe(
+      sink: (_) {},
+      nowMicros: () {
+        reads++;
+        return clock += 100;
+      },
+      reportIntervalMicros: 1 << 40,
+    );
+    final osEvents = <InteractionEvent>[];
+    final engine = MultiHandEngine(
+      calibrationEngine: InteractionEngine(),
+      trackLossGraceMs: 60,
+    );
+    engine.calibrate(MockHand.markers());
+    final server = InputServer(
+      engine: engine,
+      port: 0,
+      onEvents: osEvents.addAll,
+      onTrackEvents: (_) {},
+      onStatus: (_) {},
+      latencyProbe: probe,
+      lostTrackCheckInterval: const Duration(milliseconds: 20),
+    );
+    await server.start();
+    addTearDown(server.stop);
+
+    final ws = await WebSocket.connect(
+      'ws://localhost:${server.boundPort}/ws/v1/input',
+    );
+    addTearDown(ws.close);
+    final ack = Completer<String>();
+    ws.listen((data) {
+      final j = jsonDecode(data as String) as Map<String, dynamic>;
+      if (j['messageType'] == 'hello_ack' && !ack.isCompleted) {
+        ack.complete(j['sessionId'] as String);
+      }
+    });
+    ws.add(
+      jsonEncode({'schemaVersion': 1, 'messageType': 'hello', 'deviceId': 'x'}),
+    );
+    final session = await ack.future.timeout(const Duration(seconds: 5));
+
+    Map<String, dynamic> frame(int id, {required bool hand}) {
+      final f = MockHand.at(
+        frameId: id,
+        tip: const Vec2(0.4, 0.5),
+        pinch: true,
+      );
+      return {
+        'schemaVersion': 1,
+        'messageType': 'hand_frame',
+        'sessionId': session,
+        'frameId': id,
+        'capturedAtMonotonicMs': id * 33,
+        'hands': [
+          if (hand)
+            {
+              'trackId': 7,
+              'landmarks': [
+                for (final l in f.landmarks) [l.x, l.y, l.z],
+              ],
+            },
+        ],
+      };
+    }
+
+    Future<void> waitUntil(bool Function() cond) async {
+      for (var i = 0; i < 200 && !cond(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
+
+    ws.add(jsonEncode(frame(1, hand: true)));
+    ws.add(jsonEncode(frame(2, hand: true)));
+    ws.add(jsonEncode(frame(3, hand: false))); // 最後に手が消え、途絶える。
+    await waitUntil(() {
+      final s = probe.window.summarize(0);
+      return s.received >= 3 && s.processed + s.dropped >= 3;
+    });
+    await waitUntil(() => engine.hasLostTracks);
+    expect(engine.lostTrackIds, [7]);
+    final before = probe.window.summarize(0);
+    final readsBefore = reads;
+
+    // フレームは届かず、タイマーが猶予切れを判定して解除を流す。
+    await waitUntil(
+      () => osEvents.any((ev) => ev.kind == InteractionKind.pressUp),
+    );
+    expect(osEvents.map((ev) => ev.kind), contains(InteractionKind.pressUp));
+    expect(engine.hasLostTracks, isFalse);
+
+    final after = probe.window.summarize(0);
+    expect(reads, readsBefore, reason: 'タイマー経路では計測の時計を読まない');
+    expect(after.received, before.received);
+    expect(after.processed, before.processed);
+    expect(after.receiveToOverlay.samples, before.receiveToOverlay.samples);
+    expect(after.engineToOs.samples, before.engineToOs.samples);
   });
 }
