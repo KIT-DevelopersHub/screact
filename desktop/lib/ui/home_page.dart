@@ -97,6 +97,8 @@ class _HomePageState extends State<HomePage> {
   bool _penGestureEnabled = true;
   bool _eraserGestureEnabled = true;
   bool _scrollGestureEnabled = true;
+  // 2人操作でOS操作権を受け渡す試作（#23）。既定OFF・永続化・即時反映する。
+  bool _primaryHandoverEnabled = false;
   bool _startingServer = false;
   // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
   // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
@@ -165,6 +167,7 @@ class _HomePageState extends State<HomePage> {
     _syncCalibrationDraftFromConfig();
     _loadShowSkeleton();
     _loadGestureToggles();
+    _loadPrimaryHandover();
 
     _pairing =
         widget.pairingController ??
@@ -1744,6 +1747,35 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// OS操作権の受け渡し（試作）の永続化先。内容は '1'/'0'。
+  File? _primaryHandoverPrefsFile() => _userSettingsFile('primary_handover');
+
+  void _loadPrimaryHandover() {
+    try {
+      final f = _primaryHandoverPrefsFile();
+      if (f != null && f.existsSync()) {
+        _primaryHandoverEnabled = f.readAsStringSync().trim() == '1';
+      }
+    } catch (_) {
+      // 読めなければ既定OFFのまま。
+    }
+    _engine.primaryHandoverEnabled = _primaryHandoverEnabled;
+  }
+
+  void _setPrimaryHandover(bool v) {
+    setState(() => _primaryHandoverEnabled = v);
+    _engine.primaryHandoverEnabled = v;
+    try {
+      final f = _primaryHandoverPrefsFile();
+      if (f != null) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(v ? '1' : '0', flush: true);
+      }
+    } catch (_) {
+      // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
+    }
+  }
+
   void _setClickGesture(bool v) =>
       _setGestureToggle(() => _clickGestureEnabled = v);
   void _setPenGesture(bool v) =>
@@ -1849,6 +1881,14 @@ class _HomePageState extends State<HomePage> {
                           value: _scrollGestureEnabled,
                           onChanged: _setScrollGesture,
                         ),
+                        tile(
+                          key: const ValueKey('gesture-toggle-handover'),
+                          icon: Icons.swap_horiz_rounded,
+                          title: '操作権の受け渡し（試作）',
+                          subtitle: '2人操作時、もう1人が0.5秒つまみ続けるとOS操作を引き継ぐ（初期値OFF）',
+                          value: _primaryHandoverEnabled,
+                          onChanged: _setPrimaryHandover,
+                        ),
                       ],
                     ),
                   ),
@@ -1914,6 +1954,7 @@ class _HomePageState extends State<HomePage> {
     _persistShowSkeleton();
     _applyGestureTogglesToEngine();
     _persistGestureToggles();
+    if (_primaryHandoverEnabled) _setPrimaryHandover(false);
     _showMessage('設定を初期化しました');
   }
 
