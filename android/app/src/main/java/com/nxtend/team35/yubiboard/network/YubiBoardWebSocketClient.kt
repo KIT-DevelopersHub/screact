@@ -1,6 +1,7 @@
 package com.nxtend.team35.yubiboard.network
 
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
+import com.nxtend.team35.yubiboard.diagnostics.PerfMonitor
 import com.nxtend.team35.yubiboard.protocol.CaptureMode
 import com.nxtend.team35.yubiboard.protocol.CalibrationMarkersMessage
 import com.nxtend.team35.yubiboard.protocol.CameraChangedMessage
@@ -104,7 +105,11 @@ class YubiBoardWebSocketClient(
     }
 
     fun submitHand(result: HandDetectionResult) {
-        if (latestHand.getAndSet(result) != null) AppDiagnostics.increment("network.hand_replaced")
+        val enqueuedAtNanos = PerfMonitor.now()
+        result.enqueuedAtNanos = enqueuedAtNanos
+        val replaced = latestHand.getAndSet(result) != null
+        if (replaced) AppDiagnostics.increment("network.hand_replaced")
+        PerfMonitor.onEnqueue(result.inferenceDoneAtNanos, enqueuedAtNanos, replaced)
     }
 
     fun submitCalibration(result: MarkerDetectionResult) {
@@ -322,6 +327,7 @@ class YubiBoardWebSocketClient(
         val encoded = ProtocolCodec.encode(message)
         if (socket.send(encoded)) {
             lastHandSentAtMs.set(now)
+            PerfMonitor.onSent(result.analyzedAtNanos, result.enqueuedAtNanos, PerfMonitor.now())
             AppDiagnostics.increment("network.hand_sent")
             AppDiagnostics.increment("network.bytes_sent", encoded.toByteArray().size.toLong())
             AppDiagnostics.gauge("network.last_frame_id", message.frameId)
