@@ -79,7 +79,8 @@ void main() {
       painter.layout.swatches.map((s) => s.rect).toList(),
       expected.swatches.map((s) => s.rect).toList(),
     );
-    expect(painter.selectedSlot, isNull);
+    // 描画色は初期色（青）で固定され、未選択（null）にはならない（#31）。
+    expect(painter.selectedSlot, OverlayModel.defaultInkColorSlot);
   });
 
   testWidgets('表示の切り替えでパレットが消える（インクの描画は残る）', (tester) async {
@@ -113,10 +114,10 @@ void main() {
     await tester.pump();
     expect(_painter(tester).hoveredSlots, {1});
 
-    // 同じ色をもう一度選ぶと選択解除（トラック別自動色）になり、枠も消える。
+    // 同じ色をもう一度選んでも選択は外れず、枠も残る（#31）。
     model.selectColorSlot(2);
     await tester.pump();
-    expect(_painter(tester).selectedSlot, isNull);
+    expect(_painter(tester).selectedSlot, 2);
   });
 
   testWidgets('golden: 画面端パレット（選択中の枠とカーソルの強調）', (tester) async {
