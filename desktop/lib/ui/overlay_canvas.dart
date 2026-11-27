@@ -22,6 +22,15 @@ class OverlayCanvas extends StatelessWidget {
     Color(0xFFB7791F), // 琥珀（保険）
   ];
 
+  /// カーソルを表示中のトラックへ、色以外の識別用の表示番号（1, 2, ...）を割り当てる。
+  /// trackId の昇順で並べて 1 から振るので、同じ顔ぶれなら番号は毎フレーム安定する。
+  /// 表示中が 1 トラック以下なら空を返す（1 人利用では印を出さない）。
+  static Map<int, int> cursorBadgeNumbers(Iterable<int> visibleTrackIds) {
+    final ids = visibleTrackIds.toSet().toList()..sort();
+    if (ids.length < 2) return const {};
+    return {for (var i = 0; i < ids.length; i++) ids[i]: i + 1};
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -67,6 +76,12 @@ class _OverlayPainter extends CustomPainter {
       // キャッシュされるため、毎フレーム再構築されるのは描画中の1本だけ。
       canvas.drawPath(stroke.pathFor(size), ink);
     }
+
+    // カーソル表示中のトラックへ表示番号を割り当てる（2 トラック以上のときだけ）。
+    final badges = OverlayCanvas.cursorBadgeNumbers([
+      for (final id in model.trackIds)
+        if (model.track(id)?.cursor != null) id,
+    ]);
 
     // トラックごとの骨格＋カーソル。
     for (final id in model.trackIds) {
@@ -115,9 +130,58 @@ class _OverlayPainter extends CustomPainter {
               ..color = Colors.white,
           );
         }
+        final number = badges[id];
+        if (number != null) {
+          // 押下中(半径12)・消しゴムの輪の外側、右上に置いて見た目と重ならないようにする。
+          final r =
+              v.erasing
+                  ? OverlayModel.eraserRadius * size.shortestSide
+                  : _cursorPressedRadius;
+          _paintBadge(canvas, o, r, number, color);
+        }
       }
     }
     canvas.restore();
+  }
+
+  static const double _cursorPressedRadius = 12;
+  static const double _badgeRadius = 8;
+
+  /// カーソル中心 [center]・半径 [cursorRadius] の右上の外側に、番号入りの小さな丸を描く。
+  void _paintBadge(
+    Canvas canvas,
+    Offset center,
+    double cursorRadius,
+    int number,
+    Color color,
+  ) {
+    // 中心から 45° 方向へ、カーソルの縁＋余白＋印の半径だけ離す。
+    const diag = 0.70710678;
+    final d = cursorRadius + 2 + _badgeRadius;
+    final b = center + Offset(d * diag, -d * diag);
+    canvas.drawCircle(b, _badgeRadius, Paint()..color = color);
+    canvas.drawCircle(
+      b,
+      _badgeRadius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = Colors.white,
+    );
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '$number',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          height: 1,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, b - Offset(tp.width / 2, tp.height / 2));
+    tp.dispose();
   }
 
   void _paintSkeleton(Canvas canvas, Size size, List<Vec2> lm, Color color) {

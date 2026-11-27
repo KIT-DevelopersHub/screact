@@ -107,6 +107,10 @@ void main() {
       findsOneWidget,
     );
     expect(
+      find.byKey(const ValueKey('workspace-show-edge-palette')),
+      findsOneWidget,
+    );
+    expect(
       find.byType(OverlayCanvas),
       findsNothing,
       reason: 'アプリ内workspaceには描画キャンバスを置かない',
