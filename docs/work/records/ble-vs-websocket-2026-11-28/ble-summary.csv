@@ -1,0 +1,10 @@
+transport,condition,hands,target_fps,payload,frame_bytes,units_per_frame,generated,sent_by_android,replaced_unsent,unit_failures,received,loss_vs_generated_pct,missing_in_range,recv_fps,interval_p50_ms,interval_p95_ms,interval_max_ms,throughput_kBps,link_kBps,run_s,error,rtt_n,rtt_p50_ms,rtt_p95_ms,rtt_max_ms,rtt_mean_ms,mtu,conn_interval_ms,peripheral_latency,supervision_timeout_ms,phy_tx_2m,phy_rx_2m,conn_params_request
+ble,1h-20fps-bin,1,20,bin,148.0,1,601,601,0,0,601,0.0,0,20.0,45.27,60.38,74.91,2.97,2.97,30.0,,132,29.36,33.21,46.09,28.79,517,15.0,0,2000,True,True,throughput
+ble,1h-30fps-bin,1,30,bin,148.0,1,901,901,0,0,901,0.0,0,30.0,30.09,45.17,49.31,4.45,4.45,30.0,,133,30.16,41.39,44.58,30.49,517,15.0,0,2000,True,True,throughput
+ble,1h-60fps-bin,1,60,bin,148.0,1,1802,1802,0,0,1802,0.0,0,60.0,15.03,30.02,39.9,8.89,8.89,30.0,,136,30.16,44.25,55.01,31.26,517,15.0,0,2000,True,True,throughput
+ble,2h-20fps-bin,2,20,bin,278.0,1,601,601,0,0,601,0.0,0,20.0,45.25,60.37,74.93,5.57,5.57,30.0,,132,28.65,42.92,45.42,28.09,517,15.0,0,2000,True,True,throughput
+ble,2h-30fps-bin,2,30,bin,278.0,1,901,901,0,0,901,0.0,0,30.0,30.14,45.25,58.68,8.35,8.35,30.0,,133,30.26,43.97,45.95,31.34,517,15.0,0,2000,True,True,throughput
+ble,2h-60fps-bin,2,60,bin,278.0,1,1802,1802,0,0,1802,0.0,0,60.0,15.06,29.83,43.9,16.69,16.69,30.0,,136,30.36,44.3,58.76,32.22,517,15.0,0,2000,True,True,throughput
+ble,1h-20fps-json,1,20,json,2057.0,5,601,600,0,0,601,0.0,0,20.0,46.37,88.98,122.09,41.21,41.91,30.0,,126,29.91,188.97,645.61,50.08,517,15.0,0,2000,True,True,throughput
+ble,1h-30fps-json,1,30,json,2058.0,5,907,906,0,0,907,0.0,0,29.4,30.78,59.93,107.2,60.52,61.55,30.2,,105,43.21,509.93,795.8,104.5,517,15.0,0,2000,True,True,throughput
+ble,2h-30fps-json,2,30,json,2941.0,6,977,970,7,0,970,0.72,7,22.9,38.12,66.04,149.1,67.3,68.26,32.6,,14,1061.73,7830.0,7830.0,2152.22,517,15.0,0,2000,True,True,throughput
