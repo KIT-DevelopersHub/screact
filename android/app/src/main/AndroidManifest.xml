@@ -8,6 +8,15 @@
     <!-- ゼロコンフィグ・ペアリング: UDPブロードキャストの確実な受信用 -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- 経路比較の計測（bench/TransportBenchActivity）だけで使う。本番の接続フローでは使わない。 -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -33,6 +42,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- 計測専用。adb シェルだけが持つ DUMP 権限で保護し、他のアプリからは起動できない。 -->
+        <activity
+            android:name=".bench.TransportBenchActivity"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:screenOrientation="landscape" />
     </application>
 
 </manifest>

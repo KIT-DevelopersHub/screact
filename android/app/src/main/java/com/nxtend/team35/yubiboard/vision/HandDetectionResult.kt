@@ -34,7 +34,15 @@ data class HandDetectionResult(
     /** ランドマークが表示（ミラー補正済み）座標系か。前面カメラも補正するため常に true。 */
     val mirrorCorrected: Boolean = true,
     val cameraFacing: String = "back",
+    /** 性能計測用: 解析スレッドがフレームを受け取った単調時刻（System.nanoTime）。0は未計測。 */
+    val analyzedAtNanos: Long = 0L,
+    /** 性能計測用: MediaPipeの結果を受け取った単調時刻。0は未計測。 */
+    val inferenceDoneAtNanos: Long = 0L,
 ) {
+    /** 性能計測用: 送信キューへ入れた単調時刻。送信側だけが書き、プロトコルには載せない。 */
+    @Volatile
+    var enqueuedAtNanos: Long = 0L
+
     val detected: Boolean get() = hands.isNotEmpty()
     val primaryHand: TrackedHand? get() = hands.minByOrNull(TrackedHand::trackId)
     val landmarks: List<LandmarkPoint> get() = primaryHand?.landmarks.orEmpty()
