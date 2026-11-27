@@ -26,7 +26,8 @@ class HandPose {
     required this.goodSign,
   });
 
-  /// 描画の筆点＝人差し指先端と中指先端の中間点。
+  /// 人差し指先端と中指先端の中間点。現在は消しゴムの代表点（[erasePoint]）に使う。
+  /// 描画の筆点は人差し指先端（[indexTip]）で、InteractionEngine が決める。
   Vec2 get drawPoint =>
       Vec2((indexTip.x + middleTip.x) / 2, (indexTip.y + middleTip.y) / 2);
 
@@ -40,7 +41,7 @@ class HandPose {
 /// 2つの接触ジェスチャーをヒステリシス付きで判定する（境界のチャタリング
 /// ＝線の途切れ・二重判定を防ぐ。ON は比率 onRatio 未満、OFF は offRatio 超）:
 /// - pinch（親指-人差し指の接触）= OSの実クリック/ドラッグ
-/// - fingersTogether（人差し指-中指の接触）= インク描画（中間点を筆点にする）
+/// - fingersTogether（人差し指-中指の接触）= インク描画（筆点は人差し指先端）
 class GestureRecognizer {
   /// UIで扱う認識感度。0は指同士をより近づけないとピンチにならず、
   /// 1はより離れた状態でも接触として認識する。
