@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'calibration_config.dart';
 import 'geom.dart';
 import 'homography.dart';
@@ -16,6 +18,10 @@ import '../protocol/messages.dart';
 /// [trackLossGraceMs] のあいだ状態（押下・描画・ドラッグ）を保ったまま保留し、
 /// 同じ trackId が戻れば続きとして処理する。猶予を過ぎたら確定消失として
 /// 従来どおり安全に解除する。WebSocket切断・停止時の [releaseAll] は猶予なし。
+///
+/// 猶予切れはフレーム到着時に加えて、[expireLostTracks] で時計からも判定する。
+/// hand_frame が途絶えると到着時の判定が走らず、押下・描画が残り続けるため、
+/// 呼び出し側（[InputServer]）が猶予中のトラックがある間だけ周期的に呼ぶ。
 class MultiHandEngine {
   /// 一時欠落の猶予時間の既定値（ms）。Android `HandTrackAssigner` の
   /// `DEFAULT_RETENTION_MS`（300ms）に合わせた暫定値で、実機で調整する。
@@ -31,8 +37,16 @@ class MultiHandEngine {
   /// trackId → 最後にフレームへ現れた時刻（capturedAtMonotonicMs）。
   final Map<int, int> _lastSeenAtMs = {};
 
+  /// trackId → 最後にフレームへ現れた desktop 側の時刻（[_clock] の ms）。
+  /// フレームの capturedAtMonotonicMs は Android の時計なので、時計による
+  /// 猶予切れ判定（[expireLostTracks]）ではこちらだけを使い、混ぜない。
+  final Map<int, int> _lastSeenAtLocalMs = {};
+
   /// 直近フレームに現れず、猶予中の trackId。
   final Set<int> _lostTracks = {};
+
+  /// desktop 側の単調時計（ms）。テストで差し替えられる。
+  final int Function() _clock;
 
   /// 消えた trackId を確定消失とみなすまでの猶予（ms）。
   /// 時刻はフレームの capturedAtMonotonicMs で測る。0 なら即時解除（従来挙動）。
@@ -63,6 +77,7 @@ class MultiHandEngine {
     EngineMode mode = EngineMode.calibration,
     bool smoothingEnabled = true,
     int trackLossGraceMs = defaultTrackLossGraceMs,
+    int Function()? clock,
   }) {
     if (trackLossGraceMs < 0) {
       throw ArgumentError.value(
@@ -78,10 +93,19 @@ class MultiHandEngine {
           mode: mode,
           smoothingEnabled: smoothingEnabled,
         );
-    return MultiHandEngine._(calib, trackLossGraceMs);
+    return MultiHandEngine._(
+      calib,
+      trackLossGraceMs,
+      clock ?? _monotonicClock(),
+    );
   }
 
-  MultiHandEngine._(this._calib, this.trackLossGraceMs)
+  static int Function() _monotonicClock() {
+    final watch = Stopwatch()..start();
+    return () => watch.elapsedMilliseconds;
+  }
+
+  MultiHandEngine._(this._calib, this.trackLossGraceMs, this._clock)
     : _sensitivity = _calib.recognitionSensitivity,
       _smoothing = _calib.smoothingEnabled,
       _clickEnabled = _calib.clickEnabled,
@@ -164,7 +188,10 @@ class MultiHandEngine {
       _tracks.keys.where((id) => !_lostTracks.contains(id));
 
   /// 一時欠落の猶予中で、状態を保留している trackId。
-  Iterable<int> get lostTrackIds => _lostTracks;
+  Iterable<int> get lostTrackIds => UnmodifiableSetView(_lostTracks);
+
+  /// 猶予中のトラックがあるか（時計による猶予切れ判定が要るか）。
+  bool get hasLostTracks => _lostTracks.isNotEmpty;
   int? get primaryTrackId => _primaryTrackId;
 
   // ---- 位置合わせ（session共有）----
@@ -225,6 +252,7 @@ class MultiHandEngine {
     _lastFrameId = frame.frameId;
 
     final now = frame.capturedAtMonotonicMs;
+    final localNow = _clock();
     final previousPrimary = _primaryTrackId;
     _dispatchPrimaryTrackId = null;
     _primaryAcquiredThisFrame = false;
@@ -234,6 +262,7 @@ class MultiHandEngine {
       seen.add(track.trackId);
       _lostTracks.remove(track.trackId);
       _lastSeenAtMs[track.trackId] = now;
+      _lastSeenAtLocalMs[track.trackId] = localNow;
       final events = _engineFor(
         track.trackId,
       ).onFrame(track.toHandFrame(frame.frameId, now));
@@ -288,9 +317,49 @@ class MultiHandEngine {
     return elapsed <= 0 || elapsed >= trackLossGraceMs;
   }
 
+  /// フレーム到着とは別に、desktop 側の時計で猶予切れを判定して解除する。
+  ///
+  /// hand_frame が途絶えた（Android のバックグラウンド移行・カメラ停止など）
+  /// ときに、押下・描画を残さないための手段。猶予中のトラックのうち、
+  /// 最後にフレームへ現れた desktop 時刻から [trackLossGraceMs] 以上経った
+  /// ものを解除して取り除き、trackId→解除イベント列を返す。
+  /// 主トラックを解除した場合は、その解除だけを [primaryEventsOf] で OS へ流す。
+  /// [nowMs] は desktop 側の時計（省略時は [_clock]）。
+  Map<int, List<InteractionEvent>> expireLostTracks([int? nowMs]) {
+    final now = nowMs ?? _clock();
+    _dispatchPrimaryTrackId = null;
+    _primaryAcquiredThisFrame = false;
+    final result = <int, List<InteractionEvent>>{};
+    final expired = _lostTracks
+        .where((id) {
+          final lastSeen = _lastSeenAtLocalMs[id];
+          return lastSeen == null || now - lastSeen >= trackLossGraceMs;
+        })
+        .toList(growable: false);
+    for (final id in expired) {
+      final events = _tracks[id]!.onFrame(
+        HandFrame(
+          frameId: _lastFrameId ?? -1,
+          capturedAtMonotonicMs: _lastSeenAtMs[id] ?? 0,
+          detected: false,
+        ),
+      );
+      if (events.isNotEmpty) result[id] = events;
+      _forget(id);
+      if (id == _primaryTrackId) {
+        // 旧所有者の解除だけを OS へ送り、引き継ぎは次フレーム以降に行う。
+        _dispatchPrimaryTrackId = id;
+        _primaryTrackId = null;
+        _resetPrimaryCandidate();
+      }
+    }
+    return result;
+  }
+
   void _forget(int id) {
     _tracks.remove(id);
     _lastSeenAtMs.remove(id);
+    _lastSeenAtLocalMs.remove(id);
     _lostTracks.remove(id);
   }
 
@@ -343,6 +412,7 @@ class MultiHandEngine {
     }
     _tracks.clear();
     _lastSeenAtMs.clear();
+    _lastSeenAtLocalMs.clear();
     _lostTracks.clear();
     _lastFrameId = null;
     _primaryTrackId = null;

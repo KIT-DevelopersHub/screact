@@ -669,6 +669,80 @@ void main() {
       expect(e.lostTrackIds, isEmpty);
     });
 
+    group('hand_frame が途絶えたときの時計による猶予切れ', () {
+      test('フレームが止まっても猶予後に描画を閉じる', () {
+        var clock = 1000;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        final last = startDrawing(e, 7);
+        // 手が消えたフレームを最後に hand_frame が途絶える。
+        e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+        expect(e.lostTrackIds, [7]);
+        expect(e.hasLostTracks, isTrue);
+
+        // 最後に 7 を見た desktop 時刻から測る（フレーム時刻とは混ぜない）。
+        clock += 299;
+        expect(e.expireLostTracks(), isEmpty, reason: '猶予内は保留');
+        expect(e.lostTrackIds, [7]);
+
+        clock += 1;
+        final expired = e.expireLostTracks();
+        expect(kindsOf(expired, 7), [
+          InteractionKind.drawUp,
+          InteractionKind.release,
+        ]);
+        expect(e.lostTrackIds, isEmpty);
+        expect(e.hasLostTracks, isFalse);
+        expect(e.activeTrackCount, 0);
+        expect(e.expireLostTracks(), isEmpty, reason: '二重に解除しない');
+      });
+
+      test('押下中にフレームが止まっても猶予後に pressUp を OS へ流す', () {
+        var clock = 0;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        e.onInputFrame(frameAt(1, 33, [pinching(7, 0.4)]));
+        clock += 33;
+        e.onInputFrame(frameAt(2, 66, [pinching(7, 0.41)]));
+        expect(e.primaryTrackId, 7);
+        clock += 33;
+        e.onInputFrame(frameAt(3, 99, const []));
+        expect(e.lostTrackIds, [7]);
+
+        final early = e.expireLostTracks(clock + 100);
+        expect(early, isEmpty);
+        expect(e.primaryEventsOf(early), isNull);
+
+        final expired = e.expireLostTracks(clock + 300);
+        final os = e.primaryEventsOf(expired)!.map((ev) => ev.kind);
+        expect(os, contains(InteractionKind.pressUp));
+        expect(os, contains(InteractionKind.release));
+        expect(e.primaryTrackId, isNull);
+      });
+
+      test('猶予中に同じ trackId が戻れば時計の判定でも解除しない', () {
+        var clock = 0;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        final last = startDrawing(e, 7);
+        e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+        clock += 200;
+        e.onInputFrame(frameAt(last + 2, last * 33 + 233, [drawing(7, 0.4)]));
+        clock += 200;
+        expect(e.expireLostTracks(), isEmpty);
+        expect(e.activeTrackIds, [7]);
+      });
+    });
+
+    test('lostTrackIds は変更できないビューで返す', () {
+      final e = calibrated();
+      final last = startDrawing(e, 7);
+      e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+      final ids = e.lostTrackIds;
+      expect(() => (ids as Set<int>).clear(), throwsUnsupportedError);
+      expect(e.lostTrackIds, [7]);
+    });
+
     test('猶予0は従来どおり消えたフレームで即時解除', () {
       final e = calibrated(graceMs: 0);
       e.onInputFrame(frameAt(1, 33, [pinching(7, 0.4)]));

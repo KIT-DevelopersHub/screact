@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:thehack_overlay/core/geom.dart';
 import 'package:thehack_overlay/core/interaction_engine.dart';
 import 'package:thehack_overlay/core/mock_hand.dart';
 import 'package:thehack_overlay/core/multi_hand_engine.dart';
@@ -109,6 +110,96 @@ void main() {
     await waitFrames(5);
     expect(engine.lostTrackIds, isEmpty);
     expect(releasedOf(7), isTrue);
+  });
+
+  test('押下中に hand_frame が途絶えても、猶予後に時計で解除して pressUp を流す',
+      () async {
+    final osEvents = <InteractionEvent>[];
+    final trackEvents = <Map<int, List<InteractionEvent>>>[];
+    final engine = MultiHandEngine(
+      calibrationEngine: InteractionEngine(),
+      trackLossGraceMs: 60,
+    );
+    engine.calibrate(MockHand.markers());
+    final server = InputServer(
+      engine: engine,
+      port: 0,
+      onEvents: osEvents.addAll,
+      onTrackEvents: trackEvents.add,
+      onStatus: (_) {},
+      lostTrackCheckInterval: const Duration(milliseconds: 20),
+    );
+    await server.start();
+    addTearDown(server.stop);
+
+    final ws = await WebSocket.connect(
+      'ws://localhost:${server.boundPort}/ws/v1/input',
+    );
+    addTearDown(ws.close);
+    final ackSession = Completer<String>();
+    ws.listen((data) {
+      final j = jsonDecode(data as String) as Map<String, dynamic>;
+      if (j['messageType'] == 'hello_ack' && !ackSession.isCompleted) {
+        ackSession.complete(j['sessionId'] as String);
+      }
+    });
+    ws.add(
+      jsonEncode({'schemaVersion': 1, 'messageType': 'hello', 'deviceId': 'x'}),
+    );
+    final session = await ackSession.future.timeout(const Duration(seconds: 5));
+
+    Map<String, dynamic> frame(int id, List<Map<String, dynamic>> hands) {
+      final f = MockHand.at(frameId: id, tip: const Vec2(0.4, 0.5), pinch: true);
+      return {
+        'schemaVersion': 1,
+        'messageType': 'hand_frame',
+        'sessionId': session,
+        'frameId': id,
+        'capturedAtMonotonicMs': id * 33,
+        'hands': hands.isEmpty
+            ? const []
+            : [
+                {
+                  'trackId': 7,
+                  'landmarks': [
+                    for (final l in f.landmarks) [l.x, l.y, l.z],
+                  ],
+                },
+              ],
+      };
+    }
+
+    Future<void> waitUntil(bool Function() cond) async {
+      for (var i = 0; i < 200 && !cond(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
+
+    ws.add(jsonEncode(frame(1, [{}])));
+    ws.add(jsonEncode(frame(2, [{}])));
+    await waitUntil(
+      () => osEvents.any((ev) => ev.kind == InteractionKind.pressDown),
+    );
+    expect(
+      osEvents.map((ev) => ev.kind),
+      contains(InteractionKind.pressDown),
+    );
+
+    // 手が消えたフレームを最後に hand_frame を止める（heartbeat もなし）。
+    ws.add(jsonEncode(frame(3, const [])));
+    await waitUntil(
+      () => osEvents.any((ev) => ev.kind == InteractionKind.pressUp),
+    );
+    expect(osEvents.map((ev) => ev.kind), contains(InteractionKind.pressUp));
+    expect(engine.lostTrackIds, isEmpty);
+    expect(engine.activeTrackCount, 0);
+    expect(
+      trackEvents
+          .expand((m) => m[7] ?? const <InteractionEvent>[])
+          .map((ev) => ev.kind),
+      contains(InteractionKind.release),
+      reason: 'オーバーレイへも解除を流す',
+    );
   });
 
   test('session不一致の hand_frame は全体破棄される', () async {

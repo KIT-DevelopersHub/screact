@@ -73,10 +73,15 @@ class InputServer {
   /// 接続診断ログ（UI/ファイルへ流す。null なら無効）。
   final void Function(String)? onLog;
 
+  /// 一時欠落の猶予中のトラックがある間、時計で猶予切れを確かめる周期。
+  /// hand_frame が途絶えても押下・描画を猶予後に解除するため。
+  final Duration lostTrackCheckInterval;
+
   HttpServer? _http;
   WebSocket? _socket;
   Timer? _helloTimer;
   Timer? _inactivityTimer;
+  Timer? _lostTrackTimer;
   String? _sessionId;
   String? _clientId;
   int _frames = 0;
@@ -102,6 +107,7 @@ class InputServer {
     this.enforcePairing = true,
     this.acceptCalibrationMessages = true,
     this.onLog,
+    this.lostTrackCheckInterval = const Duration(milliseconds: 100),
   });
 
   void _log(String m) => onLog?.call(m);
@@ -418,9 +424,33 @@ class InputServer {
       onFrame?.call(f);
       _dispatch(byTrack);
       _emit();
+      _syncLostTrackTimer();
       await Future<void>.delayed(Duration.zero); // 他イベントに譲る
     }
     _processing = false;
+  }
+
+  /// 猶予中のトラックがある間だけ周期タイマーを動かし、hand_frame が途絶えても
+  /// 時計で猶予切れを判定して解除する。
+  void _syncLostTrackTimer() {
+    if (!engine.hasLostTracks || _sessionId == null) {
+      _lostTrackTimer?.cancel();
+      _lostTrackTimer = null;
+      return;
+    }
+    _lostTrackTimer ??= Timer.periodic(lostTrackCheckInterval, (_) {
+      if (_sessionId == null) {
+        _syncLostTrackTimer();
+        return;
+      }
+      final byTrack = engine.expireLostTracks();
+      if (byTrack.isNotEmpty) {
+        _log('hand_frame 途絶中に猶予が切れたトラックを解除: ${byTrack.keys.toList()}');
+        _dispatch(byTrack);
+        _emit();
+      }
+      _syncLostTrackTimer();
+    });
   }
 
   /// 安定して保持する主トラックのイベントをOS入力へ、全トラックをオーバーレイへ。
@@ -493,6 +523,8 @@ class InputServer {
     _helloTimer = null;
     _inactivityTimer?.cancel();
     _inactivityTimer = null;
+    _lostTrackTimer?.cancel();
+    _lostTrackTimer = null;
     _sessionId = null;
     _clientId = null;
     _frames = 0;
