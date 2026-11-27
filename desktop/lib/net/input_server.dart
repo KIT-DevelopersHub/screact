@@ -291,8 +291,10 @@ class InputServer {
       // close完了を待たず枠を解放する。遅れて届くこのソケットの onDone は
       // _onClose のidentity guardにより、次の正常セッションを消さない。
       if (identical(_socket, source)) {
+        // 確立済みセッションを切り離すときは、切断と同じく入力を即時解除する。
+        final established = _sessionId != null;
         _socket = null;
-        _clearConnectionState(releaseInput: false);
+        _clearConnectionState(releaseInput: established);
       }
       unawaited(source.close(4001, 'pairing_code_mismatch'));
       _emit(error: 'コード不一致の接続を拒否しました (端末: ${hello.deviceId})');
@@ -309,6 +311,9 @@ class InputServer {
       );
       _invalidateCalibration(notifyClient: false);
     }
+    // 同じソケットでの hello し直しは session の切り替え。旧 session の入力を
+    // 猶予なしで解除し、frameId の基準も新 session 用に初期化する。
+    if (_sessionId != null) _releaseSessionInput();
     _clientId = hello.deviceId;
     _helloTimer?.cancel();
     _helloTimer = null;
@@ -563,6 +568,19 @@ class InputServer {
     _clearConnectionState(releaseInput: true);
     unawaited(source.close(4004, 'inactivity_timeout'));
     _emit(error: 'スマホとの通信が途絶えたため再接続を待っています');
+  }
+
+  /// 旧 session の入力状態を捨て、全トラックを即時解除する（猶予なし）。
+  /// エンジンの releaseAll が frameId の基準も初期化する。
+  void _releaseSessionInput() {
+    _lostTrackTimer?.cancel();
+    _lostTrackTimer = null;
+    _frames = 0;
+    _lastFrameId = null;
+    _handDetected = false;
+    _pending = null;
+    final byTrack = engine.releaseAll();
+    _dispatch(byTrack);
   }
 
   void _clearConnectionState({required bool releaseInput}) {

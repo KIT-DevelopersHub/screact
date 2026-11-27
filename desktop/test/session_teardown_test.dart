@@ -48,16 +48,6 @@ Map<String, dynamic> _hello(String deviceId, {String? token}) => {
   if (token != null) 'pairingToken': token,
 };
 
-// 既存の不具合（issue-queue/bug-rehello-keeps-input.md で起票予定）。
-// 直ったら skip を外す。
-const _sameSocketRehelloSkip =
-    '既知の不具合: 同じソケットでの hello し直しは新しい sessionId を払い出すが、'
-    'releaseAll を呼ばず押下/描画等が残り、frameId の基準も旧 session のまま'
-    '（新 session の frameId=1 が失効扱いで破棄される）';
-const _mismatchRehelloSkip =
-    '既知の不具合: 確立済みセッションで 6桁コード不一致の hello を受けると '
-    'releaseInput: false で切り離すため、押下/描画等が解除されない';
-
 /// 解除前に作っておく入力状態。各状態は「開始フレーム→継続フレーム」の2枚で作る。
 enum _Held { press, drag, draw, erase, scroll }
 
@@ -493,7 +483,6 @@ void main() {
           );
           await h.waitFrames(framesBefore + 1);
         },
-        skip: _sameSocketRehelloSkip,
       );
     }
 
@@ -513,7 +502,7 @@ void main() {
       );
       final released = await h.waitRelease(before);
       _expectReleased(h, _Held.drag, released);
-    }, skip: _mismatchRehelloSkip);
+    });
 
     test('同じソケットで hello し直した後、旧 sessionId のフレームは拒否する', () async {
       final h = await _Harness.start();
