@@ -78,25 +78,37 @@ void main() {
     expect(frames.last.tracks.every((t) => t.landmarks.length == 21), isTrue);
     expect(engine.activeTrackCount, 2, reason: '2骨格分の状態を分離保持');
 
-    // 片手（12）を隠す → hands=[7]。
+    bool releasedOf(int trackId) => trackEvents
+        .expand((m) => m.entries)
+        .where((e) => e.key == trackId)
+        .expand((e) => e.value)
+        .any((ev) => ev.kind == InteractionKind.release);
+
+    // 片手（12）を隠す → hands=[7]。fixture の時刻は frameId と同じ刻みで進む。
     send(oneHandFrame(frameId: 1843, sessionId: session));
     await waitFrames(2);
     expect(frames.last.tracks.map((t) => t.trackId), [7]);
-    expect(engine.activeTrackCount, 1, reason: '12 は解除され 7 は継続');
+    expect(engine.activeTrackCount, 1, reason: '7 は継続');
     expect(engine.activeTrackIds, [7]);
+    expect(engine.lostTrackIds, [12], reason: '12 は一時欠落の猶予中');
+    expect(releasedOf(12), isFalse, reason: '猶予中は解除しない');
 
-    // 12 の解除イベントがオーバーレイ側へ通知される。
-    final released = trackEvents
-        .expand((m) => m.entries)
-        .where((e) => e.key == 12)
-        .expand((e) => e.value)
-        .any((ev) => ev.kind == InteractionKind.release);
-    expect(released, isTrue, reason: '消えた 12 だけを即時解除');
-
-    // 0手 → 全解除。
-    send(zeroHandFrame(frameId: 1844, sessionId: session));
+    // 猶予（300ms）を過ぎる → 12 を確定消失として解除し、オーバーレイへ通知。
+    send(oneHandFrame(frameId: 2143, sessionId: session));
     await waitFrames(3);
+    expect(engine.lostTrackIds, isEmpty);
+    expect(releasedOf(12), isTrue, reason: '消えた 12 だけを解除');
+    expect(releasedOf(7), isFalse);
+
+    // 0手 → 7 も猶予を経て解除。
+    send(zeroHandFrame(frameId: 2144, sessionId: session));
+    await waitFrames(4);
     expect(engine.activeTrackCount, 0);
+    expect(engine.lostTrackIds, [7]);
+    send(zeroHandFrame(frameId: 2444, sessionId: session));
+    await waitFrames(5);
+    expect(engine.lostTrackIds, isEmpty);
+    expect(releasedOf(7), isTrue);
   });
 
   test('session不一致の hand_frame は全体破棄される', () async {
@@ -122,11 +134,9 @@ void main() {
       final j = jsonDecode(data as String) as Map<String, dynamic>;
       if (j['messageType'] == 'hello_ack' && !ack.isCompleted) ack.complete();
     });
-    ws.add(jsonEncode({
-      'schemaVersion': 1,
-      'messageType': 'hello',
-      'deviceId': 'x',
-    }));
+    ws.add(
+      jsonEncode({'schemaVersion': 1, 'messageType': 'hello', 'deviceId': 'x'}),
+    );
     await ack.future.timeout(const Duration(seconds: 5));
 
     // わざと別 session を載せる → 破棄され onFrame は呼ばれない。

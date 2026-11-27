@@ -11,12 +11,32 @@ import '../protocol/messages.dart';
 ///
 /// 単一手の既存フローを壊さないためのファサードでもある: 位置合わせ・感度・
 /// 平滑化・モードは従来の [InteractionEngine] と同じ形で読み書きできる。
+///
+/// 手の一時欠落と確定消失を区別する: フレームから消えた trackId は
+/// [trackLossGraceMs] のあいだ状態（押下・描画・ドラッグ）を保ったまま保留し、
+/// 同じ trackId が戻れば続きとして処理する。猶予を過ぎたら確定消失として
+/// 従来どおり安全に解除する。WebSocket切断・停止時の [releaseAll] は猶予なし。
 class MultiHandEngine {
+  /// 一時欠落の猶予時間の既定値（ms）。Android `HandTrackAssigner` の
+  /// `DEFAULT_RETENTION_MS`（300ms）に合わせた暫定値で、実機で調整する。
+  static const int defaultTrackLossGraceMs = 300;
+
   /// 位置合わせ・設定の基準（フレームは流し込まない）。session共有の正本。
   final InteractionEngine _calib;
 
-  /// trackId → そのトラック専用エンジン。手が消えたら解除して取り除く。
+  /// trackId → そのトラック専用エンジン。猶予中のトラックも含む。
+  /// 確定消失したら解除して取り除く。
   final Map<int, InteractionEngine> _tracks = {};
+
+  /// trackId → 最後にフレームへ現れた時刻（capturedAtMonotonicMs）。
+  final Map<int, int> _lastSeenAtMs = {};
+
+  /// 直近フレームに現れず、猶予中の trackId。
+  final Set<int> _lostTracks = {};
+
+  /// 消えた trackId を確定消失とみなすまでの猶予（ms）。
+  /// 時刻はフレームの capturedAtMonotonicMs で測る。0 なら即時解除（従来挙動）。
+  final int trackLossGraceMs;
 
   double _sensitivity;
   bool _smoothing;
@@ -42,7 +62,15 @@ class MultiHandEngine {
     CalibrationConfig? config,
     EngineMode mode = EngineMode.calibration,
     bool smoothingEnabled = true,
+    int trackLossGraceMs = defaultTrackLossGraceMs,
   }) {
+    if (trackLossGraceMs < 0) {
+      throw ArgumentError.value(
+        trackLossGraceMs,
+        'trackLossGraceMs',
+        '0以上を指定する',
+      );
+    }
     final calib =
         calibrationEngine ??
         InteractionEngine(
@@ -50,10 +78,10 @@ class MultiHandEngine {
           mode: mode,
           smoothingEnabled: smoothingEnabled,
         );
-    return MultiHandEngine._(calib);
+    return MultiHandEngine._(calib, trackLossGraceMs);
   }
 
-  MultiHandEngine._(this._calib)
+  MultiHandEngine._(this._calib, this.trackLossGraceMs)
     : _sensitivity = _calib.recognitionSensitivity,
       _smoothing = _calib.smoothingEnabled,
       _clickEnabled = _calib.clickEnabled,
@@ -130,9 +158,13 @@ class MultiHandEngine {
     }
   }
 
-  /// 現在追跡中のトラック数（0〜2）。
-  int get activeTrackCount => _tracks.length;
-  Iterable<int> get activeTrackIds => _tracks.keys;
+  /// 直近フレームで追跡中のトラック数（0〜2）。猶予中のトラックは含めない。
+  int get activeTrackCount => _tracks.length - _lostTracks.length;
+  Iterable<int> get activeTrackIds =>
+      _tracks.keys.where((id) => !_lostTracks.contains(id));
+
+  /// 一時欠落の猶予中で、状態を保留している trackId。
+  Iterable<int> get lostTrackIds => _lostTracks;
   int? get primaryTrackId => _primaryTrackId;
 
   // ---- 位置合わせ（session共有）----
@@ -184,12 +216,15 @@ class MultiHandEngine {
   /// フレーム処理。返り値は trackId→操作イベント列。
   /// null は「不正/失効フレーム＝全体破棄」（イベントを一切出さない）。
   ///
-  /// 前フレームから消えた trackId は、そのトラックだけを即時解除してから取り除く。
+  /// 前フレームから消えた trackId は猶予中として状態を保ち、イベントを出さない
+  /// （カーソルは最後の位置のまま）。猶予内に同じ trackId が戻れば続きとして
+  /// 処理し、猶予を過ぎたらそのトラックだけを解除してから取り除く。
   Map<int, List<InteractionEvent>>? onInputFrame(InputFrame frame) {
     // 単調増加でない frameId（重複・巻き戻り）は全体破棄。
     if (_lastFrameId != null && frame.frameId <= _lastFrameId!) return null;
     _lastFrameId = frame.frameId;
 
+    final now = frame.capturedAtMonotonicMs;
     final previousPrimary = _primaryTrackId;
     _dispatchPrimaryTrackId = null;
     _primaryAcquiredThisFrame = false;
@@ -197,31 +232,40 @@ class MultiHandEngine {
     final seen = <int>{};
     for (final track in frame.tracks) {
       seen.add(track.trackId);
+      _lostTracks.remove(track.trackId);
+      _lastSeenAtMs[track.trackId] = now;
       final events = _engineFor(
         track.trackId,
-      ).onFrame(track.toHandFrame(frame.frameId, frame.capturedAtMonotonicMs));
+      ).onFrame(track.toHandFrame(frame.frameId, now));
       if (events.isNotEmpty) result[track.trackId] = events;
     }
 
-    // 消えた trackId は個別に解除（押下/描画/ドラッグを閉じる）→ 破棄。
-    final vanished = _tracks.keys
+    // 消えた trackId: 猶予内なら保留、猶予を過ぎたら個別に解除
+    // （押下/描画/ドラッグを閉じる）→ 破棄。
+    final missing = _tracks.keys
         .where((id) => !seen.contains(id))
         .toList(growable: false);
-    for (final id in vanished) {
+    for (final id in missing) {
+      if (!_graceExpired(id, now)) {
+        _lostTracks.add(id);
+        continue;
+      }
       final events = _tracks[id]!.onFrame(
         HandFrame(
           frameId: frame.frameId,
-          capturedAtMonotonicMs: frame.capturedAtMonotonicMs,
+          capturedAtMonotonicMs: now,
           detected: false,
         ),
       );
       if (events.isNotEmpty) result[id] = events;
-      _tracks.remove(id);
+      _forget(id);
     }
 
     if (previousPrimary != null) {
-      if (seen.contains(previousPrimary)) {
-        // 画面外やイベントなしでも所有権は維持する。
+      if (_tracks.containsKey(previousPrimary)) {
+        // 画面外・イベントなし・一時欠落の猶予中でも所有権は維持する。
+        // 猶予中は他トラックへ移さない（移すと、戻ってきた旧所有者の押下中
+        // 状態と新所有者の入力がOSの単一カーソル上で混ざるため）。
         _dispatchPrimaryTrackId = previousPrimary;
       } else {
         // このフレームは旧所有者の解除だけをOSへ送り、引き継がない。
@@ -235,8 +279,25 @@ class MultiHandEngine {
     return result;
   }
 
+  /// 猶予を過ぎたか。capturedAtMonotonicMs が進んでいない（欠落・巻き戻り）
+  /// フレームでは経過時間を測れないため、固着を避けて確定消失として扱う。
+  bool _graceExpired(int id, int now) {
+    final lastSeen = _lastSeenAtMs[id];
+    if (lastSeen == null) return true;
+    final elapsed = now - lastSeen;
+    return elapsed <= 0 || elapsed >= trackLossGraceMs;
+  }
+
+  void _forget(int id) {
+    _tracks.remove(id);
+    _lastSeenAtMs.remove(id);
+    _lostTracks.remove(id);
+  }
+
   void _advancePrimaryCandidate() {
     final candidates = _tracks.entries
+      // 猶予中のトラックは画面に見えていないので所有者候補にしない。
+      .where((entry) => !_lostTracks.contains(entry.key))
       // 実機では画面へ入った最初の姿勢がscroll/pinch/drawと判定されることが
       // ある。neutral限定では主トラックが永久に選ばれず、OS入力が全停止する。
       // 画面内に安定して存在するtrackIdを所有者にし、ジェスチャー途中の安全は
@@ -269,7 +330,8 @@ class MultiHandEngine {
     _primaryCandidateStreak = 0;
   }
 
-  /// 全トラックを即時解除（WebSocket切断・停止時）。trackId→解除イベント列を返す。
+  /// 全トラックを即時解除（WebSocket切断・停止時）。猶予中のトラックも猶予なしで
+  /// 解除する。trackId→解除イベント列を返す。
   Map<int, List<InteractionEvent>> releaseAll() {
     _dispatchPrimaryTrackId = _primaryTrackId;
     final result = <int, List<InteractionEvent>>{};
@@ -280,6 +342,8 @@ class MultiHandEngine {
       if (events.isNotEmpty) result[entry.key] = events;
     }
     _tracks.clear();
+    _lastSeenAtMs.clear();
+    _lostTracks.clear();
     _lastFrameId = null;
     _primaryTrackId = null;
     _resetPrimaryCandidate();
