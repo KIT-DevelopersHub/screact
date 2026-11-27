@@ -66,6 +66,8 @@ ScreactPerf win=5.0s recv=150 done=147 drop=3 stale=0 hands=12/120/18 interval=3
 
 区間の値は `中央値/P95` のミリ秒で、サンプルが無ければ `-`。時刻は Desktop 内の単調時計だけで、Android の時計とは引き算しない。OS 入力とオーバーレイは呼び出しの完了までを測り、ネイティブ側の反映や画面の描画完了は含まない。受信が途絶えている間は出力しない。Android 側は [`android/README.md`](../android/README.md) の同名ログを参照。
 
+両端末のログを条件ごとに集計して中央値・P95・欠落率の表（Markdown／CSV）にするには `dart run tool/latency_report.dart` を使う。計測の手順は [`docs/work/records/latency-measurement-procedure.md`](../docs/work/records/latency-measurement-procedure.md)。
+
 ## 現在の実装範囲
 
 - Android端末とのWebSocket接続
