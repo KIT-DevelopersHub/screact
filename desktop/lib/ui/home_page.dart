@@ -9,6 +9,7 @@ import '../core/geom.dart';
 import '../core/interaction_engine.dart';
 import '../core/multi_hand_engine.dart';
 import '../core/pointer_state.dart';
+import '../core/stroke_diagnostics.dart';
 import '../protocol/input_frame.dart';
 import '../net/bonjour_advertiser.dart';
 import '../net/connection_log.dart';
@@ -213,6 +214,11 @@ class _HomePageState extends State<HomePage> {
     _flow.addListener(_handleFlowChanged);
     _connLog.addListener(_handleLogChanged);
     _connLog.init();
+    // ストローク確定ごとの診断ログ（既定OFF。Issue #26）。
+    if (StrokeDiagnostics.enabledByEnvironment()) {
+      _overlay.onStrokeFinished =
+          StrokeDiagnostics(sink: _handlePerfLog).record;
+    }
     _refreshWifiIp();
     if (Platform.isMacOS) {
       unawaited(_refreshAccessibility());

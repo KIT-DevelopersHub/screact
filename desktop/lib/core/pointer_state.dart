@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'geom.dart';
 import 'interaction_engine.dart';
+import 'stroke_diagnostics.dart';
 
 /// 描画中／確定したインクストローク（画面正規化点列）。色は描画開始時の
 /// 描画色（[OverlayModel.selectedColorSlot]）を [colorSlot] に保存し、以後変えない。
@@ -90,6 +91,13 @@ class OverlayModel extends ChangeNotifier {
   /// 猶予ぶん伸びて破棄されなくなるのを防ぐ。エンジンは描画中の各フレームで
   /// 点が動かなくても drawMove を出すため、静止した長押しも毎フレーム更新される。
   final Map<InkStroke, int> _activeLastSeenMs = {};
+
+  /// 描画中ストロークが受けた drawMove の数（診断ログ用）。
+  final Map<InkStroke, int> _activeMoveCount = {};
+
+  /// ストローク確定ごとの診断（Issue #26）。null（既定）なら何もしない。
+  /// 描画結果には影響しない。
+  void Function(StrokeFinish finish)? onStrokeFinished;
 
   /// 単調増加の現在時刻（ミリ秒）。テストでは固定の時計を注入する。
   final int Function() _nowMs;
@@ -223,7 +231,7 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = e.screen;
         v.pressed = false;
         v.erasing = false;
-        _finishStroke(trackId, trimTail: false);
+        _finishStroke(trackId, StrokeEndReason.modeSwitch);
         break;
       // インク描画（人差し指＋中指のくっつき・人差し指先端）。
       case InteractionKind.drawDown:
@@ -231,7 +239,7 @@ class OverlayModel extends ChangeNotifier {
         v.pressed = true;
         v.erasing = false;
         // drawUp なしで次の描画が始まった場合も、前のストロークを確定する。
-        _finishStroke(trackId, trimTail: false);
+        _finishStroke(trackId, StrokeEndReason.redrawDown);
         // 描画色は選択中のインク色だけで決める（トラックの識別色は使わない）。
         final stroke = InkStroke(
           [e.screen],
@@ -242,6 +250,7 @@ class OverlayModel extends ChangeNotifier {
         final startMs = _nowMs();
         _activeStartMs[stroke] = startMs;
         _activeLastSeenMs[stroke] = startMs;
+        _activeMoveCount[stroke] = 0;
         strokes.add(stroke);
         _capHistory();
         break;
@@ -251,6 +260,7 @@ class OverlayModel extends ChangeNotifier {
         if (a == null) break;
         // 点を増やさない微小移動（静止した長押し）でも観測時刻は進める。
         _activeLastSeenMs[a] = _nowMs();
+        _activeMoveCount[a] = (_activeMoveCount[a] ?? 0) + 1;
         if (a.points.isEmpty ||
             a.points.last.distanceTo(e.screen) >= _minPointDist) {
           a.points.add(e.screen);
@@ -258,7 +268,7 @@ class OverlayModel extends ChangeNotifier {
         break;
       case InteractionKind.drawUp:
         v.pressed = false;
-        _finishStroke(trackId, trimTail: true);
+        _finishStroke(trackId, StrokeEndReason.drawUp);
         break;
       // 消しゴム（グー）。カーソル位置近傍のインクを消す。
       case InteractionKind.eraseDown:
@@ -266,7 +276,7 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = e.screen;
         v.pressed = false;
         v.erasing = true;
-        _finishStroke(trackId, trimTail: false);
+        _finishStroke(trackId, StrokeEndReason.modeSwitch);
         eraseAt(e.screen);
         break;
       case InteractionKind.eraseUp:
@@ -294,11 +304,11 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = null;
         v.pressed = false;
         v.erasing = false;
-        _finishStroke(trackId, trimTail: false);
+        _finishStroke(trackId, StrokeEndReason.pointerExit);
         break;
       case InteractionKind.release:
         // トラッキング喪失・通信断: このトラックのカーソル/骨格を消す。
-        _finishStroke(trackId, trimTail: false);
+        _finishStroke(trackId, StrokeEndReason.release);
         _tracks.remove(trackId);
         break;
     }
@@ -309,22 +319,45 @@ class OverlayModel extends ChangeNotifier {
   ///
   /// 1. 末尾トリム前の点列で誤認識（[isMicroStroke]）を判定し、該当すれば破棄する。
   ///    継続時間は最初の drawDown から最後の drawDown/drawMove までで測る。
-  /// 2. 残す場合、[trimTail]（drawUp＝ペン解除）のときだけ末尾のブレ線を削る。
+  /// 2. 残す場合、drawUp（ペン解除）のときだけ末尾のブレ線を削る。
   ///    release／pointerExit 等の強制終了は従来どおりトリムしない。
-  void _finishStroke(int trackId, {required bool trimTail}) {
+  /// 3. [onStrokeFinished] があれば、確定の記録を渡す（結果は変えない）。
+  void _finishStroke(int trackId, StrokeEndReason reason) {
     final ending = _active.remove(trackId);
     if (ending == null) return;
     final startMs = _activeStartMs.remove(ending);
     final lastSeenMs = _activeLastSeenMs.remove(ending);
+    final moveCount = _activeMoveCount.remove(ending) ?? 0;
+    final listener = onStrokeFinished;
+    final before = listener == null ? null : List<Vec2>.of(ending.points);
+    void report({required bool discarded}) {
+      if (listener == null) return;
+      final finishedMs = _nowMs();
+      listener(
+        StrokeFinish(
+          trackId: trackId,
+          reason: reason,
+          startMs: startMs ?? finishedMs,
+          lastSeenMs: lastSeenMs ?? finishedMs,
+          finishedMs: finishedMs,
+          drawMoveCount: moveCount,
+          pointsBeforeTrim: before!,
+          pointsAfter: discarded ? 0 : ending.points.length,
+          discarded: discarded,
+        ),
+      );
+    }
+
     final durationMs =
         startMs == null || lastSeenMs == null ? null : lastSeenMs - startMs;
     if (durationMs != null && isMicroStroke(ending.points, durationMs)) {
       strokes.remove(ending);
+      report(discarded: true);
       return;
     }
     // ペンモード終了直前のブレ線をカット: 末尾から最大 penReleaseTrimPoints 点を落とす。
     // 短い線は上限（[penReleaseTrimCount]）の範囲でしか削らない。
-    if (trimTail) {
+    if (reason == StrokeEndReason.drawUp) {
       final drop = penReleaseTrimCount(ending.points, penReleaseTrimPoints);
       if (drop > 0) {
         ending.points.removeRange(
@@ -333,6 +366,7 @@ class OverlayModel extends ChangeNotifier {
         );
       }
     }
+    report(discarded: false);
   }
 
   /// drawUp 時に [points] の末尾から削る点数を返す（最大 [maxPoints]）。
@@ -470,6 +504,7 @@ class OverlayModel extends ChangeNotifier {
     _active.clear();
     _activeStartMs.clear();
     _activeLastSeenMs.clear();
+    _activeMoveCount.clear();
     _tracks.clear();
     notifyListeners();
   }

@@ -66,6 +66,30 @@ ScreactPerf win=5.0s recv=150 done=147 drop=3 stale=0 hands=12/120/18 interval=3
 
 区間の値は `中央値/P95` のミリ秒で、サンプルが無ければ `-`。時刻は Desktop 内の単調時計だけで、Android の時計とは引き算しない。OS 入力とオーバーレイは呼び出しの完了までを測り、ネイティブ側の反映や画面の描画完了は含まない。受信が途絶えている間は出力しない。Android 側は [`android/README.md`](../android/README.md) の同名ログを参照。
 
+### ストローク診断ログ（ScreactStroke）
+
+描画ストロークが確定するたびに、`ScreactStroke` で始まる1行を接続ログと標準出力へ出す。微小ストロークの破棄の閾値（`OverlayModel.microStroke*`）を実機で調整するためのもの。既定はOFFで、ON/OFF で描画結果は変わらない。
+
+```bash
+flutter run -d windows --dart-define=SCREACT_STROKE_LOG=true
+# ビルド済みアプリは環境変数 SCREACT_STROKE_LOG=1 で起動する
+```
+
+```text
+ScreactStroke track=7 reason=drawUp pts=30/27 moves=29 dur=957ms idle=33ms len=0.3144 span=0.3144 discarded=false
+```
+
+| 項目 | 意味 |
+| --- | --- |
+| `track` | trackId |
+| `reason` | 終了理由。`drawUp`（ペン解除）、`release`（追跡喪失・切断）、`pointerExit`（画面外）、`modeSwitch`（ポインタ移動・消しゴムへ切替）、`redrawDown`（drawUp なしで次の描画） |
+| `pts` | 点数 `トリム前/確定後`（間引き後の点数。破棄なら確定後は 0。トリムは `drawUp` のときだけ） |
+| `moves` | 受けた drawMove の数（点を増やさない微小移動も数える） |
+| `dur` | 最初の drawDown から最後の drawDown/drawMove まで。誤認識の判定に使う継続時間 |
+| `idle` | 最後の drawDown/drawMove から確定まで（一時欠落の猶予など） |
+| `len` / `span` | トリム前の軌跡長／始点と終点の距離（画面正規化） |
+| `discarded` | 誤認識の微小ストロークとして破棄したか |
+
 ## 現在の実装範囲
 
 - Android端末とのWebSocket接続
