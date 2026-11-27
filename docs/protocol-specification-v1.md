@@ -180,11 +180,26 @@ PCが`hello`を受理できない場合は、session確立前に`hello_error`を
   "schemaVersion": 1,
   "messageType": "hello_error",
   "code": "pairing_code_mismatch",
+  "message": "6桁コードが一致しません",
   "retryable": false
 }
 ```
 
-`code`は`pairing_code_mismatch`、`resume_token_invalid`、`unsupported_version`、`server_busy`。`retryable=false`ではAndroidは自動再接続を停止する。`resume_token_invalid`では保存済みトークンを削除して初回接続画面へ戻し、それ以外は入力修正を案内する。`retryable=true`では再接続待ちへ移る。未知codeは汎用接続エラーとして扱う。
+`message`は利用者向けの日本語の説明で、Desktopは必ず送る。Androidはこの値を使わない（未知のフィールドとして読み飛ばす）。`retryable`もDesktopは必ず送り、省略時はfalseとみなす。
+
+`code`は次の5種類。`retryable=false`ではAndroidは自動再接続を停止する。`resume_token_invalid`では保存済みトークンを削除して初回接続画面へ戻し、それ以外は入力修正を案内する。`retryable=true`では再接続待ちへ移る。未知codeは汎用接続エラーとして扱う。
+
+| `code` | Desktop が送る条件 | `retryable` | PC 側の close コード / reason | Android 側の扱い |
+| --- | --- | --- | --- | --- |
+| `pairing_code_mismatch` | `hello`の`pairingToken`が、PC に表示中の6桁コードと一致しない | false | `4001` / `pairing_code_mismatch` | 自動再接続を止め、エラー（`PAIRING_CODE_MISMATCH`）を表示する |
+| `server_busy` | 別の端末が接続中に、後から接続が来た（`hello`を待たずに返す）。先に接続した端末は切断しない | true | `4002` / `server_busy` | 再接続待ちへ移る（`SERVER_BUSY`） |
+| `hello_timeout` | WebSocket 接続後、5秒以内に`hello`で認証できなかった | true | `4003` / `hello_timeout` | 再接続待ちへ移る。code は一覧に無いため`UNKNOWN`として扱う |
+| `resume_token_invalid` | 現在の Desktop は送らない | （false を想定。Android は false のときだけ右の扱いをする） | - | 保存済みの接続情報を削除し、6桁コードでの接続へ戻す（`RESUME_TOKEN_INVALID`） |
+| `unsupported_version` | 現在の Desktop は送らない | （false を想定） | - | 自動再接続を止め、エラー（`UNSUPPORTED_VERSION`）を表示する |
+
+Android の再接続待ちは、1、2、4、8、10秒（以降は10秒）の間隔で再接続する。Android は close コードを見ず、`hello_error`の`retryable`と`code`で扱いを決める。
+
+`hello_error`を伴わない切断として、PC はセッション確立後に heartbeat を含む受信が12秒途絶えると、close コード`4004` / reason `inactivity_timeout`で接続を閉じる。
 
 ### 位置合わせ結果
 
