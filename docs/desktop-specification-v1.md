@@ -48,7 +48,7 @@ flowchart LR
 | 領域 | 実装内容 |
 | --- | --- |
 | 接続 | UDP `8766` で接続情報を広告し、WebSocket `8765/ws/v1/input` を待ち受ける。 |
-| 認証 | 初回は6桁 `pairingToken`、再接続は `resumeToken` を用いる。詳細は [通信仕様書 v1](./protocol-specification-v1.md)。 |
+| 認証 | 6桁 `pairingToken` を照合する。`resumeToken` による信頼済み再接続は未実装（対応しているのは Android と開発用のモック PC だけ）。詳細は [通信仕様書 v1](./protocol-specification-v1.md)。 |
 | 座標処理 | 4点の ArUco 結果から Homography を計算し、手の座標を画面座標へ変換する。 |
 | 操作判定 | ポインター、ピンチクリック、ドラッグ、描画、グー消しゴム、グッドサイン・スクロールをイベント化する。 |
 | 描画 | 色選択・骨格表示を持つ操作画面と、透明・クリック透過のオーバーレイを提供する。 |

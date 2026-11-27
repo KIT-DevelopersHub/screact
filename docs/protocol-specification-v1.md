@@ -53,6 +53,8 @@ Androidは接続直後に`hello`を送る。`interactionProfile=two_users_two_ac
 
 初回接続では`pairingToken`へPC画面に表示された6桁コードを設定し、`resumeToken`は省略する。認証成功時、PCは暗号学的乱数生成器で32 byteを生成し、パディングなしBase64URLへ変換した`resumeToken`を`hello_ack`へ設定する。Androidはホスト、ポート、`resumeToken`を保存し、次回起動では`pairingToken`を省略して保存済み`resumeToken`を送る。`pairingToken`と`resumeToken`は排他的で、必ずどちらか一方だけを送る。
 
+> 実装状況: Desktop アプリ v1.0.0 は`resumeToken`を発行しない。現時点で発行・検証するのは、Android 開発用のモック PC（`android/tools/mock-websocket-server.ps1`）だけである。Android は`hello_ack`に`resumeToken`が無ければ信頼済み PC を保存せず、次回も UDP 発見または 6 桁コードで接続する。発行しない PC に対しても、Android は従来どおり動く。この節の`resumeToken`の規則は、発行する PC が守る契約として残す。
+
 `calibrationRequired=true`ならAndroidはスマホ固定とPCでの配置確認を案内し、位置合わせモードへ入る。PCは利用者がPC上の`配置OK`を押すまでArUcoマーカーを表示しない。`配置OK`はPC内のUI操作であり、Android・PC間の新しい通信メッセージは必要としない。`calibrationRequired=false`なら通常トラッキングモードへ入る。
 
 PCアプリを起動するたびに位置合わせ状態を未完了から開始し、最初の`hello_ack`では`calibrationRequired=true`を返す。同一PCプロセス内で位置合わせ完了後に一時的な通信断が発生し、`cameraFacing`も前回位置合わせ時と同じ場合だけ、再接続時に`calibrationRequired=false`を返して確認済み位置合わせを再利用する。Androidは必要に応じ、メモリ上に保持した`calibration_markers`を新しい`sessionId`で再送できる。手動切断、接続先変更、PCプロセス再起動では位置合わせを再利用しない。
