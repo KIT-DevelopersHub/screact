@@ -167,7 +167,9 @@ flowchart TB
 | `ArucoMarkerProcessor` | OpenCV初期化、対象IDの検出、座標正規化 |
 | `MarkerStabilityTracker` | 4マーカーの配置・面積・連続安定性の検証 |
 | `DebugOverlayView` | Previewと同じ`fitCenter`基準で骨格またはマーカーを描画 |
-| `YubiBoardWebSocketClient` | 接続、認証開始、再接続、送信間引き、heartbeat、制御受信 |
+| `InputSession` | 通信路に依存しないセッション処理。認証開始、再接続、送信間引き、heartbeat、制御受信 |
+| `InputTransport` / `OkHttpWebSocketTransport` | 通信路の抽象と、そのOkHttp WebSocket実装（接続、テキスト送受信、切断通知） |
+| `YubiBoardWebSocketClient` | `InputSession`にWebSocketの通信路を組み合わせた入力クライアント |
 | `ProtocolCodec` | version 1メッセージのJSONエンコード・デコード |
 
 ## 画面・カメラ・認識
