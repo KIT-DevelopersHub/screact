@@ -90,16 +90,20 @@ void main() {
   });
 
   test('インク履歴は上限を超えると古い完了ストロークから捨てる', () {
-    // 呼ぶたびに200ms進む時計。各ストロークを長押しの点として扱い、
-    // 微小ストロークの確定時破棄（Issue #5）に掛からないようにする。
+    // 呼ぶたびに200ms進む時計。各ストロークを長押しの点（drawDown→drawMove）
+    // として扱い、微小ストロークの確定時破棄（Issue #5）に掛からないようにする。
     var now = 0;
     final model = OverlayModel(nowMs: () => now += 200);
-    // 上限(240)を超える完了ストロークを作る（drawDown→drawUp）。
+    // 上限(240)を超える完了ストロークを作る（drawDown→drawMove→drawUp）。
     for (var i = 0; i < 320; i++) {
       final x = 0.1 + (i % 50) * 0.01;
       model.applyTrack(
         7,
         InteractionEvent(InteractionKind.drawDown, Vec2(x, 0.5)),
+      );
+      model.applyTrack(
+        7,
+        InteractionEvent(InteractionKind.drawMove, Vec2(x, 0.5)),
       );
       model.applyTrack(
         7,
@@ -122,11 +126,15 @@ void main() {
       );
       model.applyTrack(
         3,
+        InteractionEvent(InteractionKind.drawMove, Vec2(0.2, 0.01 * (i % 90))),
+      );
+      model.applyTrack(
+        3,
         InteractionEvent(InteractionKind.drawUp, Vec2(0.2, 0.01 * (i % 90))),
       );
     }
     expect(model.strokes.contains(active), isTrue);
-    expect(model.strokes.length, lessThanOrEqualTo(240));
+    expect(model.strokes.length, 240);
   });
 
   testWidgets('2骨格を別色で同時描画（ゴールデン）', (tester) async {

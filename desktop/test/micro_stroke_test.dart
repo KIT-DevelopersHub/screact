@@ -155,6 +155,47 @@ void main() {
     });
   });
 
+  group('一時欠落の猶予を経て確定する場合（PR #39 との組み合わせ）', () {
+    // 手が消えてから猶予（300ms）が過ぎて drawUp/release が届く。
+    // 継続時間は最後に drawDown/drawMove を受けた時刻までで測る。
+    const graceMs = 300;
+
+    test('drawDown の直後に手が消え、猶予後の release でも一瞬の点は破棄される', () {
+      drawFrames(0, const [Vec2(0.5, 0.5)]);
+      now += graceMs;
+      at(0, InteractionKind.release, const Vec2(0.5, 0.5));
+      expect(model.strokes, isEmpty);
+    });
+
+    test('数フレームの極短線も、猶予後の drawUp→release で破棄される', () {
+      drawFrames(0, line(0.5, 0.504, 3));
+      now += graceMs;
+      model.applyTrackEvents({
+        0: const [
+          InteractionEvent(InteractionKind.drawUp, Vec2(0.504, 0.5)),
+          InteractionEvent(InteractionKind.release, Vec2(0.504, 0.5)),
+        ],
+      });
+      expect(model.strokes, isEmpty);
+    });
+
+    test('静止した長押しの点は、猶予後の release でも残る', () {
+      // 点が動かなくてもエンジンは描画中の毎フレーム drawMove を出す。
+      drawFrames(0, List.filled(8, const Vec2(0.4, 0.4)));
+      now += graceMs;
+      at(0, InteractionKind.release, const Vec2(0.4, 0.4));
+      expect(model.strokes, hasLength(1));
+      expect(model.strokes.single.points, hasLength(1));
+    });
+
+    test('drawMove が続く長押しの小さな線は、猶予後の drawUp でも残る', () {
+      drawFrames(0, line(0.3, 0.306, 8));
+      now += graceMs;
+      at(0, InteractionKind.drawUp, const Vec2(0.306, 0.5));
+      expect(model.strokes, hasLength(1));
+    });
+  });
+
   group('回帰', () {
     test('消しゴム分割で生じた小さな断片は判定対象外で残る', () {
       final pts = line(0.1, 0.9, 17);

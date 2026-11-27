@@ -83,6 +83,13 @@ class OverlayModel extends ChangeNotifier {
   /// 描画中ストロークの開始時刻（[_nowMs] 基準）。確定時の誤認識判定に使う。
   final Map<InkStroke, int> _activeStartMs = {};
 
+  /// 描画中ストロークを最後に観測した時刻（最後の drawDown/drawMove を受けた
+  /// [_nowMs]）。継続時間は確定時刻ではなくここまでで測る。手が消えてから
+  /// 一時欠落の猶予（#39）を経て release が届いても、誤認識の継続時間が
+  /// 猶予ぶん伸びて破棄されなくなるのを防ぐ。エンジンは描画中の各フレームで
+  /// 点が動かなくても drawMove を出すため、静止した長押しも毎フレーム更新される。
+  final Map<InkStroke, int> _activeLastSeenMs = {};
+
   /// 単調増加の現在時刻（ミリ秒）。テストでは固定の時計を注入する。
   final int Function() _nowMs;
 
@@ -201,16 +208,20 @@ class OverlayModel extends ChangeNotifier {
           colorSlot: _selectedColorSlot ?? v.colorSlot,
         );
         _active[trackId] = stroke;
-        _activeStartMs[stroke] = _nowMs();
+        final startMs = _nowMs();
+        _activeStartMs[stroke] = startMs;
+        _activeLastSeenMs[stroke] = startMs;
         strokes.add(stroke);
         _capHistory();
         break;
       case InteractionKind.drawMove:
         v.cursor = e.screen;
         final a = _active[trackId];
-        if (a != null &&
-            (a.points.isEmpty ||
-                a.points.last.distanceTo(e.screen) >= _minPointDist)) {
+        if (a == null) break;
+        // 点を増やさない微小移動（静止した長押し）でも観測時刻は進める。
+        _activeLastSeenMs[a] = _nowMs();
+        if (a.points.isEmpty ||
+            a.points.last.distanceTo(e.screen) >= _minPointDist) {
           a.points.add(e.screen);
         }
         break;
@@ -266,13 +277,16 @@ class OverlayModel extends ChangeNotifier {
   /// 他トラックのストロークには触れない。
   ///
   /// 1. 末尾トリム前の点列で誤認識（[isMicroStroke]）を判定し、該当すれば破棄する。
+  ///    継続時間は最初の drawDown から最後の drawDown/drawMove までで測る。
   /// 2. 残す場合、[trimTail]（drawUp＝ペン解除）のときだけ末尾のブレ線を削る。
   ///    release／pointerExit 等の強制終了は従来どおりトリムしない。
   void _finishStroke(int trackId, {required bool trimTail}) {
     final ending = _active.remove(trackId);
     if (ending == null) return;
     final startMs = _activeStartMs.remove(ending);
-    final durationMs = startMs == null ? null : _nowMs() - startMs;
+    final lastSeenMs = _activeLastSeenMs.remove(ending);
+    final durationMs =
+        startMs == null || lastSeenMs == null ? null : lastSeenMs - startMs;
     if (durationMs != null && isMicroStroke(ending.points, durationMs)) {
       strokes.remove(ending);
       return;
@@ -393,6 +407,7 @@ class OverlayModel extends ChangeNotifier {
     strokes.clear();
     _active.clear();
     _activeStartMs.clear();
+    _activeLastSeenMs.clear();
     _tracks.clear();
     notifyListeners();
   }
