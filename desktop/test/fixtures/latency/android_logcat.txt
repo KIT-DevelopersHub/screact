@@ -1,0 +1,6 @@
+--------- beginning of main
+11-28 21:00:05.123  4321  4400 I ScreactPerf: win=5.0s maxHands=1 cap=150 inf=150 enq=150 sent=100 dropQ=50 dropInf=0 hands=10/140/0 interval=33.3/36.0 capInf=20.0/30.0 infEnq=0.3/0.8 enqSend=8.0/15.0 capSend=30.0/45.0
+11-28 21:00:10.125  4321  4400 I ScreactPerf: win=5.0s maxHands=1 cap=148 inf=146 enq=146 sent=98 dropQ=48 dropInf=2 hands=6/140/0 interval=33.4/40.0 capInf=22.0/34.0 infEnq=0.2/0.9 enqSend=9.0/16.0 capSend=32.0/50.0
+11-28 21:00:15.130  4321  4400 I ScreactPerf: win=5.0s maxHands=1 cap=152 inf=152 enq=152 sent=102 dropQ=50 dropInf=0 hands=2/150/0 interval=33.2/35.0 capInf=21.0/32.0 infEnq=0.4/1.0 enqSend=7.0/14.0 capSend=31.0/47.0
+11-28 21:00:17.001  4321  4400 I ScreactPerf: win=5.0s maxHands=1 cap=1
+11-28 21:00:22.140  4321  4400 I ScreactPerf: win=5.0s maxHands=2 cap=140 inf=138 enq=138 sent=100 dropQ=38 dropInf=2 hands=0/20/118 interval=35.0/45.0 capInf=30.0/48.0 infEnq=0.3/0.9 enqSend=-/- capSend=40.0/60.0

@@ -75,10 +75,10 @@ void main() {
   });
 
   test('parsePerfLog は読めない ScreactPerf 行を数える', () {
-    final log = parsePerfLog(_fixture('android_logcat.log'));
+    final log = parsePerfLog(_fixture('android_logcat.txt'));
     expect(log.records, hasLength(4));
     expect(log.skippedLines, 1);
-    final desktop = parsePerfLog(_fixture('desktop_log.log'));
+    final desktop = parsePerfLog(_fixture('desktop_log.txt'));
     expect(desktop.records, hasLength(3));
     expect(desktop.skippedLines, 0);
   });
@@ -111,8 +111,8 @@ void main() {
     late LatencyReport report;
     setUp(() {
       final records = [
-        ...parsePerfLog(_fixture('android_logcat.log')).records,
-        ...parsePerfLog(_fixture('desktop_log.log')).records,
+        ...parsePerfLog(_fixture('android_logcat.txt')).records,
+        ...parsePerfLog(_fixture('desktop_log.txt')).records,
       ];
       report = buildLatencyReport([ConditionLogs('LAN', records)]);
     });
@@ -181,13 +181,13 @@ void main() {
 
     test('片方だけの条件は件数比較を出さない', () {
       final only = buildLatencyReport([
-        ConditionLogs('A', parsePerfLog(_fixture('desktop_log.log')).records),
+        ConditionLogs('A', parsePerfLog(_fixture('desktop_log.txt')).records),
       ]);
       expect(only.links, isEmpty);
       final single = buildLatencyReport([
         ConditionLogs('B', [
-          parsePerfLog(_fixture('android_logcat.log')).records.first,
-          ...parsePerfLog(_fixture('desktop_log.log')).records,
+          parsePerfLog(_fixture('android_logcat.txt')).records.first,
+          ...parsePerfLog(_fixture('desktop_log.txt')).records,
         ]),
       ]);
       expect(single.links.single.mixedHands, isFalse);
@@ -200,11 +200,11 @@ void main() {
       report = buildLatencyReport([
         ConditionLogs(
           '1手-通常LAN',
-          parsePerfLog(_fixture('android_logcat.log')).records,
+          parsePerfLog(_fixture('android_logcat.txt')).records,
         ),
         ConditionLogs(
           '1手-通常LAN|混雑',
-          parsePerfLog(_fixture('desktop_log.log')).records,
+          parsePerfLog(_fixture('desktop_log.txt')).records,
         ),
       ], skippedLines: 1);
     });
@@ -255,7 +255,7 @@ void main() {
       expect(csv, contains('1手-通常LAN,android,2,1,5.0,enqSend,,,,'));
       expect(csv, contains('1手-通常LAN|混雑,desktop,,3,15.0,total,,1.1,2.2,2.5'));
       final quoted = buildLatencyReport([
-        ConditionLogs('a,b', parsePerfLog(_fixture('desktop_log.log')).records),
+        ConditionLogs('a,b', parsePerfLog(_fixture('desktop_log.txt')).records),
       ]);
       expect(renderCsv(quoted), contains('"a,b",desktop,'));
     });
