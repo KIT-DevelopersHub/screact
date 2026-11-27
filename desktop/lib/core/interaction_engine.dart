@@ -127,6 +127,17 @@ class InteractionEngine {
   bool get isPointerInside => !_outside && _lastScreen != null;
   bool get canAcquirePrimary => isPointerInside && _primaryNeutral;
 
+  /// ピンチ押下中（OSクリック/ドラッグの途中）か。
+  bool get isPressed => _pressed;
+
+  /// 押下をクリックなしで閉じ、ピンチが解けるまで再押下しない。
+  /// 押下中でなければ何も出さない。OS 操作権の受け渡し時に使う。
+  List<InteractionEvent> cancelPress() {
+    _blockPressUntilNeutral = true;
+    if (!_pressed) return const [];
+    return _endPress(screen: _lastScreen, allowClick: false);
+  }
+
   /// 現在の位置合わせ（ホモグラフィ）。session内の全トラックで共有するため
   /// MultiHandEngine が読み出し、新規トラックのエンジンへ配布する。
   Homography? get homography => _homography;
