@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../core/calibration_config.dart';
 import '../core/geom.dart';
+import '../core/ink_color_prefs.dart';
 import '../core/interaction_engine.dart';
 import '../core/multi_hand_engine.dart';
 import '../core/pointer_state.dart';
@@ -183,6 +184,8 @@ class _HomePageState extends State<HomePage> {
     _loadShowEdgePalette();
     _loadGestureToggles();
     _loadPrimaryHandover();
+    _overlay.selectColorSlot(_inkColorPrefs.load());
+    _overlay.addListener(_persistInkColor);
 
     _pairing =
         widget.pairingController ??
@@ -230,6 +233,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _disposed = true;
+    _overlay.removeListener(_persistInkColor);
     _overlayAttempt++;
     _pairing.removeListener(_handlePairingChanged);
     _pairing.dispose();
@@ -1747,6 +1751,11 @@ class _HomePageState extends State<HomePage> {
       // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
     }
   }
+
+  /// 選んだ描画色の永続化（Clear All・再位置合わせ・再接続・再起動で保持）。
+  late final _inkColorPrefs = InkColorPrefs(_userSettingsFile('ink_color'));
+
+  void _persistInkColor() => _inkColorPrefs.save(_overlay.selectedColorSlot);
 
   File? _showEdgePalettePrefsFile() => _userSettingsFile('show_edge_palette');
 
