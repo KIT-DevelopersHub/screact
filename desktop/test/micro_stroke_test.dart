@@ -77,12 +77,12 @@ void main() {
       );
     });
 
-    test('素早い短線は末尾トリムで1点になっても残る（判定はトリム前）', () {
-      // 4点・約100ms・軌跡長0.03。トリム3点で1点化される。
+    test('素早い短線は残り、末尾トリムで1点に縮まない（Issue #28）', () {
+      // 4点・約100ms・軌跡長0.03。以前はトリム3点で1点化されていた。
       drawFrames(0, line(0.5, 0.53, 4));
       at(0, InteractionKind.drawUp, const Vec2(0.53, 0.5));
       expect(model.strokes, hasLength(1));
-      expect(model.strokes.single.points, hasLength(1));
+      expect(model.strokes.single.points.length, greaterThanOrEqualTo(2));
     });
 
     test('長押しした点（句読点・意図した点）は1点でも残る', () {
