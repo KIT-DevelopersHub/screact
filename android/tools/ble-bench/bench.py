@@ -64,6 +64,8 @@ class Condition:
 class Run:
     condition: Condition
     started_ns: int = 0
+    stop_sent_ns: int = 0
+    error: str = ""
     frames: dict[int, tuple[int, int, int]] = field(default_factory=dict)  # frameId -> (t_ns, bytes, units)
     fragments: dict[int, dict[int, bytes]] = field(default_factory=dict)
     units_received: int = 0
@@ -145,6 +147,9 @@ class Run:
             "interval_max_ms": r(max(intervals) if intervals else None),
             "throughput_kBps": r(payload_bytes / span_s / 1000, 2) if span_s else None,
             "link_kBps": r(self.unit_bytes_received / span_s / 1000, 2) if span_s else None,
+            # START から STOP 送信まで。制御の書き込みが詰まると指定の秒数より延びる。
+            "run_s": r((self.stop_sent_ns - self.started_ns) / 1e9, 1) if self.stop_sent_ns else None,
+            "error": self.error,
             "rtt_n": len(rtts),
             "rtt_p50_ms": r(nearest_rank(rtts, 0.5)),
             "rtt_p95_ms": r(nearest_rank(rtts, 0.95)),
@@ -203,6 +208,7 @@ class Runner:
         await asyncio.sleep(self.duration)
         stop.set()
         await pinger
+        self.run.stop_sent_ns = now_ns()
         await self.send_control(bytes([CMD_STOP]))
         try:
             await asyncio.wait_for(self.stats_event.wait(), 10)
@@ -290,7 +296,18 @@ async def run_ble(args, conditions: list[Condition]) -> None:
         runs, summaries = [], []
         for condition in conditions:
             print(f"[ble] {condition.name} {args.duration}s", flush=True)
-            run = await runner.measure(condition)
+            try:
+                run = await runner.measure(condition)
+            except Exception as error:  # noqa: BLE001  切断などで続けられない。途中までを記録して終える。
+                run, runner.run = runner.run, None
+                run.error = repr(error)
+                summary = run.summary("ble", {"conn_params_request": args.conn_params})
+                print_summary(summary)
+                print(f"  中断: {run.error}", flush=True)
+                runs.append(run)
+                summaries.append(summary)
+                write_outputs(args.out, args.prefix, "ble", runs, summaries)
+                return
             info = await ble_connection_info(client)
             summary = run.summary("ble", {**info, "conn_params_request": args.conn_params})
             print_summary(summary)
