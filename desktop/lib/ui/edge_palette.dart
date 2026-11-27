@@ -11,10 +11,14 @@ class OverlayWithEdgePalette extends StatelessWidget {
   final OverlayModel model;
   final bool showEdgePalette;
 
+  /// パレットの描画に使ったレイアウトを受け取る（[EdgePaletteOverlay.onLayout]）。
+  final ValueChanged<EdgePaletteLayout>? onPaletteLayout;
+
   const OverlayWithEdgePalette({
     super.key,
     required this.model,
     required this.showEdgePalette,
+    this.onPaletteLayout,
   });
 
   @override
@@ -28,6 +32,7 @@ class OverlayWithEdgePalette extends StatelessWidget {
           EdgePaletteOverlay(
             key: const ValueKey('overlay-edge-palette'),
             model: model,
+            onLayout: onPaletteLayout,
           ),
         OverlayCanvas(model: model),
       ],
@@ -40,11 +45,16 @@ class OverlayWithEdgePalette extends StatelessWidget {
 /// 配置は [EdgePaletteLayout] が返す矩形をそのまま使う。入力側のヒット判定も
 /// 同じレイアウトを使うので、見た目と判定はずれない。
 /// オーバーレイはクリックを透過するため、Flutter のタップには頼らない
-/// （[IgnorePointer] で包む）。パレットへの入力は別の Issue で扱う。
+/// （[IgnorePointer] で包む）。パレットへの手の入力は、OS 入力へ渡す前に
+/// `PaletteInputRouter` が [onLayout] で受け取った同じレイアウトで判定する。
 class EdgePaletteOverlay extends StatelessWidget {
   final OverlayModel model;
 
-  const EdgePaletteOverlay({super.key, required this.model});
+  /// 描画に使ったレイアウトを、計算のたびに知らせる（入力のヒット判定用）。
+  /// build 中に呼ぶので、受け取り側は setState しないこと。
+  final ValueChanged<EdgePaletteLayout>? onLayout;
+
+  const EdgePaletteOverlay({super.key, required this.model, this.onLayout});
 
   /// 手のカーソルが上にあるスウォッチの色スロット（消しゴム中の手は除く）。
   static Set<int> hoveredSlots(OverlayModel model, EdgePaletteLayout layout) {
@@ -73,6 +83,7 @@ class EdgePaletteOverlay extends StatelessWidget {
             screenSize: size,
             devicePixelRatio: dpr,
           );
+          onLayout?.call(layout);
           return AnimatedBuilder(
             animation: model,
             builder:

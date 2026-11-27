@@ -23,8 +23,10 @@ import 'calibration_flow.dart';
 import 'calibration_target.dart';
 import 'color_palette.dart';
 import 'edge_palette.dart';
+import 'edge_palette_layout.dart';
 import 'pairing_controller.dart';
 import 'pairing_qr_panel.dart';
+import 'palette_input_router.dart';
 import 'production_design.dart';
 
 enum DesktopSection { connection, calibration, workspace, settings }
@@ -72,6 +74,12 @@ class _HomePageState extends State<HomePage> {
   final _calibConfig = CalibrationConfig.forCalibrationTarget();
   late final _engine = MultiHandEngine(config: _calibConfig);
   final _overlay = OverlayModel();
+  // 画面端パレットの上の手の操作を OS 入力へ流さず、色の選択として消費する。
+  late final _paletteRouter = PaletteInputRouter(
+    onSelectSlot: _overlay.selectColorSlot,
+  );
+  // 全画面オーバーレイがパレットの描画に使った最新のレイアウト（入力判定にも使う）。
+  EdgePaletteLayout? _paletteLayout;
   late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
   final _connLog = ConnectionLog();
@@ -266,17 +274,30 @@ class _HomePageState extends State<HomePage> {
     if (!_disposed) _connLog.add(message);
   }
 
+  /// パレットの入力判定に使うレイアウト。全画面オーバーレイでパレットを
+  /// 表示している間だけ返す（それ以外は判定せず、従来どおり OS へ流す）。
+  EdgePaletteLayout? get _paletteInputLayout =>
+      _overlayOn && !_flow.showingTarget && _showEdgePalette
+          ? _paletteLayout
+          : null;
+
   void _handleServerEvents(List<InteractionEvent> events) {
     // MultiHandEngineが安定して保持する主トラックだけをOS入力へ流す。
+    // パレットの上の操作は OS へ流さない。
     if (_disposed) return;
-    for (final event in events) {
+    final routed = _paletteRouter.routeOsEvents(events, _paletteInputLayout);
+    for (final event in routed) {
       _bridge.applyEvent(event);
     }
   }
 
   void _handleTrackEvents(Map<int, List<InteractionEvent>> byTrack) {
     // 各トラックのカーソル/描画をオーバーレイへ（最大2手を別色で表示）。
-    if (!_disposed) _overlay.applyTrackEvents(byTrack);
+    // どのトラックでもパレットのスウォッチで描画色を選べる。
+    if (_disposed) return;
+    _overlay.applyTrackEvents(
+      _paletteRouter.routeTrackEvents(byTrack, _paletteInputLayout),
+    );
   }
 
   void _handleFrame(InputFrame frame) {
@@ -678,6 +699,7 @@ class _HomePageState extends State<HomePage> {
           child: OverlayWithEdgePalette(
             model: _overlay,
             showEdgePalette: _showEdgePalette,
+            onPaletteLayout: (layout) => _paletteLayout = layout,
           ),
         ),
       );
