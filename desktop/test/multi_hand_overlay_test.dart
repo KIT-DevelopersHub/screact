@@ -11,7 +11,61 @@ List<Vec2> _asVec(List<List<double>> lm) => [
   for (final p in lm) Vec2(p[0], p[1]),
 ];
 
+Future<void> _pumpOverlay(WidgetTester tester, OverlayModel model) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: SizedBox(
+            width: 640,
+            height: 360,
+            child: RepaintBoundary(
+              child: ColoredBox(
+                color: Colors.white,
+                child: OverlayCanvas(model: model),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  group('cursorBadgeNumbers', () {
+    test('1トラック以下では印を出さない', () {
+      expect(OverlayCanvas.cursorBadgeNumbers(const []), isEmpty);
+      expect(OverlayCanvas.cursorBadgeNumbers(const [12]), isEmpty);
+    });
+
+    test('2トラックには trackId ではなく 1, 2 を trackId 昇順で振る', () {
+      expect(OverlayCanvas.cursorBadgeNumbers(const [12, 7]), {7: 1, 12: 2});
+      expect(OverlayCanvas.cursorBadgeNumbers(const [7, 12]), {7: 1, 12: 2});
+    });
+
+    test('重複したIDは1つとして数える', () {
+      expect(OverlayCanvas.cursorBadgeNumbers(const [5, 5]), isEmpty);
+      expect(OverlayCanvas.cursorBadgeNumbers(const [5, 3, 5]), {3: 1, 5: 2});
+    });
+  });
+
+  testWidgets('1トラックのカーソルには番号の印を出さない（ゴールデン）', (tester) async {
+    final model = OverlayModel();
+    model.showSkeletons({7: _asVec(hand7Landmarks)});
+    model.applyTrack(
+      7,
+      const InteractionEvent(InteractionKind.pressDown, Vec2(0.27, 0.31)),
+    );
+    await _pumpOverlay(tester, model);
+    await expectLater(
+      find.byType(OverlayCanvas),
+      matchesGoldenFile('goldens/one_hand_cursor.png'),
+    );
+  });
+
   test('trackIdがパレット周期分離れていても2トラックは別色になる', () {
     final model = OverlayModel();
     model.showSkeletons({
