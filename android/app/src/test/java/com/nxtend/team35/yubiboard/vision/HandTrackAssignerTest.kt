@@ -60,7 +60,7 @@ class HandTrackAssignerTest {
     // 手は 30fps 相当（33ms 間隔）の合成軌跡で動かす。どの候補がどの手かは z に入れたラベルで見分ける。
 
     @Test
-    fun `crossing hands swap ids with distance-only matching`() {
+    fun `crossing hands keep ids`() {
         val scene = Scene()
         val handA = linearPath(startX = 0.36f, startY = 0.50f, stepX = 0.04f, frames = 8)
         val handB = linearPath(startX = 0.64f, startY = 0.51f, stepX = -0.04f, frames = 8)
@@ -68,13 +68,9 @@ class HandTrackAssignerTest {
 
         val initial = frames.first()
         assertNotEquals(initial[A], initial[B])
-        // 現状の挙動: 2 手が最も近づいた直後（4 フレーム目）に ID が入れ替わり、そのまま戻らない。
-        // #20 で速度予測を入れて改善予定。
-        assertEquals(initial, frames[3])
-        assertEquals(initial[B], frames[4][A])
-        assertEquals(initial[A], frames[4][B])
-        assertEquals(initial[B], frames.last()[A])
-        assertEquals(initial[A], frames.last()[B])
+        // 距離だけで対応付けると、最も近づいた直後（4 フレーム目）に入れ替わっていた（#19）。
+        // 速度から予測した位置で対応付けるので、交差しても ID を保つ。
+        frames.forEach { assertEquals(initial, it) }
     }
 
     @Test
@@ -89,7 +85,7 @@ class HandTrackAssignerTest {
     }
 
     @Test
-    fun `side by side hands swap ids for one frame when landmarks jitter`() {
+    fun `side by side hands keep ids through jitter when handedness is confident`() {
         val scene = Scene()
         val handA = linearPath(startX = 0.47f, startY = 0.30f, stepY = 0.02f, frames = 6).toMutableList()
         val handB = linearPath(startX = 0.53f, startY = 0.30f, stepY = 0.02f, frames = 6).toMutableList()
@@ -103,18 +99,39 @@ class HandTrackAssignerTest {
             )
         }
 
-        val initial = frames.first()
-        assertEquals(initial, frames[2])
-        // 現状の挙動: ぶれたフレームだけ ID が入れ替わる（handedness は使っていない）。
-        // #20 で左右判定を入れて改善予定。
-        assertEquals(initial[B], frames[3][A])
-        assertEquals(initial[A], frames[3][B])
-        assertEquals(initial, frames[4])
-        assertEquals(initial, frames.last())
+        // 距離だけで対応付けると、ぶれたフレームだけ入れ替わっていた（#19）。
+        // 確かな左右の判定が食い違う組み合わせには罰則が付くので、ID を保つ。
+        frames.forEach { assertEquals(frames.first(), it) }
     }
 
     @Test
-    fun `hand reappearing past the other hand takes its id with distance-only matching`() {
+    fun `ignores handedness below the confidence threshold`() {
+        val scene = Scene()
+        val initial = scene.frame(
+            hand(A, Point(0.47f, 0.30f), handedness = "LEFT", handednessScore = 0.5f),
+            hand(B, Point(0.53f, 0.30f), handedness = "RIGHT", handednessScore = 0.5f),
+        )
+        val jittered = scene.frame(
+            hand(A, Point(0.505f, 0.30f), handedness = "LEFT", handednessScore = 0.5f),
+            hand(B, Point(0.495f, 0.30f), handedness = "RIGHT", handednessScore = 0.5f),
+        )
+
+        // 確かでない判定は使わないので、距離だけで決まり入れ替わる。
+        assertEquals(initial[B], jittered[A])
+        assertEquals(initial[A], jittered[B])
+    }
+
+    @Test
+    fun `handedness change alone does not drop a single hand's id`() {
+        val scene = Scene()
+        val left = scene.frame(hand(A, Point(0.4f, 0.5f), handedness = "LEFT", handednessScore = 0.95f))
+        val right = scene.frame(hand(A, Point(0.41f, 0.5f), handedness = "RIGHT", handednessScore = 0.95f))
+
+        assertEquals(left, right)
+    }
+
+    @Test
+    fun `hand reappearing past the other hand keeps its id`() {
         val scene = Scene()
         val handA = linearPath(startX = 0.40f, startY = 0.50f, stepX = 0.04f, frames = 7)
         val before = (0..2).map { i -> scene.frame(hand(A, handA[i]), hand(B, Point(0.56f, 0.50f))) }
@@ -126,10 +143,9 @@ class HandTrackAssignerTest {
         val initial = before.first()
         assertEquals(initial, before.last())
         hidden.forEach { assertEquals(mapOf(B to initial[B]), it) }
-        // 現状の挙動: 再出現した A が B の ID を取り、B が A の ID を取る。
-        // #20 で速度予測を入れて改善予定。
-        assertEquals(initial[B], reappeared[A])
-        assertEquals(initial[A], reappeared[B])
+        // 距離だけで対応付けると、再出現した A と B の ID が入れ替わっていた（#19）。
+        // 隠れていた間も A の速度で位置を予測するので、ID を保つ。
+        assertEquals(initial, reappeared)
     }
 
     @Test
