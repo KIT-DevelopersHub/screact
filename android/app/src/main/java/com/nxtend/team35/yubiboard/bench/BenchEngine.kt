@@ -136,7 +136,12 @@ class BenchEngine(
                     unitIndex = 0
                     currentBytes = pending.payload.size
                 }
-                val ok = transport.sendFrameUnit(units[unitIndex])
+                val ok = try {
+                    transport.sendFrameUnit(units[unitIndex])
+                } catch (error: RuntimeException) {
+                    log("send failed: ${error.message}")
+                    false
+                }
                 unitIndex++
                 if (!ok) {
                     // 分割途中で失敗したら、そのフレームの残りは送らない。

@@ -38,6 +38,7 @@ class BleBenchPeripheral(
         val CONTROL_UUID: UUID = UUID.fromString("6c8f0003-3c1e-4d7a-9b8e-5c2a7d1e0b17")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val DEFAULT_MTU = 23
+        private const val MAX_ATTRIBUTE_BYTES = 512
         private const val NOTIFY_TIMEOUT_MS = 2_000L
     }
 
@@ -101,7 +102,8 @@ class BleBenchPeripheral(
         status = "stopped"
     }
 
-    override fun maxUnitBytes(): Int = mtu - 3
+    // ATT の上限は MTU − 3 だが、Android は 1 属性値を 512 B までに制限している（MTU 517 でも 514 B は送れない）。
+    override fun maxUnitBytes(): Int = minOf(mtu - 3, MAX_ATTRIBUTE_BYTES)
 
     override fun mtu(): Int = mtu
 

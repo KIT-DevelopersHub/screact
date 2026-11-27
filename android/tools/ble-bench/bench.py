@@ -117,6 +117,9 @@ class Run:
         sent = stats.get("framesSent")
         received = len(self.frames)
         units = [u for _, _, u in self.frames.values()]
+        # frameId は START ごとに 1 から振り直す。1..最大受信 ID のうち届かなかった数。
+        max_id = max(self.frames) if self.frames else 0
+        missing_in_range = max_id - received
 
         def r(value, digits=2):
             return None if value is None else round(value, digits)
@@ -135,7 +138,7 @@ class Run:
             "unit_failures": stats.get("unitFailures"),
             "received": received,
             "loss_vs_generated_pct": r(100 * (1 - received / generated), 2) if generated else None,
-            "loss_vs_sent_pct": r(100 * (1 - received / sent), 2) if sent else None,
+            "missing_in_range": missing_in_range,
             "recv_fps": r((received - 1) / span_s, 1) if span_s else None,
             "interval_p50_ms": r(nearest_rank(intervals, 0.5)),
             "interval_p95_ms": r(nearest_rank(intervals, 0.95)),
@@ -231,7 +234,7 @@ def write_outputs(out_dir: str, prefix: str, transport: str, runs: list[Run], su
 
 
 def print_summary(summary: dict) -> None:
-    keys = ["condition", "frame_bytes", "units_per_frame", "received", "loss_vs_generated_pct", "loss_vs_sent_pct",
+    keys = ["condition", "frame_bytes", "units_per_frame", "received", "loss_vs_generated_pct", "missing_in_range",
             "recv_fps", "interval_p50_ms", "interval_p95_ms", "throughput_kBps", "rtt_p50_ms", "rtt_p95_ms"]
     print("  " + ", ".join(f"{k}={summary.get(k)}" for k in keys), flush=True)
 
@@ -246,8 +249,8 @@ async def ble_connection_info(client) -> dict:
         info["peripheral_latency"] = params.connection_latency
         info["supervision_timeout_ms"] = params.link_timeout * 10
         phy = device.get_connection_phy()
-        info["phy_tx_2m"] = bool(phy.transmit_info.is_uncoded2_m_phy)
-        info["phy_rx_2m"] = bool(phy.receive_info.is_uncoded2_m_phy)
+        info["phy_tx_2m"] = bool(phy.transmit_info.is_uncoded_2m_phy)
+        info["phy_rx_2m"] = bool(phy.receive_info.is_uncoded_2m_phy)
     except Exception as error:  # noqa: BLE001
         info["conn_info_error"] = repr(error)
     return info
