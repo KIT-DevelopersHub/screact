@@ -10,8 +10,13 @@ import 'fixtures/two_hand_fixtures.dart';
 /// MockHand のポインタ姿勢（人差し指のみ伸展）で1トラック分の JSON を作る。
 /// 開いた手のfixtureはスクロール扱いになり単発フレームでイベントを出さないため、
 /// 操作イベントを確実に検証する用途にはこの合成トラックを使う。
-Map<String, dynamic> pointerTrack(int trackId, Vec2 tip, {bool pinch = false}) {
-  final f = MockHand.at(frameId: 0, tip: tip, pinch: pinch);
+Map<String, dynamic> pointerTrack(
+  int trackId,
+  Vec2 tip, {
+  bool pinch = false,
+  bool together = false,
+}) {
+  final f = MockHand.at(frameId: 0, tip: tip, pinch: pinch, together: together);
   return {
     'trackId': trackId,
     'landmarks': [
@@ -37,12 +42,13 @@ Map<String, dynamic> multiHandFrame(
   int frameId,
   List<Map<String, dynamic>> hands, {
   String sessionId = 'session-01',
+  int? capturedAtMs,
 }) => {
   'schemaVersion': 1,
   'messageType': 'hand_frame',
   'sessionId': sessionId,
   'frameId': frameId,
-  'capturedAtMonotonicMs': frameId * 33,
+  'capturedAtMonotonicMs': capturedAtMs ?? frameId * 33,
   'hands': hands,
 };
 
@@ -207,8 +213,10 @@ void main() {
   });
 
   group('MultiHandEngine 2トラック分離', () {
+    // 既存の解除・主トラック交代の検証は、猶予0（従来の即時解除）で行う。
+    // 猶予ありの挙動は「一時欠落の猶予」グループで検証する。
     MultiHandEngine calibrated() {
-      final e = MultiHandEngine();
+      final e = MultiHandEngine(trackLossGraceMs: 0);
       expect(e.calibrate(MockHand.markers()), isTrue);
       expect(e.isCalibrated, isTrue);
       return e;
@@ -402,11 +410,12 @@ void main() {
 
     test('最初からピンチ中でも主トラックを選びpressDownを補完する', () {
       final e = calibrated();
-      InputFrame pinching(int frameId) => InputFrame.parse(
-        multiHandFrame(frameId, [
-          pointerTrack(7, const Vec2(0.4, 0.5), pinch: true),
-        ]),
-      )!;
+      InputFrame pinching(int frameId) =>
+          InputFrame.parse(
+            multiHandFrame(frameId, [
+              pointerTrack(7, const Vec2(0.4, 0.5), pinch: true),
+            ]),
+          )!;
 
       final first = e.onInputFrame(pinching(1))!;
       expect(e.primaryTrackId, isNull);
@@ -414,10 +423,10 @@ void main() {
 
       final second = e.onInputFrame(pinching(2))!;
       expect(e.primaryTrackId, 7);
-      expect(
-        e.primaryEventsOf(second)!.map((event) => event.kind),
-        [InteractionKind.pressDown, InteractionKind.pressMove],
-      );
+      expect(e.primaryEventsOf(second)!.map((event) => event.kind), [
+        InteractionKind.pressDown,
+        InteractionKind.pressMove,
+      ]);
     });
 
     test('主トラック消失フレームは旧解除だけを選び、次候補を後で引き継ぐ', () {
@@ -443,6 +452,302 @@ void main() {
           e.onInputFrame(onePointerHand(5, trackId: 12, x: 0.7))!;
       expect(e.primaryTrackId, 12);
       expect(e.primaryTrackIdOf(candidate2), 12);
+    });
+  });
+  group('一時欠落の猶予（trackLossGraceMs）', () {
+    MultiHandEngine calibrated({int graceMs = 300}) {
+      final e = MultiHandEngine(trackLossGraceMs: graceMs);
+      expect(e.calibrate(MockHand.markers()), isTrue);
+      return e;
+    }
+
+    InputFrame frameAt(
+      int frameId,
+      int atMs,
+      List<Map<String, dynamic>> hands,
+    ) => InputFrame.parse(multiHandFrame(frameId, hands, capturedAtMs: atMs))!;
+
+    Map<String, dynamic> drawing(int trackId, double x) =>
+        pointerTrack(trackId, Vec2(x, 0.5), together: true);
+
+    Map<String, dynamic> pinching(int trackId, double x) =>
+        pointerTrack(trackId, Vec2(x, 0.5), pinch: true);
+
+    Iterable<InteractionKind> kindsOf(
+      Map<int, List<InteractionEvent>> out,
+      int trackId,
+    ) => (out[trackId] ?? const <InteractionEvent>[]).map((ev) => ev.kind);
+
+    /// 描画が始まるまでフレームを流し、描画中にした最後の frameId を返す。
+    int startDrawing(MultiHandEngine e, int trackId) {
+      for (var id = 1; id <= 10; id++) {
+        final out =
+            e.onInputFrame(
+              frameAt(id, id * 33, [drawing(trackId, 0.3 + id * 0.005)]),
+            )!;
+        if (kindsOf(out, trackId).contains(InteractionKind.drawDown)) {
+          return id;
+        }
+      }
+      fail('描画が始まらない');
+    }
+
+    test('既定の猶予は Android の保持時間に合わせた300ms', () {
+      expect(MultiHandEngine.defaultTrackLossGraceMs, 300);
+      expect(MultiHandEngine().trackLossGraceMs, 300);
+      expect(() => MultiHandEngine(trackLossGraceMs: -1), throwsArgumentError);
+    });
+
+    test('一時欠落して猶予内に戻ると、線を閉じずに続ける', () {
+      final e = calibrated();
+      final last = startDrawing(e, 7);
+      final t0 = last * 33;
+
+      // 2フレーム（約66ms）見失う。イベントは出さず、状態は保留。
+      final lost1 = e.onInputFrame(frameAt(last + 1, t0 + 33, const []))!;
+      final lost2 = e.onInputFrame(frameAt(last + 2, t0 + 66, const []))!;
+      expect(lost1, isEmpty, reason: '猶予中はイベントを出さない');
+      expect(lost2, isEmpty);
+      expect(e.activeTrackIds, isEmpty);
+      expect(e.lostTrackIds, [7]);
+
+      // 同じ trackId が戻る → drawDown なしで drawMove が続く。
+      final back =
+          e.onInputFrame(frameAt(last + 3, t0 + 99, [drawing(7, 0.4)]))!;
+      expect(kindsOf(back, 7), contains(InteractionKind.drawMove));
+      expect(kindsOf(back, 7), isNot(contains(InteractionKind.drawDown)));
+      expect(kindsOf(back, 7), isNot(contains(InteractionKind.drawUp)));
+      expect(kindsOf(back, 7), isNot(contains(InteractionKind.release)));
+      expect(e.activeTrackIds, [7]);
+      expect(e.lostTrackIds, isEmpty);
+    });
+
+    test('猶予を過ぎたら確定消失として解除し、再出現は新規扱い', () {
+      final e = calibrated();
+      final last = startDrawing(e, 7);
+      final t0 = last * 33;
+
+      expect(e.onInputFrame(frameAt(last + 1, t0 + 299, const []))!, isEmpty);
+      final expired = e.onInputFrame(frameAt(last + 2, t0 + 300, const []))!;
+      expect(kindsOf(expired, 7), [
+        InteractionKind.drawUp,
+        InteractionKind.release,
+      ]);
+      expect(e.lostTrackIds, isEmpty);
+      expect(e.activeTrackCount, 0);
+
+      // 同じIDが別の手に再割り当てされても、過去の描画状態は復活しない。
+      final reborn =
+          e.onInputFrame(
+            frameAt(last + 3, t0 + 333, [
+              pointerTrack(7, const Vec2(0.6, 0.5)),
+            ]),
+          )!;
+      expect(kindsOf(reborn, 7), isNot(contains(InteractionKind.drawMove)));
+      expect(kindsOf(reborn, 7), isNot(contains(InteractionKind.pressMove)));
+      expect(kindsOf(reborn, 7), isNot(contains(InteractionKind.drawUp)));
+    });
+
+    test('押下中に猶予が切れたら pressUp を出して OS 入力を固着させない', () {
+      final e = calibrated();
+      e.onInputFrame(frameAt(1, 33, [pinching(7, 0.4)]));
+      final second = e.onInputFrame(frameAt(2, 66, [pinching(7, 0.41)]))!;
+      expect(e.primaryTrackId, 7);
+      expect(e.primaryEventsOf(second)!.map((ev) => ev.kind), [
+        InteractionKind.pressDown,
+        InteractionKind.pressMove,
+      ]);
+
+      final lost = e.onInputFrame(frameAt(3, 99, const []))!;
+      expect(e.primaryEventsOf(lost), isNull, reason: '猶予中はOSへ何も送らない');
+
+      final expired = e.onInputFrame(frameAt(4, 400, const []))!;
+      final osEvents = e.primaryEventsOf(expired)!.map((ev) => ev.kind);
+      expect(osEvents, contains(InteractionKind.pressUp));
+      expect(osEvents, contains(InteractionKind.release));
+      expect(e.primaryTrackId, isNull);
+    });
+
+    test('主トラックの猶予中は所有権を他トラックへ移さない', () {
+      final e = calibrated();
+      e.onInputFrame(frameAt(1, 33, [pinching(7, 0.3), pinching(12, 0.7)]));
+      e.onInputFrame(frameAt(2, 66, [pinching(7, 0.3), pinching(12, 0.7)]));
+      expect(e.primaryTrackId, 7);
+
+      // 主トラック 7 が見えない間、12 がピンチを続けてもOSへは流さない。
+      for (var i = 3; i <= 6; i++) {
+        final out =
+            e.onInputFrame(
+              frameAt(i, 66 + (i - 2) * 50, [pinching(12, 0.7 + i * 0.01)]),
+            )!;
+        expect(e.primaryTrackId, 7, reason: '猶予中は所有者のまま');
+        expect(e.lostTrackIds, [7]);
+        expect(e.primaryEventsOf(out), isNull, reason: '12 の押下をOSへ流さない');
+      }
+
+      // 猶予内に 7 が戻れば押下中のまま続ける（pressDown を重ねない）。
+      final back =
+          e.onInputFrame(
+            frameAt(7, 330, [pinching(7, 0.32), pinching(12, 0.75)]),
+          )!;
+      expect(e.primaryTrackId, 7);
+      final os = e.primaryEventsOf(back)!.map((ev) => ev.kind);
+      expect(os, contains(InteractionKind.pressMove));
+      expect(os, isNot(contains(InteractionKind.pressDown)));
+    });
+
+    test('主トラックの猶予が切れたら旧所有者を解除し、次候補は安定後に引き継ぐ', () {
+      final e = calibrated();
+      e.onInputFrame(frameAt(1, 33, [pinching(7, 0.3), pinching(12, 0.7)]));
+      e.onInputFrame(frameAt(2, 66, [pinching(7, 0.3), pinching(12, 0.7)]));
+      expect(e.primaryTrackId, 7);
+
+      e.onInputFrame(frameAt(3, 99, [pinching(12, 0.7)]));
+      final expired = e.onInputFrame(frameAt(4, 366, [pinching(12, 0.71)]))!;
+      expect(e.primaryTrackIdOf(expired), 7, reason: '旧所有者の解除だけをOSへ送る');
+      expect(
+        e.primaryEventsOf(expired)!.map((ev) => ev.kind),
+        containsAll([InteractionKind.pressUp, InteractionKind.release]),
+      );
+      expect(e.primaryTrackId, isNull);
+
+      final c1 = e.onInputFrame(frameAt(5, 399, [pinching(12, 0.72)]))!;
+      expect(e.primaryTrackIdOf(c1), isNull);
+      final c2 = e.onInputFrame(frameAt(6, 432, [pinching(12, 0.73)]))!;
+      expect(e.primaryTrackId, 12);
+      // 引き継ぎ時はピンチ途中でも pressDown を補完して押下なしドラッグを防ぐ。
+      expect(e.primaryEventsOf(c2)!.first.kind, InteractionKind.pressDown);
+    });
+
+    test('2手で片方が一時欠落しても、他方の描画は影響を受けない', () {
+      final e = calibrated();
+      for (var i = 1; i <= 4; i++) {
+        e.onInputFrame(
+          frameAt(i, i * 33, [
+            drawing(7, 0.3 + i * 0.005),
+            drawing(12, 0.7 - i * 0.005),
+          ]),
+        );
+      }
+
+      final lost = e.onInputFrame(frameAt(5, 165, [drawing(12, 0.67)]))!;
+      expect(lost.containsKey(7), isFalse);
+      expect(kindsOf(lost, 12), contains(InteractionKind.drawMove));
+      expect(e.activeTrackIds, [12]);
+      expect(e.lostTrackIds, [7]);
+
+      final back =
+          e.onInputFrame(
+            frameAt(6, 198, [drawing(7, 0.33), drawing(12, 0.66)]),
+          )!;
+      expect(kindsOf(back, 7), contains(InteractionKind.drawMove));
+      expect(kindsOf(back, 7), isNot(contains(InteractionKind.drawDown)));
+      expect(kindsOf(back, 12), contains(InteractionKind.drawMove));
+      expect(kindsOf(back, 12), isNot(contains(InteractionKind.drawUp)));
+    });
+
+    test('猶予中でも WebSocket 切断相当の releaseAll は即時に全解除', () {
+      final e = calibrated();
+      final last = startDrawing(e, 7);
+      e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+      expect(e.lostTrackIds, [7]);
+
+      final released = e.releaseAll();
+      expect(released[7]!.map((ev) => ev.kind), [
+        InteractionKind.drawUp,
+        InteractionKind.release,
+      ]);
+      expect(e.lostTrackIds, isEmpty);
+      expect(e.activeTrackCount, 0);
+    });
+
+    test('時刻が進まないフレームでは経過を測れないため確定消失として扱う', () {
+      final e = calibrated();
+      e.onInputFrame(frameAt(1, 0, [pinching(7, 0.4)]));
+      final out = e.onInputFrame(frameAt(2, 0, const []))!;
+      expect(kindsOf(out, 7), contains(InteractionKind.release));
+      expect(e.lostTrackIds, isEmpty);
+    });
+
+    group('hand_frame が途絶えたときの時計による猶予切れ', () {
+      test('フレームが止まっても猶予後に描画を閉じる', () {
+        var clock = 1000;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        final last = startDrawing(e, 7);
+        // 手が消えたフレームを最後に hand_frame が途絶える。
+        e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+        expect(e.lostTrackIds, [7]);
+        expect(e.hasLostTracks, isTrue);
+
+        // 最後に 7 を見た desktop 時刻から測る（フレーム時刻とは混ぜない）。
+        clock += 299;
+        expect(e.expireLostTracks(), isEmpty, reason: '猶予内は保留');
+        expect(e.lostTrackIds, [7]);
+
+        clock += 1;
+        final expired = e.expireLostTracks();
+        expect(kindsOf(expired, 7), [
+          InteractionKind.drawUp,
+          InteractionKind.release,
+        ]);
+        expect(e.lostTrackIds, isEmpty);
+        expect(e.hasLostTracks, isFalse);
+        expect(e.activeTrackCount, 0);
+        expect(e.expireLostTracks(), isEmpty, reason: '二重に解除しない');
+      });
+
+      test('押下中にフレームが止まっても猶予後に pressUp を OS へ流す', () {
+        var clock = 0;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        e.onInputFrame(frameAt(1, 33, [pinching(7, 0.4)]));
+        clock += 33;
+        e.onInputFrame(frameAt(2, 66, [pinching(7, 0.41)]));
+        expect(e.primaryTrackId, 7);
+        clock += 33;
+        e.onInputFrame(frameAt(3, 99, const []));
+        expect(e.lostTrackIds, [7]);
+
+        final early = e.expireLostTracks(clock + 100);
+        expect(early, isEmpty);
+        expect(e.primaryEventsOf(early), isNull);
+
+        final expired = e.expireLostTracks(clock + 300);
+        final os = e.primaryEventsOf(expired)!.map((ev) => ev.kind);
+        expect(os, contains(InteractionKind.pressUp));
+        expect(os, contains(InteractionKind.release));
+        expect(e.primaryTrackId, isNull);
+      });
+
+      test('猶予中に同じ trackId が戻れば時計の判定でも解除しない', () {
+        var clock = 0;
+        final e = MultiHandEngine(clock: () => clock);
+        expect(e.calibrate(MockHand.markers()), isTrue);
+        final last = startDrawing(e, 7);
+        e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+        clock += 200;
+        e.onInputFrame(frameAt(last + 2, last * 33 + 233, [drawing(7, 0.4)]));
+        clock += 200;
+        expect(e.expireLostTracks(), isEmpty);
+        expect(e.activeTrackIds, [7]);
+      });
+    });
+
+    test('lostTrackIds は変更できないビューで返す', () {
+      final e = calibrated();
+      final last = startDrawing(e, 7);
+      e.onInputFrame(frameAt(last + 1, last * 33 + 33, const []));
+      final ids = e.lostTrackIds;
+      expect(() => (ids as Set<int>).clear(), throwsUnsupportedError);
+      expect(e.lostTrackIds, [7]);
+    });
+
+    test('猶予0は従来どおり消えたフレームで即時解除', () {
+      final e = calibrated(graceMs: 0);
+      e.onInputFrame(frameAt(1, 33, [pinching(7, 0.4)]));
+      final out = e.onInputFrame(frameAt(2, 66, const []))!;
+      expect(kindsOf(out, 7), contains(InteractionKind.release));
     });
   });
 }
