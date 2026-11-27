@@ -14,6 +14,7 @@ import '../net/bonjour_advertiser.dart';
 import '../net/connection_log.dart';
 import '../net/discovery.dart';
 import '../net/input_server.dart';
+import '../net/latency_probe.dart';
 import '../net/pairing_payload.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
@@ -248,6 +249,12 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
+  /// 区間計測の1行。接続ログ（UI/ファイル）と標準出力の両方へ出す。
+  void _handlePerfLog(String line) {
+    debugPrint(line);
+    _handleServerLog(line);
+  }
+
   void _handleServerLog(String message) {
     if (!_disposed) _connLog.add(message);
   }
@@ -379,6 +386,10 @@ class _HomePageState extends State<HomePage> {
       enforcePairing: _enforcePairing,
       acceptCalibrationMessages: false,
       onLog: _handleServerLog,
+      latencyProbe:
+          LatencyProbe.enabledByEnvironment()
+              ? LatencyProbe(sink: _handlePerfLog)
+              : null,
     );
     _startingServerInstance = server;
     try {
