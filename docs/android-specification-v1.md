@@ -174,17 +174,16 @@ flowchart TB
 
 ### 画面仕様
 
-画面は単一ActivityのJetpack Compose UIで構成し、本番とデバッグで`ProductionScreen`を共用する。debug APKでは本番レイアウト上に診断導線と最大2手の全骨格を重ね、release APKは本番表示に固定する。切替時にカメラと接続を破棄しない。
+画面は単一ActivityのJetpack Compose UIで構成し、debug APKとrelease APKのどちらも`ProductionScreen`だけを表示する。debug APKではプレビューに最大2手の全骨格とArUco IDを重ね、release APKは本番用の簡略Overlayを重ねる。旧デバッグ画面（`YubiBoardScreen`）はコードに残るが、現状はどこからも開けない。
 
 ```mermaid
 flowchart TB
     Screen[メイン画面]
     Screen --> Production[本番画面]
-    Screen --> Debug[デバッグ画面]
-    Production --> Preview[常時Previewと簡略Overlay]
+    Production --> Preview[常時Preview]
+    Preview --> ReleaseOverlay[release: 簡略Overlay]
+    Preview --> DebugOverlay[debug: 21点骨格・ArUco ID]
     Production --> Guide[最優先状態と主要操作]
-    Debug --> Detail[21点・ArUco ID・fps・手動モード]
-    Debug --> Diagnostics[診断・疑似入力・状態ラボ]
 ```
 
 ### 表示項目
@@ -196,7 +195,7 @@ flowchart TB
 | 本番撮影モード | PC指示に従う位置合わせまたは手追跡。手動切替は表示しない |
 | 接続入力 | PCのホスト、1〜65535のポート、6桁数字のペアリングコード |
 | 本番操作 | 接続、キャンセル、切断、即時再接続、接続設定変更、権限復旧、ヘルプ |
-| デバッグ | 手動モード、解像度、fps、しきい値、疑似入力、JSONL、本番状態ラボ |
+| デバッグ | 現状は表示しない。旧デバッグ画面の手動モード、解像度、fps、しきい値、疑似入力、JSONL、本番状態ラボはコードに残るが導線がない |
 
 接続処理中から再接続中までは接続ボタンを無効化し、切断ボタンを有効化する。未接続またはエラー表示時は接続ボタンを有効化する。
 
@@ -533,9 +532,9 @@ flowchart LR
 | 存在信頼度 | 0.5 | 0.0〜1.0 | する |
 | 追跡信頼度 | 0.5 | 0.0〜1.0 | する |
 | 最大送信fps | 20 | 5〜20 | する |
-| Experience Mode | debug APKはDebug、release APKはProduction | debugだけ切替可能 | する |
+| デバッグモード | オフ | 常にオフ（起動時と設定変更時にオフへ戻す） | する |
 | 信頼済みPC host | 空 | 空でない文字列 | resumeToken発行成功時に保存 |
-| 信頼済みPC port | 8080 | 1〜65535 | resumeToken発行成功時に保存 |
+| 信頼済みPC port | 8765 | 1〜65535 | resumeToken発行成功時に保存 |
 | resumeToken | 空 | PC発行の不透明文字列 | Keystoreの非エクスポートAES鍵で暗号化して保存 |
 | deviceId | 初回に`android-`＋UUID先頭8文字 | アプリ生成 | する |
 | ペアリングコード | 空 | 6桁数字 | しない |
@@ -545,7 +544,7 @@ flowchart LR
 
 ### 可視化とデバッグ
 
-本番の通常撮影では人差し指先端のリングだけを表示し、位置合わせではIDを表示せずマーカー枠だけを描く。デバッグ画面では従来どおり21点骨格、ArUco枠とIDを表示する。両者は同時表示しない。
+本番の通常撮影では人差し指先端のリングだけを表示し、位置合わせではIDを表示せずマーカー枠だけを描く。debug APKでは代わりに21点骨格、追跡ID、ArUco枠とIDを表示する。どちらを表示するかはビルド種別で決まり、両者は同時表示しない。
 
 PreviewとOverlayはともに`fitCenter`相当で、次の座標変換を行う。
 
@@ -557,7 +556,7 @@ flowchart LR
     Offset --> Overlay[画面上へ描画]
 ```
 
-デバッグ画面の「診断」では端末・カメラ・検出・ArUco・通信の最新値、カウンター、直近500イベント、JSONL保存、疑似21点、疑似未検出、疑似4マーカーを利用できる。「本番状態ラボ」は実カメラと実通信を変更せず本番画面の全状態を表示する。本番モードでは診断UIと詳細なしきい値を隠し、releaseからデバッグへ切り替えられない。
+旧デバッグ画面の「診断」（端末・カメラ・検出・ArUco・通信の最新値、カウンター、直近500イベント、JSONL保存、疑似21点、疑似未検出、疑似4マーカー）と「本番状態ラボ」はコードに残るが、現状はdebug APKでもrelease APKでも画面から開けない。debug APKは診断イベントの収集を続け、Logcatの`YubiBoardDiag`タグへJSONで出力する。本番画面の「設定・ヘルプ」で変えられる設定は、操作する手の数だけである。
 
 PC側のPowerShellテストハーネスは本番位置合わせ成功・再試行、ペアリング拒否、未対応版、server busy、モード切替、切断、ackタイムアウト、不正JSON、session/schema不一致、低速受信を再現する。イベントJSONL、全`hand_frame`の21点座標JSONL、接続CSV、Markdown要約を`android/debug-results/`へ保存し、任意でH.264 MP4も生成する。
 
@@ -691,7 +690,7 @@ journey
 - マーカー安定後も安定結果が到着するたび最大5 fpsで送信する。PCからの受領確認はない。
 - デバッグAPKはMediaPipeモデルとOpenCVネイティブライブラリを含むユニバーサルAPKであり、サイズが大きい。
 - `hello_error`の非再試行エラーは`ERROR`接続状態として本番UIへ表示する。通信不能と一時的なサーバー混雑は再接続状態へ移る。
-- release APKは本番UIだけを収録する。debug APKのみ設定から既存デバッグ画面と状態ラボを開ける。
+- debug APKとrelease APKのどちらも本番UIだけを表示する。旧デバッグ画面と状態ラボはコードに残るが、現状は開く導線がない。
 - 端末が1280×720を正確に同時バインドできない場合は960×540、640×480へフォールバックする。実際の解析サイズは起動時診断ログで確認できる。
 
 ## 変更時の同期対象
