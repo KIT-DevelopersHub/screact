@@ -10,6 +10,8 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.nxtend.team35.yubiboard.camera.toCorrectedBitmap
 import com.nxtend.team35.yubiboard.diagnostics.AppDiagnostics
+import com.nxtend.team35.yubiboard.diagnostics.PerfMonitor
+import com.nxtend.team35.yubiboard.diagnostics.TimestampStampTable
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 
@@ -27,9 +29,11 @@ class HandLandmarkerProcessor(
     private val frameTimes = ArrayDeque<Long>()
     private val trackingStateMachine = TrackingStateMachine()
     private val pendingMirrorByTimestamp = ConcurrentHashMap<Long, Boolean>()
+    private val pendingAnalyzedAtNanos = TimestampStampTable()
 
     init {
         require(maxHands in 1..HandTrackAssigner.MAX_HANDS)
+        PerfMonitor.setMaxHands(maxHands)
         runCatching {
             val baseOptions = BaseOptions.builder()
                 .setModelAssetPath(MODEL_FILE)
@@ -55,6 +59,8 @@ class HandLandmarkerProcessor(
             return
         }
 
+        val analyzedAtNanos = PerfMonitor.now()
+        PerfMonitor.onCapture(analyzedAtNanos)
         val capturedAt = SystemClock.uptimeMillis()
         AppDiagnostics.increment("hand.frames_submitted")
         // MediaPipeには鏡像化していない画像を渡す。撮影時のレンズ状態を時刻へ
@@ -62,14 +68,18 @@ class HandLandmarkerProcessor(
         val correctedBitmap = image.toCorrectedBitmap()
         val mpImage = BitmapImageBuilder(correctedBitmap).build()
         pendingMirrorByTimestamp[capturedAt] = mirror
+        pendingAnalyzedAtNanos.put(capturedAt, analyzedAtNanos)
         runCatching { detector.detectAsync(mpImage, capturedAt) }
             .onFailure {
                 pendingMirrorByTimestamp.remove(capturedAt)
+                pendingAnalyzedAtNanos.remove(capturedAt)
                 onError(it)
             }
     }
 
     private fun handleResult(result: HandLandmarkerResult, input: com.google.mediapipe.framework.image.MPImage) {
+        val inferenceDoneAtNanos = PerfMonitor.now()
+        val analyzedAtNanos = pendingAnalyzedAtNanos.take(result.timestampMs())
         val now = SystemClock.uptimeMillis()
         frameTimes.addLast(now)
         while (frameTimes.isNotEmpty() && frameTimes.first() < now - FPS_WINDOW_MS) {
@@ -104,6 +114,7 @@ class HandLandmarkerProcessor(
         }
         val hands = trackAssigner.assign(candidates, result.timestampMs())
         val detected = hands.isNotEmpty()
+        PerfMonitor.onInference(analyzedAtNanos, inferenceDoneAtNanos, hands.size)
         AppDiagnostics.increment("hand.results")
         if (detected) AppDiagnostics.increment("hand.detected") else AppDiagnostics.increment("hand.missing")
         AppDiagnostics.gauge("hand.fps", frameTimes.size * 1000f / FPS_WINDOW_MS)
@@ -139,6 +150,8 @@ class HandLandmarkerProcessor(
                 inferenceTimeMs = (now - result.timestampMs()).coerceAtLeast(0),
                 framesPerSecond = frameTimes.size * 1000f / FPS_WINDOW_MS,
                 cameraFacing = if (mirror) "front" else "back",
+                analyzedAtNanos = analyzedAtNanos,
+                inferenceDoneAtNanos = inferenceDoneAtNanos,
             ),
         )
     }
@@ -147,6 +160,7 @@ class HandLandmarkerProcessor(
         handLandmarker?.close()
         handLandmarker = null
         pendingMirrorByTimestamp.clear()
+        pendingAnalyzedAtNanos.clear()
     }
 
     companion object {
