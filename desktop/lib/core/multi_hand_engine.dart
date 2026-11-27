@@ -22,10 +22,18 @@ import '../protocol/messages.dart';
 /// 猶予切れはフレーム到着時に加えて、[expireLostTracks] で時計からも判定する。
 /// hand_frame が途絶えると到着時の判定が走らず、押下・描画が残り続けるため、
 /// 呼び出し側（[InputServer]）が猶予中のトラックがある間だけ周期的に呼ぶ。
+///
+/// 主トラック（OS 操作権）は、既定では前の主トラックが消えるまで変わらない。
+/// [primaryHandoverEnabled] を ON にすると、主トラックでない手が
+/// [primaryHandoverHoldMs] のあいだピンチを保ったときに操作権を移す（試作）。
+/// 主トラックが押下中・ドラッグ中、または一時欠落の猶予中のときは移さない。
 class MultiHandEngine {
   /// 一時欠落の猶予時間の既定値（ms）。Android `HandTrackAssigner` の
   /// `DEFAULT_RETENTION_MS`（300ms）に合わせた暫定値で、実機で調整する。
   static const int defaultTrackLossGraceMs = 300;
+
+  /// 操作権の受け渡しに要るピンチ保持時間の既定値（ms）。実機で調整する。
+  static const int defaultPrimaryHandoverHoldMs = 500;
 
   /// 位置合わせ・設定の基準（フレームは流し込まない）。session共有の正本。
   final InteractionEngine _calib;
@@ -51,6 +59,16 @@ class MultiHandEngine {
   /// 消えた trackId を確定消失とみなすまでの猶予（ms）。
   /// 時刻はフレームの capturedAtMonotonicMs で測る。0 なら即時解除（従来挙動）。
   final int trackLossGraceMs;
+
+  /// 主トラックでない手が操作権を受け取るまでに保つピンチの時間（ms）。
+  /// 時刻はフレームの capturedAtMonotonicMs で測る。
+  final int primaryHandoverHoldMs;
+
+  bool _primaryHandoverEnabled;
+
+  /// 操作権の受け渡し候補の trackId と、そのピンチ保持の起点時刻。
+  int? _handoverCandidateTrackId;
+  int _handoverSinceMs = 0;
 
   double _sensitivity;
   bool _smoothing;
@@ -78,11 +96,20 @@ class MultiHandEngine {
     bool smoothingEnabled = true,
     int trackLossGraceMs = defaultTrackLossGraceMs,
     int Function()? clock,
+    bool primaryHandoverEnabled = false,
+    int primaryHandoverHoldMs = defaultPrimaryHandoverHoldMs,
   }) {
     if (trackLossGraceMs < 0) {
       throw ArgumentError.value(
         trackLossGraceMs,
         'trackLossGraceMs',
+        '0以上を指定する',
+      );
+    }
+    if (primaryHandoverHoldMs < 0) {
+      throw ArgumentError.value(
+        primaryHandoverHoldMs,
+        'primaryHandoverHoldMs',
         '0以上を指定する',
       );
     }
@@ -97,6 +124,8 @@ class MultiHandEngine {
       calib,
       trackLossGraceMs,
       clock ?? _monotonicClock(),
+      primaryHandoverEnabled,
+      primaryHandoverHoldMs,
     );
   }
 
@@ -105,8 +134,13 @@ class MultiHandEngine {
     return () => watch.elapsedMilliseconds;
   }
 
-  MultiHandEngine._(this._calib, this.trackLossGraceMs, this._clock)
-    : _sensitivity = _calib.recognitionSensitivity,
+  MultiHandEngine._(
+    this._calib,
+    this.trackLossGraceMs,
+    this._clock,
+    this._primaryHandoverEnabled,
+    this.primaryHandoverHoldMs,
+  ) : _sensitivity = _calib.recognitionSensitivity,
       _smoothing = _calib.smoothingEnabled,
       _clickEnabled = _calib.clickEnabled,
       _penEnabled = _calib.penEnabled,
@@ -193,6 +227,13 @@ class MultiHandEngine {
   /// 猶予中のトラックがあるか（時計による猶予切れ判定が要るか）。
   bool get hasLostTracks => _lostTracks.isNotEmpty;
   int? get primaryTrackId => _primaryTrackId;
+
+  /// 主トラックでない手のピンチ保持で操作権を移すか（試作・既定 OFF）。
+  bool get primaryHandoverEnabled => _primaryHandoverEnabled;
+  set primaryHandoverEnabled(bool value) {
+    _primaryHandoverEnabled = value;
+    _resetHandoverCandidate();
+  }
 
   // ---- 位置合わせ（session共有）----
 
@@ -296,16 +337,84 @@ class MultiHandEngine {
         // 猶予中は他トラックへ移さない（移すと、戻ってきた旧所有者の押下中
         // 状態と新所有者の入力がOSの単一カーソル上で混ざるため）。
         _dispatchPrimaryTrackId = previousPrimary;
+        _advanceHandover(previousPrimary, now, result);
       } else {
         // このフレームは旧所有者の解除だけをOSへ送り、引き継がない。
         _dispatchPrimaryTrackId = previousPrimary;
         _primaryTrackId = null;
         _resetPrimaryCandidate();
+        _resetHandoverCandidate();
       }
     } else {
+      _resetHandoverCandidate();
       _advancePrimaryCandidate();
     }
     return result;
+  }
+
+  /// 主トラックでない手が [primaryHandoverHoldMs] のあいだピンチを保ったら、
+  /// 操作権をその手へ移す（[primaryHandoverEnabled] が ON のときだけ）。
+  ///
+  /// - 主トラックが一時欠落の猶予中なら移さない（猶予中は所有権を他へ移さない）。
+  /// - 主トラックが押下中・ドラッグ中なら移さず、保持時間も数え直す。
+  /// - 移すフレームは旧主トラックのイベントだけを OS へ流し、押下が残っていれば
+  ///   クリックなしで閉じる。新しい主トラックは次のフレームから OS へ流す。
+  /// - 新しい主トラックの受け渡しに使ったピンチは、押下をクリックなしで閉じ、
+  ///   ピンチが解けるまで再押下させない（OS にクリックとして流さない）。
+  void _advanceHandover(
+    int primary,
+    int now,
+    Map<int, List<InteractionEvent>> result,
+  ) {
+    if (!_primaryHandoverEnabled) return;
+    final primaryEngine = _tracks[primary]!;
+    if (_lostTracks.contains(primary) || primaryEngine.isPressed) {
+      _resetHandoverCandidate();
+      return;
+    }
+    final candidates = _tracks.entries
+      .where(
+        (entry) =>
+            entry.key != primary &&
+            !_lostTracks.contains(entry.key) &&
+            entry.value.isPressed &&
+            entry.value.isPointerInside,
+      )
+      .map((entry) => entry.key)
+      .toList(growable: false)..sort();
+    if (candidates.isEmpty) {
+      _resetHandoverCandidate();
+      return;
+    }
+    final candidate = candidates.first;
+    if (_handoverCandidateTrackId != candidate) {
+      _handoverCandidateTrackId = candidate;
+      _handoverSinceMs = now;
+    }
+    if (now - _handoverSinceMs < primaryHandoverHoldMs) return;
+
+    // 旧主トラックの押下を閉じてから移す（押下中は上で除外しているが、
+    // OS に押下を残さないことをここでも保証する）。
+    _appendEvents(result, primary, primaryEngine.cancelPress());
+    // 受け渡しに使ったピンチは OS へ流していないので、クリックなしで閉じる。
+    _appendEvents(result, candidate, _tracks[candidate]!.cancelPress());
+    _primaryTrackId = candidate;
+    _resetPrimaryCandidate();
+    _resetHandoverCandidate();
+  }
+
+  static void _appendEvents(
+    Map<int, List<InteractionEvent>> result,
+    int trackId,
+    List<InteractionEvent> events,
+  ) {
+    if (events.isEmpty) return;
+    result[trackId] = [...?result[trackId], ...events];
+  }
+
+  void _resetHandoverCandidate() {
+    _handoverCandidateTrackId = null;
+    _handoverSinceMs = 0;
   }
 
   /// 猶予を過ぎたか。capturedAtMonotonicMs が進んでいない（欠落・巻き戻り）
@@ -351,12 +460,14 @@ class MultiHandEngine {
         _dispatchPrimaryTrackId = id;
         _primaryTrackId = null;
         _resetPrimaryCandidate();
+        _resetHandoverCandidate();
       }
     }
     return result;
   }
 
   void _forget(int id) {
+    if (_handoverCandidateTrackId == id) _resetHandoverCandidate();
     _tracks.remove(id);
     _lastSeenAtMs.remove(id);
     _lastSeenAtLocalMs.remove(id);
@@ -417,6 +528,7 @@ class MultiHandEngine {
     _lastFrameId = null;
     _primaryTrackId = null;
     _resetPrimaryCandidate();
+    _resetHandoverCandidate();
     return result;
   }
 
