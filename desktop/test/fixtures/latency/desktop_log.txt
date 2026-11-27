@@ -1,0 +1,4 @@
+2026-11-28T21:00:01.000000 ws upgraded
+2026-11-28T21:00:05.100000 ScreactPerf win=5.0s recv=98 done=97 drop=1 stale=0 hands=8/90/0 interval=50.0/60.0 parse=0.3/0.6 wait=0.0/0.1 engine=0.4/0.9 os=0.1/0.3 overlay=0.2/0.5 total=1.1/2.2
+flutter: ScreactPerf win=5.0s recv=96 done=96 drop=0 stale=0 hands=5/91/0 interval=51.0/70.0 parse=0.4/0.7 wait=0.0/0.1 engine=0.5/1.0 os=0.1/0.2 overlay=0.2/0.4 total=1.2/2.5
+2026-11-28T21:00:15.300000 ScreactPerf win=5.0s recv=100 done=99 drop=1 stale=0 hands=1/99/0 interval=49.0/55.0 parse=0.3/0.5 wait=0.0/0.2 engine=0.4/0.8 os=0.1/0.3 overlay=0.3/0.6 total=1.0/2.0

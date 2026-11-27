@@ -9,11 +9,13 @@ import '../core/geom.dart';
 import '../core/interaction_engine.dart';
 import '../core/multi_hand_engine.dart';
 import '../core/pointer_state.dart';
+import '../core/stroke_diagnostics.dart';
 import '../protocol/input_frame.dart';
 import '../net/bonjour_advertiser.dart';
 import '../net/connection_log.dart';
 import '../net/discovery.dart';
 import '../net/input_server.dart';
+import '../net/latency_probe.dart';
 import '../net/pairing_payload.dart';
 import '../net/wifi_ip.dart';
 import '../platform/desktop_bridge.dart';
@@ -21,9 +23,11 @@ import '../platform/overlay_window.dart';
 import 'calibration_flow.dart';
 import 'calibration_target.dart';
 import 'color_palette.dart';
-import 'overlay_canvas.dart';
+import 'edge_palette.dart';
+import 'edge_palette_layout.dart';
 import 'pairing_controller.dart';
 import 'pairing_qr_panel.dart';
+import 'palette_input_router.dart';
 import 'production_design.dart';
 
 enum DesktopSection { connection, calibration, workspace, settings }
@@ -33,6 +37,10 @@ enum DesktopSection { connection, calibration, workspace, settings }
 class HomePage extends StatefulWidget {
   /// 保存値がない環境で使う骨格表示の初期値。
   static const bool defaultShowSkeleton = false;
+
+  /// 保存値がない環境で使う、全画面オーバーレイの画面端パレット表示の初期値。
+  /// 推奨案として表示する（実機で調整予定）。
+  static const bool defaultShowEdgePalette = true;
 
   /// テスト用のポート差し替え。nullならYUBI_PORT、未指定時は8765。
   final int? port;
@@ -67,6 +75,12 @@ class _HomePageState extends State<HomePage> {
   final _calibConfig = CalibrationConfig.forCalibrationTarget();
   late final _engine = MultiHandEngine(config: _calibConfig);
   final _overlay = OverlayModel();
+  // 画面端パレットの上の手の操作を OS 入力へ流さず、色の選択として消費する。
+  late final _paletteRouter = PaletteInputRouter(
+    onSelectSlot: _overlay.selectColorSlot,
+  );
+  // 全画面オーバーレイがパレットの描画に使った最新のレイアウト（入力判定にも使う）。
+  EdgePaletteLayout? _paletteLayout;
   late final DesktopBridge _bridge;
   final _flow = CalibrationFlowController();
   final _connLog = ConnectionLog();
@@ -91,11 +105,15 @@ class _HomePageState extends State<HomePage> {
   bool _enforcePairing = true;
   // 手の骨格（ランドマーク）をオーバーレイに描画するか。既定OFF・永続化する。
   bool _showSkeleton = HomePage.defaultShowSkeleton;
+  // 全画面オーバーレイの画面端パレットを表示するか。既定ON・永続化する。
+  bool _showEdgePalette = HomePage.defaultShowEdgePalette;
   // ハンドジェスチャーの個別ON/OFF。既定は全てON・永続化・即時反映する。
   bool _clickGestureEnabled = true;
   bool _penGestureEnabled = true;
   bool _eraserGestureEnabled = true;
   bool _scrollGestureEnabled = true;
+  // 2人操作でOS操作権を受け渡す試作（#23）。既定OFF・永続化・即時反映する。
+  bool _primaryHandoverEnabled = false;
   bool _startingServer = false;
   // UDPで自動接続できない環境向けの手動接続情報（IP/ポート）を開いているか。
   // 既定は非表示で1ボタンに集中させ、リンク押下かUDPタイムアウト時だけ開く。
@@ -163,7 +181,9 @@ class _HomePageState extends State<HomePage> {
     _draftSmoothing = _engine.smoothingEnabled;
     _syncCalibrationDraftFromConfig();
     _loadShowSkeleton();
+    _loadShowEdgePalette();
     _loadGestureToggles();
+    _loadPrimaryHandover();
 
     _pairing =
         widget.pairingController ??
@@ -194,6 +214,11 @@ class _HomePageState extends State<HomePage> {
     _flow.addListener(_handleFlowChanged);
     _connLog.addListener(_handleLogChanged);
     _connLog.init();
+    // ストローク確定ごとの診断ログ（既定OFF。Issue #26）。
+    if (StrokeDiagnostics.enabledByEnvironment()) {
+      _overlay.onStrokeFinished =
+          StrokeDiagnostics(sink: _handlePerfLog).record;
+    }
     _refreshWifiIp();
     if (Platform.isMacOS) {
       unawaited(_refreshAccessibility());
@@ -248,21 +273,40 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
+  /// 区間計測の1行。接続ログ（UI/ファイル）と標準出力の両方へ出す。
+  void _handlePerfLog(String line) {
+    debugPrint(line);
+    _handleServerLog(line);
+  }
+
   void _handleServerLog(String message) {
     if (!_disposed) _connLog.add(message);
   }
 
+  /// パレットの入力判定に使うレイアウト。全画面オーバーレイでパレットを
+  /// 表示している間だけ返す（それ以外は判定せず、従来どおり OS へ流す）。
+  EdgePaletteLayout? get _paletteInputLayout =>
+      _overlayOn && !_flow.showingTarget && _showEdgePalette
+          ? _paletteLayout
+          : null;
+
   void _handleServerEvents(List<InteractionEvent> events) {
     // MultiHandEngineが安定して保持する主トラックだけをOS入力へ流す。
+    // パレットの上の操作は OS へ流さない。
     if (_disposed) return;
-    for (final event in events) {
+    final routed = _paletteRouter.routeOsEvents(events, _paletteInputLayout);
+    for (final event in routed) {
       _bridge.applyEvent(event);
     }
   }
 
   void _handleTrackEvents(Map<int, List<InteractionEvent>> byTrack) {
     // 各トラックのカーソル/描画をオーバーレイへ（最大2手を別色で表示）。
-    if (!_disposed) _overlay.applyTrackEvents(byTrack);
+    // どのトラックでもパレットのスウォッチで描画色を選べる。
+    if (_disposed) return;
+    _overlay.applyTrackEvents(
+      _paletteRouter.routeTrackEvents(byTrack, _paletteInputLayout),
+    );
   }
 
   void _handleFrame(InputFrame frame) {
@@ -379,6 +423,10 @@ class _HomePageState extends State<HomePage> {
       enforcePairing: _enforcePairing,
       acceptCalibrationMessages: false,
       onLog: _handleServerLog,
+      latencyProbe:
+          LatencyProbe.enabledByEnvironment()
+              ? LatencyProbe(sink: _handlePerfLog)
+              : null,
     );
     _startingServerInstance = server;
     try {
@@ -656,7 +704,13 @@ class _HomePageState extends State<HomePage> {
       }
       return Material(
         type: MaterialType.transparency,
-        child: SizedBox.expand(child: OverlayCanvas(model: _overlay)),
+        child: SizedBox.expand(
+          child: OverlayWithEdgePalette(
+            model: _overlay,
+            showEdgePalette: _showEdgePalette,
+            onPaletteLayout: (layout) => _paletteLayout = layout,
+          ),
+        ),
       );
     }
 
@@ -1239,6 +1293,21 @@ class _HomePageState extends State<HomePage> {
                       value: _showSkeleton,
                       onChanged: _setShowSkeleton,
                     ),
+                    const SizedBox(width: 32),
+                    const Text(
+                      '端パレット',
+                      style: TextStyle(
+                        color: ProductionDesign.textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Switch(
+                      key: const ValueKey('workspace-show-edge-palette'),
+                      value: _showEdgePalette,
+                      onChanged: _setShowEdgePalette,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -1685,6 +1754,36 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  File? _showEdgePalettePrefsFile() => _userSettingsFile('show_edge_palette');
+
+  void _loadShowEdgePalette() {
+    try {
+      final f = _showEdgePalettePrefsFile();
+      if (f != null && f.existsSync()) {
+        _showEdgePalette = f.readAsStringSync().trim() == '1';
+      }
+    } catch (_) {
+      // 読めなければ既定値のまま。
+    }
+  }
+
+  void _setShowEdgePalette(bool value) {
+    setState(() => _showEdgePalette = value);
+    _persistShowEdgePalette();
+  }
+
+  void _persistShowEdgePalette() {
+    try {
+      final f = _showEdgePalettePrefsFile();
+      if (f != null) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(_showEdgePalette ? '1' : '0', flush: true);
+      }
+    } catch (_) {
+      // 永続化に失敗しても致命ではない（次回起動は既定値）。
+    }
+  }
+
   /// ジェスチャー個別ON/OFFの永続化先（show_skeleton と同流儀のプレーンファイル）。
   /// 内容は click,pen,eraser,scroll の順に '1'/'0' を並べた4文字。
   File? _gestureTogglesPrefsFile() => _userSettingsFile('gesture_toggles');
@@ -1730,6 +1829,35 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {
       // 永続化に失敗しても致命ではない。
+    }
+  }
+
+  /// OS操作権の受け渡し（試作）の永続化先。内容は '1'/'0'。
+  File? _primaryHandoverPrefsFile() => _userSettingsFile('primary_handover');
+
+  void _loadPrimaryHandover() {
+    try {
+      final f = _primaryHandoverPrefsFile();
+      if (f != null && f.existsSync()) {
+        _primaryHandoverEnabled = f.readAsStringSync().trim() == '1';
+      }
+    } catch (_) {
+      // 読めなければ既定OFFのまま。
+    }
+    _engine.primaryHandoverEnabled = _primaryHandoverEnabled;
+  }
+
+  void _setPrimaryHandover(bool v) {
+    setState(() => _primaryHandoverEnabled = v);
+    _engine.primaryHandoverEnabled = v;
+    try {
+      final f = _primaryHandoverPrefsFile();
+      if (f != null) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(v ? '1' : '0', flush: true);
+      }
+    } catch (_) {
+      // 永続化に失敗しても致命ではない（次回起動は既定OFF）。
     }
   }
 
@@ -1838,6 +1966,14 @@ class _HomePageState extends State<HomePage> {
                           value: _scrollGestureEnabled,
                           onChanged: _setScrollGesture,
                         ),
+                        tile(
+                          key: const ValueKey('gesture-toggle-handover'),
+                          icon: Icons.swap_horiz_rounded,
+                          title: '操作権の受け渡し（試作）',
+                          subtitle: '2人操作時、もう1人が0.5秒つまみ続けるとOS操作を引き継ぐ（初期値OFF）',
+                          value: _primaryHandoverEnabled,
+                          onChanged: _setPrimaryHandover,
+                        ),
                       ],
                     ),
                   ),
@@ -1898,11 +2034,14 @@ class _HomePageState extends State<HomePage> {
       _eraserGestureEnabled = true;
       _scrollGestureEnabled = true;
       _showSkeleton = HomePage.defaultShowSkeleton;
+      _showEdgePalette = HomePage.defaultShowEdgePalette;
     });
     if (!_showSkeleton) _overlay.showSkeletons(const {});
     _persistShowSkeleton();
+    _persistShowEdgePalette();
     _applyGestureTogglesToEngine();
     _persistGestureToggles();
+    if (_primaryHandoverEnabled) _setPrimaryHandover(false);
     _showMessage('設定を初期化しました');
   }
 
@@ -2163,6 +2302,16 @@ class _HomePageState extends State<HomePage> {
                           value: _showSkeleton,
                           onChanged: (value) {
                             _setShowSkeleton(value);
+                            setDialogState(() {});
+                          },
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('画面端パレットを表示'),
+                          subtitle: const Text('全画面オーバーレイの右端に描画色を並べる'),
+                          value: _showEdgePalette,
+                          onChanged: (value) {
+                            _setShowEdgePalette(value);
                             setDialogState(() {});
                           },
                         ),

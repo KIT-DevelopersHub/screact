@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 
 import 'geom.dart';
 import 'interaction_engine.dart';
+import 'stroke_diagnostics.dart';
 
-/// 描画中／確定したインクストローク（画面正規化点列）。trackId でトラック別に
-/// 色分けする（2人同時描画の識別）。
+/// 描画中／確定したインクストローク（画面正規化点列）。色は描画開始時の
+/// 描画色（[OverlayModel.selectedColorSlot]）を [colorSlot] に保存し、以後変えない。
 class InkStroke {
   final List<Vec2> points;
   final int trackId;
@@ -57,6 +58,7 @@ class InkStroke {
 
 /// 1トラック分の表示状態（カーソル・押下・骨格）。
 class TrackVisual {
+  /// カーソルと骨格の識別色スロット（トラック別）。インクの描画色には使わない。
   final int colorSlot;
   Vec2? cursor;
   bool pressed = false;
@@ -80,6 +82,31 @@ class OverlayModel extends ChangeNotifier {
   final List<InkStroke> strokes = [];
   final Map<int, InkStroke> _active = {};
 
+  /// 描画中ストロークの開始時刻（[_nowMs] 基準）。確定時の誤認識判定に使う。
+  final Map<InkStroke, int> _activeStartMs = {};
+
+  /// 描画中ストロークを最後に観測した時刻（最後の drawDown/drawMove を受けた
+  /// [_nowMs]）。継続時間は確定時刻ではなくここまでで測る。手が消えてから
+  /// 一時欠落の猶予（#39）を経て release が届いても、誤認識の継続時間が
+  /// 猶予ぶん伸びて破棄されなくなるのを防ぐ。エンジンは描画中の各フレームで
+  /// 点が動かなくても drawMove を出すため、静止した長押しも毎フレーム更新される。
+  final Map<InkStroke, int> _activeLastSeenMs = {};
+
+  /// 描画中ストロークが受けた drawMove の数（診断ログ用）。
+  final Map<InkStroke, int> _activeMoveCount = {};
+
+  /// ストローク確定ごとの診断（Issue #26）。null（既定）なら何もしない。
+  /// 描画結果には影響しない。
+  void Function(StrokeFinish finish)? onStrokeFinished;
+
+  /// 単調増加の現在時刻（ミリ秒）。テストでは固定の時計を注入する。
+  final int Function() _nowMs;
+
+  OverlayModel({int Function()? nowMs}) : _nowMs = nowMs ?? _monotonicMs;
+
+  static final Stopwatch _clock = Stopwatch()..start();
+  static int _monotonicMs() => _clock.elapsedMilliseconds;
+
   /// これ未満の移動は点を増やさない（重複点の抑制・描画の軽量化）。
   static const double _minPointDist = 0.002;
 
@@ -87,6 +114,29 @@ class OverlayModel extends ChangeNotifier {
   /// 不要な線が描かれやすい。drawUp 時に末尾のこの点数ぶんを削ってブレ線をカットする。
   /// 保守的な既定値。0 で無効。実測に応じて調整可能（フレーム間引き後の点数基準）。
   int penReleaseTrimPoints = 3;
+
+  // --- 末尾トリムの上限（正当な短い線を 1 点に縮めない。Issue #28）-----------
+  // 末尾から1点ずつ削り、次のどれかに当たる手前で止める。
+  //   - 残りが [penReleaseTrimMinKeptPoints] 点未満になる
+  //   - 残りの軌跡長が [penReleaseTrimMinKeptLength] 未満になる
+  //   - 残りの軌跡長が [penReleaseTrimFullKeepLength] 未満の短い線で、削った長さが
+  //     全体の [penReleaseTrimMaxFraction] を超える
+  // 残りが [penReleaseTrimFullKeepLength] 以上ある長い線は割合で制限しないので、
+  // 従来どおり [penReleaseTrimPoints] 点を削る。
+  // 値は暫定。実機（送信fps・解像度・手の速さ）で調整予定。
+
+  /// トリム後に残す最小点数。2点あれば線として描ける。
+  static const int penReleaseTrimMinKeptPoints = 2;
+
+  /// トリム後に残す最小の軌跡長（画面正規化）。微小ストロークの軌跡長閾値に揃える。
+  /// トリム前の時点でこれより短い線は削らない。
+  static const double penReleaseTrimMinKeptLength = 0.01;
+
+  /// 短い線で削ってよい軌跡長の割合の上限。
+  static const double penReleaseTrimMaxFraction = 0.25;
+
+  /// トリム後にこの軌跡長（画面幅の約10%）以上残る線は、割合の上限を適用しない。
+  static const double penReleaseTrimFullKeepLength = 0.1;
 
   /// 保持するインクストロークの上限。長時間デモで無制限に増えると、毎フレーム
   /// の再描画コストとメモリが増え続けるため、古い完了ストロークから捨てる。
@@ -96,16 +146,42 @@ class OverlayModel extends ChangeNotifier {
   /// 消しゴム（グー）の消去半径（画面正規化・0..1）。この距離以内のインク点を消す。
   static const double eraserRadius = 0.045;
 
-  /// ユーザーがパレットで選んだ描画色スロット（null=トラック別自動色にフォールバック）。
-  int? _selectedColorSlot;
-  int? get selectedColorSlot => _selectedColorSlot;
+  // --- 誤認識ストローク（点のカス）の判定閾値 -------------------------------
+  // 描画中は即時表示し、確定時に「一瞬・少点数・ほぼ動いていない」の3条件を
+  // すべて満たしたストロークだけを誤認識として破棄する（Issue #5）。どれか1つでも
+  // 外れれば残すので、長押しした点（句読点・意図した点）、素早く引いた短線、
+  // 低速描画は消えない。判定は末尾トリム前の点列で行う。
+  // 値は暫定。実機ログ（送信fps・解像度・手の速さ）で調整する予定。
 
-  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する。
-  /// 同じ色を再選択したら選択解除し、トラック別自動色へ戻す。
-  void selectColorSlot(int? slot) {
-    final next = _selectedColorSlot == slot ? null : slot;
-    if (next == _selectedColorSlot) return;
-    _selectedColorSlot = next;
+  /// これ未満の継続時間なら「一瞬」とみなす。30fps 送信で約4〜5フレーム。
+  /// 2本指くっつきを意図して作ると、これより長く保持されるという想定。
+  static const int microStrokeMaxDurationMs = 150;
+
+  /// 点数がこれ以下なら「少点数」とみなす（[_minPointDist] 間引き後の点数）。
+  /// 上の継続時間内に届く送信フレーム数の目安に合わせている。
+  static const int microStrokeMaxPoints = 5;
+
+  /// 軌跡長（画面正規化）がこれ未満なら「ほぼ動いていない」とみなす。
+  /// 画面幅の約1%（1920px幅で約19px）。末尾トリム前の全点で測る。
+  static const double microStrokeMaxPathLength = 0.01;
+
+  /// 描画色（インク色）の初期スロット（0 = 青）。
+  static const int defaultInkColorSlot = 0;
+
+  /// 利用者がパレットで選んだ描画色スロット。trackId のライフサイクルとは
+  /// 独立しており、手の再認識（新しい trackId）・画角外移動・追跡喪失・
+  /// Clear All では変わらない。複数の手・利用者で共有の 1 色。
+  /// カーソルと骨格の識別色（[TrackVisual.colorSlot]）とは別物。
+  int _selectedColorSlot = defaultInkColorSlot;
+  int get selectedColorSlot => _selectedColorSlot;
+
+  /// パレットのスウォッチ選択。以後の新規ストロークへこの色を適用する
+  /// （描画済みの線は変色しない）。同じ色を再選択しても選択は外れない。
+  /// 範囲外のスロットは無視する。
+  void selectColorSlot(int slot) {
+    if (slot < 0 || slot >= colorSlotCount) return;
+    if (slot == _selectedColorSlot) return;
+    _selectedColorSlot = slot;
     notifyListeners();
   }
 
@@ -155,46 +231,44 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = e.screen;
         v.pressed = false;
         v.erasing = false;
-        _active.remove(trackId);
+        _finishStroke(trackId, StrokeEndReason.modeSwitch);
         break;
       // インク描画（人差し指＋中指のくっつき・人差し指先端）。
       case InteractionKind.drawDown:
         v.cursor = e.screen;
         v.pressed = true;
         v.erasing = false;
-        // ユーザーがパレットで選んだ色を優先。未選択ならトラック別自動色。
+        // drawUp なしで次の描画が始まった場合も、前のストロークを確定する。
+        _finishStroke(trackId, StrokeEndReason.redrawDown);
+        // 描画色は選択中のインク色だけで決める（トラックの識別色は使わない）。
         final stroke = InkStroke(
           [e.screen],
           trackId: trackId,
-          colorSlot: _selectedColorSlot ?? v.colorSlot,
+          colorSlot: _selectedColorSlot,
         );
         _active[trackId] = stroke;
+        final startMs = _nowMs();
+        _activeStartMs[stroke] = startMs;
+        _activeLastSeenMs[stroke] = startMs;
+        _activeMoveCount[stroke] = 0;
         strokes.add(stroke);
         _capHistory();
         break;
       case InteractionKind.drawMove:
         v.cursor = e.screen;
         final a = _active[trackId];
-        if (a != null &&
-            (a.points.isEmpty ||
-                a.points.last.distanceTo(e.screen) >= _minPointDist)) {
+        if (a == null) break;
+        // 点を増やさない微小移動（静止した長押し）でも観測時刻は進める。
+        _activeLastSeenMs[a] = _nowMs();
+        _activeMoveCount[a] = (_activeMoveCount[a] ?? 0) + 1;
+        if (a.points.isEmpty ||
+            a.points.last.distanceTo(e.screen) >= _minPointDist) {
           a.points.add(e.screen);
         }
         break;
       case InteractionKind.drawUp:
         v.pressed = false;
-        final ending = _active.remove(trackId);
-        // ペンモード終了直前のブレ線をカット: 末尾の penReleaseTrimPoints 点を落とす。
-        // 少なくとも1点は残す（点を消しすぎてストローク自体を壊さない）。
-        if (ending != null &&
-            penReleaseTrimPoints > 0 &&
-            ending.points.length > 1) {
-          final drop = penReleaseTrimPoints.clamp(0, ending.points.length - 1);
-          ending.points.removeRange(
-            ending.points.length - drop,
-            ending.points.length,
-          );
-        }
+        _finishStroke(trackId, StrokeEndReason.drawUp);
         break;
       // 消しゴム（グー）。カーソル位置近傍のインクを消す。
       case InteractionKind.eraseDown:
@@ -202,7 +276,7 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = e.screen;
         v.pressed = false;
         v.erasing = true;
-        _active.remove(trackId);
+        _finishStroke(trackId, StrokeEndReason.modeSwitch);
         eraseAt(e.screen);
         break;
       case InteractionKind.eraseUp:
@@ -230,14 +304,112 @@ class OverlayModel extends ChangeNotifier {
         v.cursor = null;
         v.pressed = false;
         v.erasing = false;
-        _active.remove(trackId);
+        _finishStroke(trackId, StrokeEndReason.pointerExit);
         break;
       case InteractionKind.release:
-        // トラッキング喪失: このトラックのカーソル/骨格を消す。
-        _active.remove(trackId);
+        // トラッキング喪失・通信断: このトラックのカーソル/骨格を消す。
+        _finishStroke(trackId, StrokeEndReason.release);
         _tracks.remove(trackId);
         break;
     }
+  }
+
+  /// [trackId] の描画中ストロークを確定する（全終了経路の共通処理）。
+  /// 他トラックのストロークには触れない。
+  ///
+  /// 1. 末尾トリム前の点列で誤認識（[isMicroStroke]）を判定し、該当すれば破棄する。
+  ///    継続時間は最初の drawDown から最後の drawDown/drawMove までで測る。
+  /// 2. 残す場合、drawUp（ペン解除）のときだけ末尾のブレ線を削る。
+  ///    release／pointerExit 等の強制終了は従来どおりトリムしない。
+  /// 3. [onStrokeFinished] があれば、確定の記録を渡す（結果は変えない）。
+  void _finishStroke(int trackId, StrokeEndReason reason) {
+    final ending = _active.remove(trackId);
+    if (ending == null) return;
+    final startMs = _activeStartMs.remove(ending);
+    final lastSeenMs = _activeLastSeenMs.remove(ending);
+    final moveCount = _activeMoveCount.remove(ending) ?? 0;
+    final listener = onStrokeFinished;
+    final before = listener == null ? null : List<Vec2>.of(ending.points);
+    void report({required bool discarded}) {
+      if (listener == null) return;
+      final finishedMs = _nowMs();
+      listener(
+        StrokeFinish(
+          trackId: trackId,
+          reason: reason,
+          startMs: startMs ?? finishedMs,
+          lastSeenMs: lastSeenMs ?? finishedMs,
+          finishedMs: finishedMs,
+          drawMoveCount: moveCount,
+          pointsBeforeTrim: before!,
+          pointsAfter: discarded ? 0 : ending.points.length,
+          discarded: discarded,
+        ),
+      );
+    }
+
+    final durationMs =
+        startMs == null || lastSeenMs == null ? null : lastSeenMs - startMs;
+    if (durationMs != null && isMicroStroke(ending.points, durationMs)) {
+      strokes.remove(ending);
+      report(discarded: true);
+      return;
+    }
+    // ペンモード終了直前のブレ線をカット: 末尾から最大 penReleaseTrimPoints 点を落とす。
+    // 短い線は上限（[penReleaseTrimCount]）の範囲でしか削らない。
+    if (reason == StrokeEndReason.drawUp) {
+      final drop = penReleaseTrimCount(ending.points, penReleaseTrimPoints);
+      if (drop > 0) {
+        ending.points.removeRange(
+          ending.points.length - drop,
+          ending.points.length,
+        );
+      }
+    }
+    report(discarded: false);
+  }
+
+  /// drawUp 時に [points] の末尾から削る点数を返す（最大 [maxPoints]）。
+  /// 正当な短い線（句読点・短い横棒・小さな丸）を 1 点に縮めないよう、
+  /// 残す点数・軌跡長の下限と、短い線で削る割合の上限を守る。
+  @visibleForTesting
+  static int penReleaseTrimCount(List<Vec2> points, int maxPoints) {
+    final n = points.length;
+    if (maxPoints <= 0 || n <= penReleaseTrimMinKeptPoints) return 0;
+    // prefix[i] = points[0..i] の軌跡長。
+    final prefix = List<double>.filled(n, 0);
+    for (var i = 1; i < n; i++) {
+      prefix[i] = prefix[i - 1] + points[i - 1].distanceTo(points[i]);
+    }
+    final total = prefix[n - 1];
+    var drop = 0;
+    while (drop < maxPoints) {
+      final kept = n - (drop + 1);
+      if (kept < penReleaseTrimMinKeptPoints) break;
+      final keptLength = prefix[kept - 1];
+      if (keptLength < penReleaseTrimMinKeptLength) break;
+      final removed = total - keptLength;
+      if (keptLength < penReleaseTrimFullKeepLength &&
+          removed > total * penReleaseTrimMaxFraction) {
+        break;
+      }
+      drop++;
+    }
+    return drop;
+  }
+
+  /// 確定時点の点列（トリム前）と継続時間から、誤認識の微小ストロークかを判定する。
+  /// 継続時間・点数・軌跡長がすべて閾値内のときだけ true（1点でも長押しなら false）。
+  @visibleForTesting
+  static bool isMicroStroke(List<Vec2> points, int durationMs) {
+    if (durationMs >= microStrokeMaxDurationMs) return false;
+    if (points.length > microStrokeMaxPoints) return false;
+    var length = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      length += points[i - 1].distanceTo(points[i]);
+      if (length >= microStrokeMaxPathLength) return false;
+    }
+    return true;
   }
 
   /// 現在フレームの骨格を反映する。map に無いトラックの骨格は消す
@@ -330,6 +502,9 @@ class OverlayModel extends ChangeNotifier {
   void clear() {
     strokes.clear();
     _active.clear();
+    _activeStartMs.clear();
+    _activeLastSeenMs.clear();
+    _activeMoveCount.clear();
     _tracks.clear();
     notifyListeners();
   }
