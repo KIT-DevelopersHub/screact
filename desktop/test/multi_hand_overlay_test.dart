@@ -90,7 +90,10 @@ void main() {
   });
 
   test('インク履歴は上限を超えると古い完了ストロークから捨てる', () {
-    final model = OverlayModel();
+    // 呼ぶたびに200ms進む時計。各ストロークを長押しの点として扱い、
+    // 微小ストロークの確定時破棄（Issue #5）に掛からないようにする。
+    var now = 0;
+    final model = OverlayModel(nowMs: () => now += 200);
     // 上限(240)を超える完了ストロークを作る（drawDown→drawUp）。
     for (var i = 0; i < 320; i++) {
       final x = 0.1 + (i % 50) * 0.01;
@@ -103,7 +106,7 @@ void main() {
         InteractionEvent(InteractionKind.drawUp, Vec2(x, 0.5)),
       );
     }
-    expect(model.strokes.length, lessThanOrEqualTo(240));
+    expect(model.strokes.length, 240);
 
     // 描画中（未drawUp）のストロークは上限超過でも捨てない。
     model.applyTrack(
