@@ -52,7 +52,7 @@ class CalibrationConfig {
   static const double targetMarkerInsetX = 240 / 1920; // 0.125
   static const double targetMarkerInsetY = 240 / 1080; // 0.2222
 
-  /// 「スマホ設置完了」フロー用の既定値: 同梱キャリブ画像を全画面表示した時の
+  /// 位置合わせフロー（自動開始または「位置合わせをはじめる」）用の既定値: 同梱キャリブ画像を全画面表示した時の
   /// マーカー中心位置に合わせたインセット。
   factory CalibrationConfig.forCalibrationTarget() => CalibrationConfig(
         markerInsetX: targetMarkerInsetX,
