@@ -107,6 +107,29 @@ class OverlayModel extends ChangeNotifier {
   /// 保守的な既定値。0 で無効。実測に応じて調整可能（フレーム間引き後の点数基準）。
   int penReleaseTrimPoints = 3;
 
+  // --- 末尾トリムの上限（正当な短い線を 1 点に縮めない。Issue #28）-----------
+  // 末尾から1点ずつ削り、次のどれかに当たる手前で止める。
+  //   - 残りが [penReleaseTrimMinKeptPoints] 点未満になる
+  //   - 残りの軌跡長が [penReleaseTrimMinKeptLength] 未満になる
+  //   - 残りの軌跡長が [penReleaseTrimFullKeepLength] 未満の短い線で、削った長さが
+  //     全体の [penReleaseTrimMaxFraction] を超える
+  // 残りが [penReleaseTrimFullKeepLength] 以上ある長い線は割合で制限しないので、
+  // 従来どおり [penReleaseTrimPoints] 点を削る。
+  // 値は暫定。実機（送信fps・解像度・手の速さ）で調整予定。
+
+  /// トリム後に残す最小点数。2点あれば線として描ける。
+  static const int penReleaseTrimMinKeptPoints = 2;
+
+  /// トリム後に残す最小の軌跡長（画面正規化）。微小ストロークの軌跡長閾値に揃える。
+  /// トリム前の時点でこれより短い線は削らない。
+  static const double penReleaseTrimMinKeptLength = 0.01;
+
+  /// 短い線で削ってよい軌跡長の割合の上限。
+  static const double penReleaseTrimMaxFraction = 0.25;
+
+  /// トリム後にこの軌跡長（画面幅の約10%）以上残る線は、割合の上限を適用しない。
+  static const double penReleaseTrimFullKeepLength = 0.1;
+
   /// 保持するインクストロークの上限。長時間デモで無制限に増えると、毎フレーム
   /// の再描画コストとメモリが増え続けるため、古い完了ストロークから捨てる。
   /// 描画中（_active）のストロークは対象外。
@@ -299,15 +322,46 @@ class OverlayModel extends ChangeNotifier {
       strokes.remove(ending);
       return;
     }
-    // ペンモード終了直前のブレ線をカット: 末尾の penReleaseTrimPoints 点を落とす。
-    // 少なくとも1点は残す（点を消しすぎてストローク自体を壊さない）。
-    if (trimTail && penReleaseTrimPoints > 0 && ending.points.length > 1) {
-      final drop = penReleaseTrimPoints.clamp(0, ending.points.length - 1);
-      ending.points.removeRange(
-        ending.points.length - drop,
-        ending.points.length,
-      );
+    // ペンモード終了直前のブレ線をカット: 末尾から最大 penReleaseTrimPoints 点を落とす。
+    // 短い線は上限（[penReleaseTrimCount]）の範囲でしか削らない。
+    if (trimTail) {
+      final drop = penReleaseTrimCount(ending.points, penReleaseTrimPoints);
+      if (drop > 0) {
+        ending.points.removeRange(
+          ending.points.length - drop,
+          ending.points.length,
+        );
+      }
     }
+  }
+
+  /// drawUp 時に [points] の末尾から削る点数を返す（最大 [maxPoints]）。
+  /// 正当な短い線（句読点・短い横棒・小さな丸）を 1 点に縮めないよう、
+  /// 残す点数・軌跡長の下限と、短い線で削る割合の上限を守る。
+  @visibleForTesting
+  static int penReleaseTrimCount(List<Vec2> points, int maxPoints) {
+    final n = points.length;
+    if (maxPoints <= 0 || n <= penReleaseTrimMinKeptPoints) return 0;
+    // prefix[i] = points[0..i] の軌跡長。
+    final prefix = List<double>.filled(n, 0);
+    for (var i = 1; i < n; i++) {
+      prefix[i] = prefix[i - 1] + points[i - 1].distanceTo(points[i]);
+    }
+    final total = prefix[n - 1];
+    var drop = 0;
+    while (drop < maxPoints) {
+      final kept = n - (drop + 1);
+      if (kept < penReleaseTrimMinKeptPoints) break;
+      final keptLength = prefix[kept - 1];
+      if (keptLength < penReleaseTrimMinKeptLength) break;
+      final removed = total - keptLength;
+      if (keptLength < penReleaseTrimFullKeepLength &&
+          removed > total * penReleaseTrimMaxFraction) {
+        break;
+      }
+      drop++;
+    }
+    return drop;
   }
 
   /// 確定時点の点列（トリム前）と継続時間から、誤認識の微小ストロークかを判定する。
