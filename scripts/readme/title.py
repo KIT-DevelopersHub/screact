@@ -2,7 +2,7 @@
 
 最初はふつうの見出しにしか見えない。少したつと、ロゴの手が「Screact」の「r」をつまんで持ち上げ、
 すき間から YouRay が顔を出す（ロゴの絵と同じ場面）。YouRay が外へ出ると手は「r」を戻し、
-キャッチコピーの「操作できる」をペンで囲む。YouRay が喜んだあと、手は線をなぞって消し、みんな去って元の見出しに戻る。
+キャッチコピーの「操作できる」にチラシと同じマーカーを引く。YouRay が喜んだあと、手はマーカーを戻して消し、みんな去って元の見出しに戻る。
 1周は約23秒で、最初の約4.5秒は止まっている。
 
 一番上の「※技育展2026 決勝での内容です」は、GitHub の引用（> で始まる行）と同じ見た目で描く。
@@ -122,50 +122,34 @@ def build(kind, mode):
                 (T_DOWNED, tr())], origin="50% 100%")
     out.append(f'<text x="{rx0:.2f}" y="{b1:.2f}" class="h1 rr" textLength="{rw:.2f}" lengthAdjust="spacingAndGlyphs">r</text>')
 
-    # ---- 手 ----
-    px, py = rx0 + rw * .62, b1 - 17.5  # 「r」の上をつまむ点
+    # ---- 手（ロゴの手） ----
+    px, py = rx0 + rw * .55, b1 - 18  # 「r」の上端をつまむ点
     lx, ly = px + lift[0], py + lift[1]
+    HS = .092  # ロゴの「r」と手の大きさの比をそのまま使う
 
-    # ---- 丸で囲む言葉の位置 ----
+    # ---- マーカーを引く言葉の位置（チラシの「操作できる」と同じ強調） ----
     mrow = next(i for i, line in enumerate(cl) if MARK in line) + 1
-    mx0 = 24 * cl[mrow - 1].index(MARK)
-    mcx, mcy = mx0 + 24 * len(MARK) / 2, base(mrow) - 9
-    erx, ery = 24 * len(MARK) / 2 + 12, 15.5
-    if mcx - erx * 1.04 < 2:  # 行頭の「（スマホ）は、丸が画像の左にはみ出さないよう少し右へ寄せて小さくする
-        mcx += 6
-        erx = (mcx - 3) / 1.04
-    pts = ellipse_pts(mcx, mcy, erx, ery)
-    d = "M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
-    plen = sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
+    mx0 = 24 * cl[mrow - 1].index(MARK) + 4
+    mw = 24 * len(MARK) - 8
+    my = base(mrow) - 9
+    p0, p1 = (mx0, my + 9), (mx0 + mw, my + 7)
 
-    off = (min(W + 60, px + 220), -70)
-    hf = [(0, tr(*off)), (.05, tr(*off), "out"), (T_ARRIVE, tr(px + 3, py - 4), "io"), (T_PINCH, tr(px, py), "out"),
+    off = (min(W + 80, px + 260), -60)
+    hf = [(0, tr(*off)), (.05, tr(*off), "out"), (T_ARRIVE, tr(px + 4, py - 6), "io"), (T_PINCH, tr(px, py), "out"),
           (T_LIFT, tr(px, py), "out"), (T_UP, tr(lx, ly)), (T_DOWN, tr(lx, ly), "in"), (T_DOWNED, tr(px, py)),
-          (T_RELEASE + .15, tr(px, py), "io"), (T_RELEASE + .55, tr(px + 10, py - 14), "io"),
-          (T_INK0 - .1, tr(*pts[0]), "lin")]
-    seg = (T_INK1 - T_INK0) / (len(pts) - 1)
-    hf += [(T_INK0 + k * seg, tr(*p), "lin") for k, p in enumerate(pts)]
-    hf += [(T_INK1 + .25, tr(pts[-1][0] + 6, pts[-1][1] - 8), "io"), (T_ER0 - .05, tr(*pts[0]), "lin")]
-    seg = (T_ER1 - T_ER0) / (len(pts) - 1)
-    hf += [(T_ER0 + k * seg, tr(p[0], p[1] + 1), "lin") for k, p in enumerate(pts)]
-    hf += [(T_ER1 + .1, tr(pts[-1][0], pts[-1][1]), "in"), (T_HAND_OUT, tr(*off))]
+          (T_RELEASE + .15, tr(px, py), "io"), (T_RELEASE + .6, tr(px + 12, py - 16), "io"),
+          (T_INK0 - .1, tr(*p0), "io"), (T_INK1, tr(*p1), "io"), (T_INK1 + .5, tr(p1[0] + 10, p1[1] - 14), "io"),
+          (T_ER0 - .05, tr(*p1), "io"), (T_ER1, tr(*p0), "io"), (T_ER1 + .2, tr(*p0), "in"), (T_HAND_OUT, tr(*off))]
     a.kf("hd", hf)
-    # 親指：近づくときは開き、つまむと閉じる。「r」を放すと開き、線を描く間は閉じる
-    a.kf("th", [(0, "translate(3px,6px) rotate(14deg)"), (T_PINCH, "translate(3px,6px) rotate(14deg)", "out"),
-                (T_PINCH + .25, "translate(0px,0px) rotate(0deg)"), (T_RELEASE, "translate(0px,0px) rotate(0deg)", "out"),
-                (T_RELEASE + .2, "translate(3px,6px) rotate(14deg)"), (T_INK0 - .5, "translate(3px,6px) rotate(14deg)", "out"),
-                (T_INK0 - .2, "translate(0px,0px) rotate(0deg)"), (T_HAND_OUT - .6, "translate(0px,0px) rotate(0deg)", "out"),
-                (T_HAND_OUT - .3, "translate(3px,6px) rotate(14deg)")], origin="80% 10%")
-    sk = f'stroke="{art.SKIN_LINE}" stroke-width="2.4" stroke-linejoin="round"'
-    hand = (f'<g class="hd"><g transform="scale(.5)"><path d="{art.HAND_BACK}" fill="{art.SKIN}" {sk}/>'
-            f'<path d="{art.HAND_NAIL}" fill="#F5C59D"/><g class="th"><path d="{art.HAND_THUMB}" fill="{art.SKIN}" {sk}/></g></g></g>')
+    hand = f'<g class="hd">{art.hand(HS, stroke=14)}</g>'
 
-    # ---- インク（描いて、なぞって消す）----
-    L = plen + 2
-    a.kf("ink", [(T_INK0, f"{L:.1f}", "lin"), (T_INK1, "0"), (T_ER0, "0", "lin"), (T_ER1, f"{-L:.1f}")],
-         prop="stroke-dashoffset")
-    out.append(f'<path class="ink" d="{d}" fill="none" stroke="{art.OPS["draw"]}" stroke-width="3" stroke-linecap="round" '
-               f'stroke-linejoin="round" stroke-dasharray="{L:.1f} {L + 4:.1f}" stroke-dashoffset="{L:.1f}"/>')
+    # ---- マーカー（左から引いて、右から戻して消す） ----
+    mk = art.marker(mx0, my, mw, 12)
+    a.kf("mkg", [(0, "scaleX(0)"), (T_INK0, "scaleX(0)", "io"), (T_INK1, "scaleX(1)")], origin="0% 50%")
+    a.kf("mko", [(0, "1"), (T_ER0 - .01, "1", "step"), (T_ER0, "0", "step")], prop="opacity")
+    a.kf("mks", [(0, "scaleX(1)"), (T_ER0, "scaleX(1)", "io"), (T_ER1, "scaleX(0)")], origin="0% 50%")
+    a.kf("mkso", [(0, "0"), (T_ER0 - .01, "0", "step"), (T_ER0, "1", "step"), (T_ER1 + .05, "1", "step"), (T_ER1 + .06, "0", "step")], prop="opacity")
+    marker = f'<g class="mko"><g class="mkg">{mk}</g></g><g class="mkso"><g class="mks">{mk}</g></g>'
 
     # ---- YouRay ----
     s = .24
@@ -210,14 +194,7 @@ def build(kind, mode):
     clip = f'<clipPath id="gclip"><rect x="-50" y="-200" width="{W + 200}" height="{b1 + 200 + 1.5:.1f}"/></clipPath>'
     out.insert(0, f'<defs>{clip}</defs><g clip-path="url(#gclip)"><g class="gh"><g transform="scale({s})">{body}</g></g></g>')
 
-    # ---- きらきら（喜ぶとき）----
-    for k, (dx, dy, r) in enumerate([(-erx - 10, -14, 6), (erx + 8, -16, 7), (erx + 14, 6, 5)]):
-        st = T_JOY0 + k * .18
-        a.kf(f"sp{k}", [(st, "scale(0)", "out"), (st + .3, "scale(1.15)", "io"), (st + .6, "scale(.85)", "io"),
-                        (st + .9, "scale(1)", "in"), (T_ER0 - .2, "scale(1)", "in"), (T_ER0, "scale(0)")],
-             origin="50% 50%")
-        out.append(f'<g class="sp{k}">{art.sparkle(mcx + dx, mcy + dy, r, art.OPS["click"] if k == 1 else "#F5B400")}</g>')
-
+    out.insert(0, marker)
     out.append(hand)
     css = (f".q{{font-family:{FONT};font-size:16px;fill:{MUTED[mode]}}}"
            f".h1{{font-family:{FONT};font-size:32px;font-weight:600;fill:{ink}}}"
