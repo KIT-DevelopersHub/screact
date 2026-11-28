@@ -1,6 +1,6 @@
 <h1><picture><source media="(max-width: 1100px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/title-narrow-dark.svg"><source media="(max-width: 1100px)" srcset="docs/assets/readme/title-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/title-dark.svg"><img src="docs/assets/readme/title-light.svg" align="absbottom" alt="※技育展2026 決勝での内容です Screact 今ある画面を買い替えず、「操作できる」を後付けする。"></picture></h1>
 
-Screactは、**タッチ機能のない普通の画面を、手でそのまま操作できるようにするシステム**です。
+Screactは**タッチ機能のない普通の画面を、手でそのまま操作できるようにするシステム**です。
 
 画面の横にスマホを置き、そのカメラを画面の「目」にします。スマホが手指の動きと画面の位置を認識してPCへ送り、PCがそれをクリック・ドラッグ・スクロール・書き込みに変えます。今あるモニターやプロジェクターを買い替えずに、「操作できる」を後付けします。
 
@@ -33,9 +33,9 @@ Screactは、**タッチ機能のない普通の画面を、手でそのまま�
 
 ### <a id="背景"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-01-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-01-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-01-dark.svg"><img src="docs/assets/readme/heads/play-01-light.svg" alt="01 背景（製品開発のきっかけ）（YouRayがふつうの画面に触ってみるが、何も起きない）"></picture>
 
-Screactの出発点は、「プレゼンのとき、画面の前でそのまま操作できたらいいのに」という思いつきでした。説明する人は画面の前にいるのに、スライドを送ったり書き込んだりするたびに、PCの前へ戻らなければなりません。
+Screactの出発点は「プレゼンのとき、画面の前でそのまま操作できたらいいのに」という思いつきでした。説明する人は画面の前にいるのに、スライドを送ったり書き込んだりするたびに、PCの前へ戻らなければなりません。
 
-普通のモニターとマウスでも、説明や会議は成り立ちます。それでも、画面を指し示しながら、その場で書き込み、動かせたら、話はもっと伝わり、もっと一緒に考えられるはずです。画面を直接操作する体験を、特別な機器がなくても、身の回りのどの画面でも味わえるようにしたいと考えました。
+普通のモニターとマウスでも、説明や会議は成り立ちます。それでも、画面を指し示しながらその場で書き込んだり動かしたりできれば、話はもっと伝わり、もっと一緒に考えられるはずです。画面を直接操作する体験を、特別な機器がなくても、身の回りのどの画面でも味わえるようにしたいと考えました。
 
 <picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/message-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/message-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/message-dark.svg"><img src="docs/assets/readme/message-light.svg" alt="情報を映す画面から、情報と関わる画面へ。普通のモニターやマウスでも、説明や会議は成り立ちます。Screactは、そこに「画面を直接さわって動かす」体験を足し、指し示す・書き込む・動かすを、話しながらその場でできるようにします。"></picture>
 
@@ -49,7 +49,7 @@ Screactの出発点は、「プレゼンのとき、画面の前でそのまま�
 
 <picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/screens-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/screens-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/screens-dark.svg"><img src="docs/assets/readme/screens-light.svg" alt="実際の画面。PC：位置合わせ（画面の四隅にArUcoマーカーを出す）。スマホ：手の追跡（手指の21点を追い、座標と状態を送る）"></picture>
 
-接続から操作までの、PCとスマホのすべての画面は[ギャラリー](docs/gallery.md)で見られます。名前の **Screact** は、Screen と React を合わせた言葉です。
+接続から操作までの、PCとスマホのすべての画面は[ギャラリー](docs/gallery.md)で見られます。名前の **Screact** は Screen と React を合わせた言葉です。
 
 ### <a id="できること"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-03-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-03-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-03-dark.svg"><img src="docs/assets/readme/heads/play-03-light.svg" alt="03 できること（画面に線を描き、グーで消し、上へ動かしてスクロールする）"></picture>
 
@@ -61,7 +61,7 @@ Screactの出発点は、「プレゼンのとき、画面の前でそのまま�
 
 ### <a id="特長"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-04-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-04-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-04-dark.svg"><img src="docs/assets/readme/heads/play-04-light.svg" alt="04 特長（YouRayがスマホを運んでモニターの横に置くと、画面が操作できるようになる）"></picture>
 
-画面を直接さわって動かす体験は、電子黒板やタッチディスプレイでも得られます。ただ、それには画面の買い替えが必要で、お金も時間もかかります。Screactは、今ある画面に「操作できる」を後付けします。
+画面を直接さわって動かす体験は、電子黒板やタッチディスプレイでも得られます。ただ、それには画面の買い替えが必要で、お金も時間もかかります。Screactは今ある画面に「操作できる」を後付けします。
 
 <picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/features-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/features-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/features-dark.svg"><img src="docs/assets/readme/features-light.svg" alt="特長。1：今ある画面を、そのまま使う。教室・会議室・店舗にあるモニターやプロジェクターを、買い替えずに使います。タッチ対応の画面へ入れ替える必要はありません。。2：専用の機器がいらない。赤外線カメラやセンサー、電子ペンは使いません。誰もが持っているスマホとPCに、アプリを入れるだけで始められます。。3：いつでも、どこでも。スマホを持ち運べば、その場の画面が操作できる画面になります。スマホは斜めに置いても位置を合わせられます。"></picture>
 
@@ -69,13 +69,13 @@ Screactの出発点は、「プレゼンのとき、画面の前でそのまま�
 
 ### <a id="利用場面"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-05-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-05-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-05-dark.svg"><img src="docs/assets/readme/heads/play-05-light.svg" alt="05 利用場面（会議・授業・接客の3つの画面を、YouRayが順にめぐる）"></picture>
 
-モニターは、教室にも、会議室にも、店舗にもあります。直接操作できる画面は、人と情報、人と人の関わり方を変えます。
+モニターは教室にも、会議室にも、店舗にもあります。直接操作できる画面は、人と情報、人と人の関わり方を変えます。
 
 <picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/scenes-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/scenes-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/scenes-dark.svg"><img src="docs/assets/readme/scenes-light.svg" alt="利用場面。会議・共同作業：情報を動かしながら、一緒に考える。注目している箇所や意図を、その場で共有できます。画面を囲んだ全員が、対話や共同作業に加わりやすくなります。。授業・プレゼン：説明・身振り・操作がひとつになる。説明する人は画面の前から離れず、伝えることに集中できます。聞く人も、どこを見ればよいかをつかみやすくなります。。接客・相談・提案：同じ情報を指しながら対話する。相手の反応や質問に合わせて、その場で書き込みながら説明できます。"></picture>
 
 ### <a id="直接操作の価値"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-06-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-06-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-06-dark.svg"><img src="docs/assets/readme/heads/play-06-light.svg" alt="06 直接操作の価値（マウスより、タッチの方が短い棒グラフを見て、YouRayが驚いて喜ぶ）"></picture>
 
-画面を直接操作することの価値は、これまでの研究でも報告されています。直接操作は、操作しやすいだけでなく、操作の意図が周りに伝わりやすくなります。
+画面を直接操作することの価値は、これまでの研究でも報告されています。直接操作すると、操作しやすくなるだけでなく、操作の意図も周りに伝わりやすくなります。
 
 <picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/stats-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/stats-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/stats-dark.svg"><img src="docs/assets/readme/stats-light.svg" alt="直接操作の価値（先行研究）。高齢者の操作時間がマウスより約35%短い（タッチスクリーンとマウスの比較 [1]）。若年者の操作時間がマウスより約16%短い（タッチスクリーンとマウスの比較 [1]）。両手を使う作業では直接タッチが有利（テーブル型ディスプレイでの比較 [2]）。注意：先行研究の結果であり、Screact自体で測った効果ではありません。"></picture>
 
@@ -107,7 +107,7 @@ Screactの出発点は、「プレゼンのとき、画面の前でそのまま�
 | UDP | `8766` | PCの居場所、WebSocketのポート、6桁コードをスマホへ知らせる（自動発見専用） |
 | WebSocket over TCP | `8765` / `/ws/v1/input` | 認証、位置合わせ、手指21点、状態、制御のメッセージ |
 
-手指のデータはUDPでは送りません。メッセージの形式は[通信仕様書 v1](docs/protocol-specification-v1.md)を正本にしています。
+手指のデータはUDPでは送りません。メッセージの形式は[通信仕様書 v1](docs/protocol-specification-v1.md)で定めています。
 
 ### <a id="活用した技術"></a><picture><source media="(max-width: 700px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-10-narrow-dark.svg"><source media="(max-width: 700px)" srcset="docs/assets/readme/heads/play-10-narrow-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/heads/play-10-dark.svg"><img src="docs/assets/readme/heads/play-10-light.svg" alt="10 活用した技術（4色のブロックを積み上げ、YouRayが一番上に乗る）"></picture>
 
@@ -182,7 +182,7 @@ cd android
 - 自動発見はUDPのブロードキャストを使うため、VPN、ゲストWi-Fi、AP isolation、ファイアウォールなどの環境では失敗することがあります。そのときは手動接続を使ってください。
 - PCが同時に受け付けるスマホは1台です。
 - 位置合わせの結果は、PCのアプリを終了すると消えます。
-- 通信は、信頼できる同じLANでの利用を前提とした、暗号化なしのWebSocketです。
+- 通信は信頼できる同じLANでの利用を前提とした、暗号化なしのWebSocketです。
 - 単眼のカメラなので、画面に指が触れた瞬間は検出しません。つまむなどのジェスチャーで、操作の意思を表します。
 - 手による拡大・縮小のジェスチャーは、まだありません。
 
