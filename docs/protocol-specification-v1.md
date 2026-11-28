@@ -180,11 +180,24 @@ PCが`hello`を受理できない場合は、session確立前に`hello_error`を
   "schemaVersion": 1,
   "messageType": "hello_error",
   "code": "pairing_code_mismatch",
+  "message": "6桁コードが一致しません",
   "retryable": false
 }
 ```
 
-`code`は`pairing_code_mismatch`、`resume_token_invalid`、`unsupported_version`、`server_busy`。`retryable=false`ではAndroidは自動再接続を停止する。`resume_token_invalid`では保存済みトークンを削除して初回接続画面へ戻し、それ以外は入力修正を案内する。`retryable=true`では再接続待ちへ移る。未知codeは汎用接続エラーとして扱う。
+`message`は利用者向けの説明文（日本語）で、PCは常に付与する。Androidは表示・分岐に使わず読み飛ばしてよい。`retryable`は省略時`false`とみなす。
+
+`code`は次のとおり。PCは`hello_error`を送った直後に、表のcloseコードでWebSocketを閉じる。
+
+| `code` | 送信条件 | `retryable` | PC側closeコード | Android側の扱い |
+| --- | --- | --- | --- | --- |
+| `pairing_code_mismatch` | `pairingToken`が表示中の6桁コードと不一致（照合オン時） | `false` | `4001` | 自動再接続を停止し、6桁コードの入力修正を案内する |
+| `server_busy` | 別の端末が接続中で、後着の接続を拒否した | `true` | `4002` | 再接続待ちへ移る |
+| `hello_timeout` | 接続後5秒以内に`hello`を受信しなかった | `true` | `4003` | 再接続待ちへ移る（未知codeとして汎用接続エラー扱い） |
+| `resume_token_invalid` | `resumeToken`が無効（PC側は未実装で現在は送信しない） | `false` | — | 保存済みトークンを削除して初回接続画面へ戻す |
+| `unsupported_version` | 対応しない`schemaVersion`（PC側は未実装で現在は送信しない） | `false` | — | 自動再接続を停止し、PCアプリの更新を案内する |
+
+`retryable=false`ではAndroidは自動再接続を停止する。`retryable=true`では再接続待ちへ移る。未知codeは汎用接続エラーとして扱い、`retryable`に従う。closeコードは`hello_error`の補助情報であり、Androidは`hello_error`の`code`と`retryable`で分岐する。
 
 ### 位置合わせ結果
 
