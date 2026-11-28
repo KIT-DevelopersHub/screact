@@ -2,3 +2,6 @@
 /tmp/
 # Drive取得時に破損していた未採用の受賞写真（元ファイルは削除せず保持）
 /docs/assets/media/award-photo-01.jpg
+# README の図の生成に使うフォント（scripts/readme が google/fonts から取得する）
+/data/local/
+__pycache__/

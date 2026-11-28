@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 158 62" width="158" height="62" role="img"><title>製品概要（PRODUCT）</title><defs><filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.6"/></filter><linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#A06BFF"/><stop offset=".55" stop-color="#7A7EF0"/><stop offset="1" stop-color="#3DB5C8"/></linearGradient><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1C1933"/><stop offset="1" stop-color="#14222A"/></linearGradient><style>
+.jp{font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Yu Gothic','Meiryo','Noto Sans JP','Noto Sans CJK JP',sans-serif}
+.disp{font-family:Impact,Haettenschweiler,'Anton','Arial Narrow Bold','Arial Black',sans-serif}
+.gh{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif}
+.rnd{font-family:ScRounded,'Hiragino Maru Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif}
+.hand{font-family:ScHand,'Hiragino Maru Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,'Cascadia Mono',Consolas,'Liberation Mono',monospace}
+
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes flow{to{stroke-dashoffset:-28}}
+.float{animation:float 3.2s ease-in-out infinite}
+.blink{transform-box:fill-box;transform-origin:center;animation:blink 5.2s infinite}
+.flow{stroke-dasharray:6 8;animation:flow 1.1s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style></defs><path d="M4.02 5.72Q5.81 5.72 6.67 6.46Q7.53 7.21 7.53 8.58Q7.53 9.19 7.34 9.75Q7.16 10.31 6.74 10.75Q6.32 11.2 5.63 11.45Q4.94 11.71 3.93 11.71H3.09V15H1.1V5.72ZM3.95 7.35H3.09V10.08H3.76Q4.3 10.08 4.7 9.93Q5.1 9.79 5.31 9.48Q5.53 9.16 5.53 8.64Q5.53 8.02 5.14 7.68Q4.76 7.35 3.95 7.35ZM16.92 15 16.21 12.82H12.93L12.22 15H10.07L13.34 5.68H15.78L19.06 15ZM15.1 9.14Q15.05 8.94 14.94 8.56Q14.83 8.17 14.73 7.75Q14.62 7.34 14.56 7.09Q14.51 7.38 14.41 7.77Q14.32 8.16 14.22 8.52Q14.13 8.88 14.06 9.14L13.4 11.16H15.75ZM25.03 5.72Q26.25 5.72 27.05 6.02Q27.85 6.33 28.25 6.92Q28.65 7.52 28.65 8.42Q28.65 9.05 28.43 9.53Q28.21 10.01 27.83 10.34Q27.45 10.68 26.97 10.91L29.61 15H27.34L25.27 11.44H24.16V15H22.17V5.72ZM24.98 7.27H24.16V9.91H24.99Q25.78 9.91 26.2 9.58Q26.63 9.25 26.63 8.51Q26.63 8.09 26.46 7.82Q26.29 7.55 25.92 7.41Q25.55 7.27 24.98 7.27ZM36.34 15H34.36V7.37H31.85V5.72H38.85V7.37H36.34ZM51.85 15H49.88V9.63Q49.88 9.41 49.89 9.09Q49.9 8.76 49.91 8.41Q49.92 8.06 49.94 7.79Q49.87 7.86 49.66 8.06Q49.44 8.27 49.26 8.42L48.19 9.28L47.25 8.1L50.23 5.72H51.85Z" fill="url(#brand)"><title>PART 1</title></path><text x="0" y="41" class="gh" font-size="19" font-weight="700" fill="#EEF0F6" text-anchor="start">製品概要</text><rect y="50" width="144" height="3" rx="1.5" fill="url(#brand)"/></svg>
